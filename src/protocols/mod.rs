@@ -1,0 +1,23 @@
+use serde::{Deserialize, Serialize};
+
+pub mod bluetooth;
+pub mod wifi_direct;
+pub mod lorawan;
+pub mod satellite;
+
+/// Network protocol enumeration
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum NetworkProtocol {
+    /// Bluetooth Low Energy for device-to-device communication
+    BluetoothLE,
+    /// WiFi Direct for medium-range peer connections
+    WiFiDirect,
+    /// LoRaWAN for long-range low-power communication
+    LoRaWAN,
+    /// Satellite for global coverage
+    Satellite,
+    /// TCP for internet bridging
+    TCP,
+    /// UDP for mesh networking
+    UDP,
+}

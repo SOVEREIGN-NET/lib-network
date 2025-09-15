@@ -1,0 +1,66 @@
+[package]
+name = "lib-network"
+version = "0.1.0"
+edition = "2021"
+authors = ["ZHTP Development Team"]
+description = "ZHTP Mesh Protocol - Revolutionary Internet Replacement"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/SOVEREIGN-NETWORK/ZHTPDEV"
+
+[dependencies]
+# Async runtime
+tokio = { version = "1.0", features = ["full"] }
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Error handling
+anyhow = "1.0"
+
+# Logging
+tracing = "0.1"
+
+# UUID generation
+uuid = { version = "1.0", features = ["v4"] }
+
+# Random number generation
+rand = "0.8"
+
+# Hex encoding for debugging
+hex = "0.4"
+
+# Cryptographic hashing
+sha2 = "0.10"
+
+# Cryptography (from lib-crypto package)
+lib-crypto = { path = "../lib-crypto" }
+
+# ZK proofs (from lib-proofs package) 
+lib-proofs = { path = "../lib-proofs" }
+
+# Economics system integration
+lib-economy = { path = "../lib-economy" }
+
+# Protocols and API system integration
+lib-protocols = { path = "../lib-protocols" }
+
+# Identity system integration
+lib-identity = { path = "../lib-identity" }
+
+# NOTE: lib-storage dependency added for DHT integration
+lib-storage = { path = "../lib-storage" }
+
+
+[dev-dependencies]
+tokio-test = "0.4"
+tracing-subscriber = "0.3"
+futures = "0.3"
+
+[features]
+default = ["lib-storage"]
+testing = []
+hardware-scanning = []
+lib-economy = []
+lib-storage = []
+lib-proofs = []
