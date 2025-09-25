@@ -2,11 +2,14 @@ pub mod lorawan;
 pub mod satellite;
 pub mod wifi;
 pub mod hardware;
+pub mod lorawan_hardware;
 pub mod geo_location;
 
 pub use lorawan::*;
 pub use satellite::*;
 pub use wifi::*;
+pub use hardware::*;
+pub use lorawan_hardware::*;
 pub use geo_location::GeographicLocation;
 
 use anyhow::Result;

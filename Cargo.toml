@@ -30,6 +30,9 @@ rand = "0.8"
 # Hex encoding for debugging
 hex = "0.4"
 
+# Serial port communication for hardware detection
+serialport = "4.2"
+
 # Cryptographic hashing
 sha2 = "0.10"
 

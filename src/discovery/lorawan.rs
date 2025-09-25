@@ -2,6 +2,7 @@ use anyhow::{anyhow, Result};
 use tokio::time::Duration;
 use rand;
 use lib_crypto::PublicKey;
+use crate::discovery::hardware::HardwareCapabilities;
 
 /// LoRaWAN Gateway Information from real discovery
 #[derive(Debug, Clone)]
@@ -18,6 +19,17 @@ pub struct LoRaWANGatewayInfo {
 
 /// Discover LoRaWAN gateways for long-range mesh communication
 pub async fn discover_lorawan_gateways() -> Result<Vec<LoRaWANGatewayInfo>> {
+    discover_lorawan_gateways_with_capabilities(&HardwareCapabilities::detect().await?).await
+}
+
+/// Discover LoRaWAN gateways with pre-detected hardware capabilities (avoids duplicate detection)
+pub async fn discover_lorawan_gateways_with_capabilities(capabilities: &HardwareCapabilities) -> Result<Vec<LoRaWANGatewayInfo>> {
+    // Check if LoRaWAN hardware is available first
+    if !capabilities.lorawan_available {
+        println!("📡 LoRaWAN hardware not detected - skipping gateway discovery");
+        return Ok(Vec::new());
+    }
+    
     // REAL LoRaWAN gateway discovery using actual radio scanning
     println!("📡 Scanning for REAL LoRaWAN gateways...");
     
@@ -38,18 +50,11 @@ pub async fn discover_lorawan_gateways() -> Result<Vec<LoRaWANGatewayInfo>> {
         }
     }
     
-    // If no real gateways found, this is expected in development
+    // Only report real gateways found - no fake data
     if discovered_gateways.is_empty() {
-        println!("📡 No LoRaWAN gateways detected in area (normal for development)");
-        
-        // For development environments, create a local test gateway
-        discovered_gateways.push(LoRaWANGatewayInfo {
-            gateway_eui: "test_gateway_eui".to_string(),
-            frequency_hz: 868100000,
-            coverage_radius_km: 15.0,
-            operator_key: PublicKey::new(vec![1, 2, 3]),
-        });
-        println!("📡 Development LoRaWAN test gateway created - 15km range");
+        println!("📡 No LoRaWAN gateways detected in area");
+    } else {
+        println!("📡 Discovered {} real LoRaWAN gateways", discovered_gateways.len());
     }
     
     Ok(discovered_gateways)

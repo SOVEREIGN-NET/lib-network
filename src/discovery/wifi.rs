@@ -2,6 +2,7 @@ use anyhow::Result;
 use tokio::time::Duration;
 use rand;
 use crate::types::wifi_security::WiFiSecurity;
+use crate::discovery::hardware::HardwareCapabilities;
 
 /// Real WiFi network discovery information
 #[derive(Debug, Clone)]
@@ -22,6 +23,17 @@ pub struct WiFiNetworkInfo {
 
 /// Discover high-power WiFi relays
 pub async fn discover_wifi_relays() -> Result<Vec<WiFiNetworkInfo>> {
+    discover_wifi_relays_with_capabilities(&HardwareCapabilities::detect().await?).await
+}
+
+/// Discover WiFi relays with pre-detected hardware capabilities (avoids duplicate detection)
+pub async fn discover_wifi_relays_with_capabilities(capabilities: &HardwareCapabilities) -> Result<Vec<WiFiNetworkInfo>> {
+    // Check if WiFi Direct hardware is available first
+    if !capabilities.wifi_direct_available {
+        println!("📶 WiFi Direct hardware not detected - skipping relay discovery");
+        return Ok(Vec::new());
+    }
+    
     // REAL WiFi network scanning for sharing-enabled networks
     println!("📶 Scanning for REAL WiFi sharing networks...");
     
@@ -41,19 +53,11 @@ pub async fn discover_wifi_relays() -> Result<Vec<WiFiNetworkInfo>> {
         }
     }
     
-    // For development, create test WiFi relay
+    // Only report real networks found - no fake data
     if discovered_networks.is_empty() {
-        println!("📶 No ZHTP WiFi sharing networks detected (normal in development)");
-        
-        discovered_networks.push(WiFiNetworkInfo {
-            ssid: "ZHTP_Test_Network".to_string(),
-            bssid: "AA:BB:CC:DD:EE:FF".to_string(),
-            signal_strength_dbm: -45,
-            channel: 6,
-            security: WiFiSecurity::Open,
-            bandwidth_estimate_mbps: 100,
-        });
-        println!("📶 Development WiFi test relay created - 2km range");
+        println!("📶 No ZHTP WiFi sharing networks detected");
+    } else {
+        println!("📶 Discovered {} real WiFi sharing networks", discovered_networks.len());
     }
     
     Ok(discovered_networks)

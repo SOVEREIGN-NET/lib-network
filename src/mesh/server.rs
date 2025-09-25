@@ -20,6 +20,7 @@ use crate::bootstrap::{start_tcp_bootstrap_server, start_udp_bootstrap_server};
 use crate::messaging::message_handler::MeshMessageHandler;
 use crate::monitoring::health_monitoring::HealthMonitor;
 use crate::dht::{ZkDHTIntegration, DHTNetworkStatus};
+use crate::discovery::hardware::HardwareCapabilities;
 
 // Import real implementations from other packages
 use lib_economy::EconomicModel;
@@ -55,6 +56,8 @@ pub struct ZhtpMeshServer {
     pub health_monitor: HealthMonitor,
     /// Zero-Knowledge DHT integration
     pub dht: Arc<RwLock<ZkDHTIntegration>>,
+    /// Hardware capabilities detected on this system  
+    pub hardware_capabilities: Option<HardwareCapabilities>,
 }
 
 /// Real MeshNode implementation for pure mesh networking
@@ -72,6 +75,8 @@ pub struct MeshNode {
     pub active_connections: HashMap<PublicKey, MeshConnection>,
     /// Mesh discovery state
     pub discovery_active: bool,
+    /// Hardware capabilities detected on this system
+    pub hardware_capabilities: Option<HardwareCapabilities>,
 }
 
 impl MeshNode {
@@ -84,6 +89,45 @@ impl MeshNode {
             bootstrap_peers: config.bootstrap_peers,
             active_connections: HashMap::new(),
             discovery_active: false,
+            hardware_capabilities: None,
+        })
+    }
+    
+    /// Create new pure mesh node with hardware detection
+    pub async fn new_with_hardware_detection(config: NetworkConfig) -> Result<Self> {
+        info!("🔍 Detecting available mesh networking hardware...");
+        
+        let hardware_capabilities = match HardwareCapabilities::detect().await {
+            Ok(caps) => {
+                info!("✅ Hardware detection completed");
+                Some(caps)
+            },
+            Err(e) => {
+                warn!("⚠️ Hardware detection failed: {}", e);
+                None
+            }
+        };
+        
+        // Filter protocols based on hardware availability
+        let filtered_protocols = if let Some(ref caps) = hardware_capabilities {
+            filter_protocols_by_hardware(&config.protocols, caps)
+        } else {
+            // If hardware detection fails, use safe defaults (Bluetooth + WiFi)
+            config.protocols.into_iter()
+                .filter(|p| matches!(p, NetworkProtocol::BluetoothLE | NetworkProtocol::WiFiDirect))
+                .collect()
+        };
+        
+        info!("🚀 Enabled protocols: {:?}", filtered_protocols);
+        
+        Ok(MeshNode {
+            node_id: config.node_id,
+            protocols: filtered_protocols,
+            max_peers: config.max_peers,
+            bootstrap_peers: config.bootstrap_peers,
+            active_connections: HashMap::new(),
+            discovery_active: false,
+            hardware_capabilities,
         })
     }
     
@@ -127,7 +171,63 @@ impl MeshNode {
         
         Ok(())
     }
+}
+
+/// Filter protocols based on available hardware
+fn filter_protocols_by_hardware(
+    requested_protocols: &[NetworkProtocol], 
+    hardware_caps: &HardwareCapabilities
+) -> Vec<NetworkProtocol> {
+    let mut enabled_protocols = Vec::new();
     
+    for protocol in requested_protocols {
+        match protocol {
+            NetworkProtocol::BluetoothLE => {
+                if hardware_caps.bluetooth_available {
+                    info!("✅ Bluetooth LE enabled - hardware detected");
+                    enabled_protocols.push(protocol.clone());
+                } else {
+                    warn!("❌ Bluetooth LE disabled - no hardware detected");
+                }
+            },
+            NetworkProtocol::WiFiDirect => {
+                if hardware_caps.wifi_direct_available {
+                    info!("✅ WiFi Direct enabled - hardware detected");
+                    enabled_protocols.push(protocol.clone());
+                } else {
+                    warn!("❌ WiFi Direct disabled - no hardware detected");
+                }
+            },
+            NetworkProtocol::LoRaWAN => {
+                if hardware_caps.lorawan_available {
+                    info!("✅ LoRaWAN enabled - hardware detected");
+                    enabled_protocols.push(protocol.clone());
+                } else {
+                    warn!("❌ LoRaWAN disabled - no radio hardware detected");
+                    info!("💡 To enable LoRaWAN: Connect a LoRaWAN radio module (SX127x, USB adapter, etc.)");
+                }
+            },
+            NetworkProtocol::Satellite => {
+                // Satellite doesn't require special hardware detection for now
+                info!("🛰️ Satellite protocol enabled (software-based)");
+                enabled_protocols.push(protocol.clone());
+            },
+            _ => {
+                // Enable other protocols by default
+                enabled_protocols.push(protocol.clone());
+            }
+        }
+    }
+    
+    if enabled_protocols.is_empty() {
+        warn!("⚠️ No protocols enabled! Falling back to Bluetooth LE as minimum viable mesh");
+        enabled_protocols.push(NetworkProtocol::BluetoothLE);
+    }
+    
+    enabled_protocols
+}
+
+impl MeshNode {
     /// Start Bluetooth LE mesh discovery
     async fn start_bluetooth_discovery(&mut self) -> Result<()> {
         use crate::protocols::bluetooth::BluetoothMeshProtocol;
@@ -155,12 +255,30 @@ impl MeshNode {
     /// Start LoRaWAN long-range mesh
     async fn start_lorawan_discovery(&mut self) -> Result<()> {
         use crate::protocols::lorawan::LoRaWANMeshProtocol;
+        use crate::discovery::lorawan_hardware;
         
-        // Initialize LoRaWAN mesh protocol
-        let lorawan_protocol = LoRaWANMeshProtocol::new(self.node_id)?;
-        lorawan_protocol.start_discovery().await?;
+        // Double-check for LoRaWAN hardware before starting
+        if let Ok(Some(hardware)) = lorawan_hardware::detect_lorawan_hardware().await {
+            info!("📡 LoRaWAN hardware confirmed: {}", hardware.device_name);
+            
+            // Test hardware functionality
+            if lorawan_hardware::test_lorawan_hardware(&hardware).await.unwrap_or(false) {
+                info!("✅ LoRaWAN hardware test passed - initializing protocol");
+                
+                // Initialize LoRaWAN mesh protocol
+                let lorawan_protocol = LoRaWANMeshProtocol::new(self.node_id)?;
+                lorawan_protocol.start_discovery().await?;
+                
+                info!("📡 LoRaWAN mesh discovery active with real hardware");
+            } else {
+                warn!("⚠️ LoRaWAN hardware test failed - skipping LoRaWAN initialization");
+                return Err(anyhow!("LoRaWAN hardware test failed"));
+            }
+        } else {
+            warn!("❌ No LoRaWAN hardware detected - skipping LoRaWAN initialization");
+            return Err(anyhow!("No LoRaWAN hardware available"));
+        }
         
-        info!("📡 LoRaWAN mesh discovery active");
         Ok(())
     }
     
@@ -287,7 +405,14 @@ impl ZhtpMeshServer {
             ],
         };
         
-        let mesh_node = Arc::new(RwLock::new(MeshNode::new_pure_mesh(network_config)?));
+        let mesh_node = Arc::new(RwLock::new(MeshNode::new_with_hardware_detection(network_config).await?));
+        
+        // Extract hardware capabilities from the mesh node
+        let hardware_capabilities = {
+            let node = mesh_node.read().await;
+            node.hardware_capabilities.clone()
+        };
+        
         let economics = Arc::new(RwLock::new(EconomicModel::new()));
         let storage = Arc::new(RwLock::new(storage));
         let mesh_connections = Arc::new(RwLock::new(HashMap::new()));
@@ -331,6 +456,7 @@ impl ZhtpMeshServer {
             message_handler,
             health_monitor,
             dht,
+            hardware_capabilities,
         };
         
         Ok(server)
@@ -354,7 +480,11 @@ impl ZhtpMeshServer {
         self.dht.write().await.initialize(default_identity).await?;
         
         // Initialize long-range communication capabilities
-        self.initialize_long_range_relays().await?;
+        if let Some(ref hardware_caps) = self.hardware_capabilities {
+            self.initialize_long_range_relays(hardware_caps).await?;
+        } else {
+            warn!("⚠️ Skipping long-range relay initialization - no hardware capabilities detected");
+        }
         
         // Start WiFi sharing discovery
         self.start_wifi_sharing_discovery().await?;
@@ -376,18 +506,19 @@ impl ZhtpMeshServer {
     }
     
     /// Initialize long-range communication relays - GLOBAL internet replacement!
-    async fn initialize_long_range_relays(&self) -> Result<()> {
+    async fn initialize_long_range_relays(&self, hardware_caps: &HardwareCapabilities) -> Result<()> {
         println!("🌍 Initializing GLOBAL long-range mesh relays...");
         println!("📡 ZHTP Goal: Planet-wide internet replacement via mesh networking!");
         
+        // Use the provided hardware capabilities (already detected)
         // Discover available LoRaWAN gateways (regional 15km coverage)
-        self.discover_lorawan_gateways().await?;
+        self.discover_lorawan_gateways_with_capabilities(hardware_caps).await?;
         
         // Search for satellite uplink capabilities (GLOBAL coverage)
-        self.discover_satellite_uplinks().await?;
+        self.discover_satellite_uplinks_with_capabilities(hardware_caps).await?;
         
         // Find high-power WiFi relays (internet bridge points)
-        self.discover_wifi_relays().await?;
+        self.discover_wifi_relays_with_capabilities(hardware_caps).await?;
         
         let relay_count = self.long_range_relays.read().await.len();
         let relays = self.long_range_relays.read().await;
@@ -420,13 +551,11 @@ impl ZhtpMeshServer {
         Ok(())
     }
     
-    /// Discover LoRaWAN gateways for long-range mesh communication
-    async fn discover_lorawan_gateways(&self) -> Result<()> {
-        use crate::discovery::lorawan::{discover_lorawan_gateways, LoRaWANGatewayInfo};
+    /// Discover LoRaWAN gateways with hardware capabilities
+    async fn discover_lorawan_gateways_with_capabilities(&self, capabilities: &HardwareCapabilities) -> Result<()> {
+        use crate::discovery::lorawan::discover_lorawan_gateways_with_capabilities;
         
-        println!("📡 Scanning for REAL LoRaWAN gateways...");
-        
-        let discovered_gateways = discover_lorawan_gateways().await?;
+        let discovered_gateways = discover_lorawan_gateways_with_capabilities(capabilities).await?;
         let mut relays = self.long_range_relays.write().await;
         
         for gateway_info in discovered_gateways {
@@ -450,12 +579,10 @@ impl ZhtpMeshServer {
     }
     
     /// Discover satellite uplinks for global coverage
-    async fn discover_satellite_uplinks(&self) -> Result<()> {
-        use crate::discovery::satellite::{discover_satellite_uplinks, SatelliteInfo};
+    async fn discover_satellite_uplinks_with_capabilities(&self, capabilities: &HardwareCapabilities) -> Result<()> {
+        use crate::discovery::satellite::discover_satellite_uplinks_with_capabilities;
         
-        println!("🛰️ Scanning for REAL satellite uplinks...");
-        
-        let discovered_satellites = discover_satellite_uplinks().await?;
+        let discovered_satellites = discover_satellite_uplinks_with_capabilities(capabilities).await?;
         let mut relays = self.long_range_relays.write().await;
         
         for satellite_info in discovered_satellites {
@@ -480,12 +607,10 @@ impl ZhtpMeshServer {
     }
     
     /// Discover WiFi relays for internet bridging
-    async fn discover_wifi_relays(&self) -> Result<()> {
-        use crate::discovery::wifi::{discover_wifi_relays, WiFiNetworkInfo};
+    async fn discover_wifi_relays_with_capabilities(&self, capabilities: &HardwareCapabilities) -> Result<()> {
+        use crate::discovery::wifi::discover_wifi_relays_with_capabilities;
         
-        println!("📶 Scanning for WiFi sharing networks...");
-        
-        let discovered_networks = discover_wifi_relays().await?;
+        let discovered_networks = discover_wifi_relays_with_capabilities(capabilities).await?;
         let mut relays = self.long_range_relays.write().await;
         
         for wifi_info in discovered_networks {
@@ -598,16 +723,18 @@ impl ZhtpMeshServer {
         
         let wifi_nodes = self.wifi_sharing_nodes.clone();
         let server_id = self.server_id;
+        let hardware_caps = self.hardware_capabilities.clone();
         
         tokio::spawn(async move {
             loop {
                 // Continuously discover WiFi sharing nodes using real WiFi scanning
                 tokio::time::sleep(Duration::from_secs(30)).await;
                 
-                // Use real WiFi discovery from discovery module
-                match crate::discovery::wifi::discover_wifi_relays().await {
-                    Ok(discovered_networks) => {
-                        let mut nodes = wifi_nodes.write().await;
+                // Use hardware-optimized WiFi discovery (avoid duplicate hardware detection)
+                if let Some(ref caps) = hardware_caps {
+                    match crate::discovery::wifi::discover_wifi_relays_with_capabilities(caps).await {
+                        Ok(discovered_networks) => {
+                            let mut nodes = wifi_nodes.write().await;
                         
                         for wifi_info in discovered_networks {
                             // Create deterministic key from BSSID
@@ -634,10 +761,13 @@ impl ZhtpMeshServer {
                         }
                         
                         info!("📊 Total WiFi sharing nodes: {}", nodes.len());
-                    },
-                    Err(e) => {
-                        warn!("⚠️ WiFi discovery failed: {}", e);
+                        },
+                        Err(e) => {
+                            warn!("⚠️ WiFi discovery failed: {}", e);
+                        }
                     }
+                } else {
+                    warn!("⚠️ Skipping WiFi sharing discovery - no hardware capabilities detected");
                 }
             }
         });

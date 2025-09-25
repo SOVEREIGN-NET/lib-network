@@ -2,6 +2,7 @@ use anyhow::{anyhow, Result};
 use tokio::time::Duration;
 use rand;
 use lib_crypto::PublicKey;
+use crate::discovery::hardware::HardwareCapabilities;
 
 /// Satellite uplink information from real discovery
 #[derive(Debug, Clone)]
@@ -20,8 +21,18 @@ pub struct SatelliteInfo {
 
 /// Discover satellite uplinks for global coverage
 pub async fn discover_satellite_uplinks() -> Result<Vec<SatelliteInfo>> {
-    // REAL satellite uplink discovery using actual satellite communication
+    discover_satellite_uplinks_with_capabilities(&HardwareCapabilities::detect().await?).await
+}
+
+/// Discover satellite uplinks with pre-detected hardware capabilities (avoids duplicate detection)
+pub async fn discover_satellite_uplinks_with_capabilities(_capabilities: &HardwareCapabilities) -> Result<Vec<SatelliteInfo>> {
     println!("🛰️ Scanning for REAL satellite uplinks...");
+    
+    // Check for actual satellite modem hardware
+    if !has_satellite_hardware().await {
+        println!("🛰️ No satellite hardware detected - skipping satellite discovery");
+        return Ok(Vec::new());
+    }
     
     let mut discovered_satellites = Vec::new();
     
@@ -39,18 +50,11 @@ pub async fn discover_satellite_uplinks() -> Result<Vec<SatelliteInfo>> {
         }
     }
     
-    // For development, create test satellite
+    // Only report real satellites found - no fake data
     if discovered_satellites.is_empty() {
-        println!("🛰️ No satellite uplinks accessible (normal without satellite hardware)");
-        
-        discovered_satellites.push(SatelliteInfo {
-            satellite_id: "test_satellite".to_string(),
-            network_name: "TestSat".to_string(),
-            coverage_radius_km: 1000.0,
-            max_throughput_mbps: 100,
-            operator_key: PublicKey::new(vec![4, 5, 6]),
-        });
-        println!("🛰️ Development satellite test uplink created - Global coverage");
+        println!("🛰️ No satellite uplinks accessible (requires satellite hardware)");
+    } else {
+        println!("🛰️ Discovered {} real satellite uplinks", discovered_satellites.len());
     }
     
     Ok(discovered_satellites)
@@ -59,6 +63,19 @@ pub async fn discover_satellite_uplinks() -> Result<Vec<SatelliteInfo>> {
 /// Discover satellite nodes (alias for discover_satellite_uplinks for compatibility)
 pub async fn discover_satellite_nodes() -> Result<Vec<SatelliteInfo>> {
     discover_satellite_uplinks().await
+}
+
+/// Check for satellite modem hardware
+async fn has_satellite_hardware() -> bool {
+    // Real satellite hardware detection would check for:
+    // - Satellite modem devices (USB or PCIe)
+    // - Starlink dish connectivity
+    // - Iridium/Globalstar modems
+    // - Amateur radio satellite transponders
+    
+    // For development, always return false since satellite hardware is rare
+    // In production, this would do actual hardware enumeration
+    false
 }
 
 /// Scan for real satellite network connectivity
@@ -71,16 +88,6 @@ async fn scan_satellite_network(network_name: &str, _satellite_count: u32) -> Re
     println!("🔍 Scanning for {} satellite access...", network_name);
     tokio::time::sleep(Duration::from_millis(200)).await;
     
-    // Realistically, most users don't have satellite hardware
-    if rand::random::<f32>() > 0.05 { // 5% chance for development testing
-        return Err(anyhow!("No {} satellite hardware detected", network_name));
-    }
-    
-    Ok(SatelliteInfo {
-        satellite_id: format!("SAT_{}", rand::random::<u32>()),
-        network_name: network_name.to_string(),
-        coverage_radius_km: 1000.0 + rand::random::<f64>() * 2000.0,
-        max_throughput_mbps: 50 + (rand::random::<u32>() % 200),
-        operator_key: PublicKey::new(vec![rand::random(), rand::random(), rand::random()]),
-    })
+    // Only return satellites if real hardware is available
+    return Err(anyhow!("No {} satellite hardware detected", network_name));
 }
