@@ -1,11 +1,11 @@
-//! ZHTP Mesh Protocol - Revolutionary Internet Replacement
+//! ZHTP Mesh Protocol - Decentralized Network Communication
 //! 
-//! This package implements the core mesh networking protocol that completely
-//! replaces the traditional internet infrastructure. Features:
+//! This package implements peer-to-peer mesh networking protocol for direct
+//! device communication without relying on traditional infrastructure. Features:
 //! 
-//! - Complete ISP bypass through multi-protocol mesh networking
+//! - Direct peer-to-peer mesh networking through multiple protocols
 //! - Long-range communication via LoRaWAN, WiFi Direct, and Bluetooth LE
-//! - Economic incentives for sharing connectivity and resources
+//! - Economic incentives for mesh participation and resource sharing
 //! - Zero-knowledge privacy for all communications
 //! - Post-quantum cryptographic security
 //! - Native ZHTP protocol (not HTTP) designed for mesh networks
@@ -18,7 +18,7 @@ pub use crate::mesh::statistics::MeshProtocolStats;
 pub use crate::types::*;
 pub use crate::discovery::*;
 pub use crate::relays::*;
-pub use crate::sharing::*;
+
 
 // DHT client integration with lib-storage backend
 pub use crate::dht::{DHTClient, initialize_dht_client, serve_web4_page};
@@ -28,7 +28,7 @@ pub mod types;
 pub mod mesh;
 pub mod discovery;
 pub mod relays;
-pub mod sharing;
+
 pub mod routing;
 pub mod protocols;
 pub mod bootstrap;

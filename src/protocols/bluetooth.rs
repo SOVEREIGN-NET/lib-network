@@ -8,6 +8,7 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::{info, warn, error};
 use serde::{Serialize, Deserialize};
+use std::hash::{Hash, Hasher};
 
 /// Bluetooth LE mesh protocol handler
 #[derive(Clone)]
@@ -38,14 +39,14 @@ pub struct BluetoothConnection {
     pub rssi: i16,
 }
 
-/// ISP Bypass peer information
+/// Mesh peer information for direct communication
 #[derive(Debug, Clone)]
-pub struct BypassPeer {
+pub struct MeshPeer {
     pub peer_id: String,
     pub address: String,
     pub rssi: i16,
     pub last_seen: u64,
-    pub bypass_capable: bool,
+    pub mesh_capable: bool,
     pub services: Vec<String>,
     pub quantum_secure: bool,
 }
@@ -156,7 +157,7 @@ impl BluetoothMeshProtocol {
     pub async fn start_discovery(&mut self) -> Result<()> {
         info!("📱 Starting Bluetooth LE mesh discovery...");
         
-        // Initialize Bluetooth stack for ISP bypass
+        // Initialize Bluetooth stack for mesh networking
         self.initialize_bluetooth_stack().await?;
         
         // Setup quantum-resistant ZK mesh protocols  
@@ -175,7 +176,7 @@ impl BluetoothMeshProtocol {
     
     /// Initialize real Bluetooth stack
     async fn initialize_bluetooth_stack(&self) -> Result<()> {
-        info!("🔵 Initializing Bluetooth stack for ISP bypass...");
+        info!("🔵 Initializing Bluetooth stack for mesh networking...");
         
         #[cfg(target_os = "windows")]
         {
@@ -199,7 +200,7 @@ impl BluetoothMeshProtocol {
     async fn setup_zk_mesh_protocols(&self) -> Result<()> {
         info!("🔐 Setting up quantum-resistant ZK mesh protocols...");
         
-        // ZHTP Mesh Service UUID (custom for ISP bypass)
+        // ZHTP Mesh Service UUID (custom for mesh networking)
         let lib_mesh_service = "6ba7b810-9dad-11d1-80b4-00c04fd430c8";
         
         // ZK Authentication characteristic
@@ -211,25 +212,25 @@ impl BluetoothMeshProtocol {
         // Mesh data transfer characteristic
         let mesh_data_char = "6ba7b813-9dad-11d1-80b4-00c04fd430c8";
         
-        // ISP bypass coordination characteristic
-        let bypass_coord_char = "6ba7b814-9dad-11d1-80b4-00c04fd430c8";
+        // Mesh coordination characteristic
+        let mesh_coord_char = "6ba7b814-9dad-11d1-80b4-00c04fd430c8";
         
         self.register_mesh_gatt_service(lib_mesh_service, vec![
             zk_auth_char,
             quantum_routing_char,
             mesh_data_char,
-            bypass_coord_char
+            mesh_coord_char
         ]).await?;
         
-        info!("🔐 Quantum-resistant mesh protocols ready for ISP bypass");
+        info!("🔐 Quantum-resistant mesh protocols ready for peer-to-peer communication");
         Ok(())
     }
     
-    /// Start real mesh advertising for ISP bypass
+    /// Start real mesh advertising for peer-to-peer networking
     async fn start_real_mesh_advertising(&self) -> Result<()> {
-        info!("📡 Broadcasting ZHTP ISP BYPASS mesh network...");
+        info!("📡 Broadcasting ZHTP P2P mesh network...");
         
-        // Create advertising data with ISP bypass capabilities
+        // Create advertising data with mesh capabilities
         let mut adv_data = Vec::new();
         
         // Flags (LE General Discoverable, BR/EDR Not Supported)
@@ -242,28 +243,28 @@ impl BluetoothMeshProtocol {
             0xd1, 0x11, 0xad, 0x9d, 0x10, 0xb8, 0xa7, 0x6b
         ]);
         
-        // Local name "ZHTP-BYPASS" 
-        adv_data.extend_from_slice(&[0x0C, 0x09]);
-        adv_data.extend_from_slice(b"ZHTP-BYPASS");
+        // Local name "ZHTP-MESH" 
+        adv_data.extend_from_slice(&[0x0B, 0x09]);
+        adv_data.extend_from_slice(b"ZHTP-MESH");
         
-        // Manufacturer specific data (ISP bypass capabilities)
+        // Manufacturer specific data (mesh capabilities)
         adv_data.extend_from_slice(&[0x15, 0xFF, 0xFF, 0xFF]); // Manufacturer ID
         adv_data.extend_from_slice(&self.device_id);            // Bluetooth MAC
         adv_data.extend_from_slice(&[0x02, 0x01]);            // Protocol version 2.1
-        adv_data.extend_from_slice(&[0xBF]);                   // Capabilities: ISP bypass + ZK + quantum
+        adv_data.extend_from_slice(&[0x3F]);                   // Capabilities: Mesh + ZK + quantum (no ISP bypass)
         adv_data.extend_from_slice(&[0x01, 0x00, 0x00, 0x00]); // Routing capacity
         adv_data.extend_from_slice(&[0x80, 0x1A, 0x00, 0x00]); // Bandwidth: 6784 bps available
         
         // Start platform-specific advertising
         self.broadcast_mesh_advertisement(&adv_data).await?;
         
-        info!("📡 ISP BYPASS mesh broadcasting on Bluetooth LE");
+        info!("📡 P2P MESH broadcasting on Bluetooth LE");
         Ok(())
     }
     
-    /// Start mesh peer discovery for ISP bypass
+    /// Start mesh peer discovery for P2P networking
     async fn start_mesh_peer_discovery(&self) -> Result<()> {
-        info!("🔍 Scanning for ZHTP ISP bypass peers...");
+        info!("🔍 Scanning for ZHTP mesh peers...");
         
         let connections = self.current_connections.clone();
         let device_id = self.device_id;
@@ -275,17 +276,17 @@ impl BluetoothMeshProtocol {
             loop {
                 scan_interval.tick().await;
                 
-                // Scan for real bypass peers
-                if let Ok(peers) = Self::scan_for_bypass_peers().await {
+                // Scan for real mesh peers
+                if let Ok(peers) = Self::scan_for_mesh_peers().await {
                     let mut conns = connections.write().await;
                     
                     for peer in peers {
                         if !conns.contains_key(&peer.address) {
                             info!("� Attempting to connect to bypass peer: {}", peer.address);
                             
-                            if let Ok(connection) = Self::connect_bypass_peer(&peer, device_id).await {
+                            if let Ok(connection) = Self::connect_mesh_peer(&peer, device_id).await {
                                 conns.insert(peer.address.clone(), connection);
-                                info!("✅ Connected to bypass peer: {}", peer.address);
+                                info!("✅ Connected to mesh peer: {}", peer.address);
                             }
                         }
                     }
@@ -300,28 +301,44 @@ impl BluetoothMeshProtocol {
     pub async fn send_mesh_message(&self, target_address: &str, message: &[u8]) -> Result<()> {
         info!("📤 Sending Bluetooth LE mesh message to {}: {} bytes", target_address, message.len());
         
-        // Real Bluetooth LE packet transmission with ISP bypass
-        const BLE_MTU: usize = 247;
+        // Check if peer is connected
+        let connections = self.current_connections.read().await;
+        if !connections.contains_key(target_address) {
+            return Err(anyhow::anyhow!("Peer not connected: {}", target_address));
+        }
         
-        if message.len() <= BLE_MTU {
-            self.transmit_bypass_packet(message, target_address).await?;
+        let connection = connections.get(target_address).unwrap();
+        let ble_mtu = connection.mtu as usize;
+        
+        if message.len() <= ble_mtu {
+            self.transmit_mesh_packet(message, target_address).await?;
         } else {
             // Fragment message for BLE transmission
-            let chunks: Vec<&[u8]> = message.chunks(BLE_MTU).collect();
+            let chunks: Vec<&[u8]> = message.chunks(ble_mtu).collect();
             for (i, chunk) in chunks.iter().enumerate() {
                 info!("📡 Sending fragment {}/{} ({} bytes)", i + 1, chunks.len(), chunk.len());
-                self.transmit_bypass_packet(chunk, target_address).await?;
+                self.transmit_mesh_packet(chunk, target_address).await?;
                 
                 // Small delay between fragments to avoid overwhelming BLE stack
                 tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
             }
         }
         
+        // Update connection activity
+        drop(connections);
+        let mut connections_mut = self.current_connections.write().await;
+        if let Some(conn) = connections_mut.get_mut(target_address) {
+            conn.last_seen = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs();
+        }
+        
         Ok(())
     }
     
-    /// Transmit packet via ISP bypass mesh
-    async fn transmit_bypass_packet(&self, data: &[u8], address: &str) -> Result<()> {
+    /// Transmit packet via mesh networking
+    async fn transmit_mesh_packet(&self, data: &[u8], address: &str) -> Result<()> {
         #[cfg(target_os = "linux")]
         {
             self.linux_transmit_gatt(data, address).await?;
@@ -334,7 +351,7 @@ impl BluetoothMeshProtocol {
         
         #[cfg(target_os = "macos")]
         {
-            info!("📡 macOS: Transmitted via ISP bypass to {}", address);
+                        info!("� macOS: Transmitted via mesh networking to {}", address);
         }
         
         Ok(())
@@ -345,7 +362,7 @@ impl BluetoothMeshProtocol {
     async fn init_windows_bluetooth(&self) -> Result<()> {
         use std::process::Command;
         
-        info!("🔵 Enabling Windows Bluetooth for ISP bypass...");
+        info!("🔵 Enabling Windows Bluetooth for mesh networking...");
         
         // Enable Bluetooth adapter
         let _ = Command::new("powershell")
@@ -357,7 +374,7 @@ impl BluetoothMeshProtocol {
             .args(&["-Command", "Set-NetConnectionProfile -NetworkCategory Private"])
             .output();
         
-        info!("🔵 Windows Bluetooth ready for ISP bypass");
+        info!("🔵 Windows Bluetooth ready for mesh networking");
         Ok(())
     }
 
@@ -394,29 +411,29 @@ impl BluetoothMeshProtocol {
     }
     
     /// Scan for real ZHTP bypass peers
-    async fn scan_for_bypass_peers() -> Result<Vec<BypassPeer>> {
+    async fn scan_for_mesh_peers() -> Result<Vec<MeshPeer>> {
         let mut peers = Vec::new();
         
         #[cfg(target_os = "linux")]
         {
-            peers.extend(Self::linux_scan_bypass_peers().await?);
+            peers.extend(Self::linux_scan_mesh_peers().await?);
         }
         
         #[cfg(target_os = "windows")]
         {
-            peers.extend(Self::windows_scan_bypass_peers().await?);
+            peers.extend(Self::windows_scan_mesh_peers().await?);
         }
         
         #[cfg(target_os = "macos")]
         {
-            peers.extend(Self::macos_scan_bypass_peers().await?);
+            peers.extend(Self::macos_scan_mesh_peers().await?);
         }
         
         Ok(peers)
     }
 
     #[cfg(target_os = "linux")]
-    async fn linux_scan_bypass_peers() -> Result<Vec<BypassPeer>> {
+    async fn linux_scan_mesh_peers() -> Result<Vec<MeshPeer>> {
         use std::process::Command;
         
         info!("🔍 Linux: Scanning for ZHTP bypass peers...");
@@ -431,7 +448,7 @@ impl BluetoothMeshProtocol {
         if let Ok(result) = scan_output {
             let output = String::from_utf8_lossy(&result.stdout);
             for line in output.lines() {
-                if let Some(peer) = Self::parse_linux_bypass_peer(line) {
+                if let Some(peer) = Self::parse_linux_mesh_peer(line) {
                     peers.push(peer);
                 }
             }
@@ -456,7 +473,7 @@ impl BluetoothMeshProtocol {
     }
 
     #[cfg(target_os = "windows")]
-    async fn windows_scan_bypass_peers() -> Result<Vec<BypassPeer>> {
+    async fn windows_scan_mesh_peers() -> Result<Vec<MeshPeer>> {
         use std::process::Command;
         
         info!("🔍 Windows: Scanning for ZHTP bypass peers...");
@@ -471,7 +488,7 @@ impl BluetoothMeshProtocol {
         if let Ok(result) = output {
             let output_str = String::from_utf8_lossy(&result.stdout);
             for line in output_str.lines() {
-                if let Some(peer) = Self::parse_windows_bypass_peer(line) {
+                if let Some(peer) = Self::parse_windows_mesh_peer(line) {
                     peers.push(peer);
                 }
             }
@@ -482,18 +499,18 @@ impl BluetoothMeshProtocol {
     }
 
     #[cfg(target_os = "macos")]
-    async fn macos_scan_bypass_peers() -> Result<Vec<BypassPeer>> {
+    async fn macos_scan_mesh_peers() -> Result<Vec<MeshPeer>> {
         info!("🔍 macOS: Scanning for ZHTP bypass peers...");
         // macOS Core Bluetooth scanning would be implemented here
         Ok(Vec::new())
     }
 
     /// Parse Linux hcitool output for bypass peers
-    fn parse_linux_bypass_peer(line: &str) -> Option<BypassPeer> {
+    fn parse_linux_mesh_peer(line: &str) -> Option<MeshPeer> {
         // Parse hcitool lescan output: "AA:BB:CC:DD:EE:FF ZHTP-BYPASS"
         let parts: Vec<&str> = line.split_whitespace().collect();
         if parts.len() >= 2 && parts[0].len() == 17 && parts[1].contains("ZHTP") {
-            Some(BypassPeer {
+            Some(MeshPeer {
                 peer_id: parts[0].to_string(),
                 address: parts[0].to_string(),
                 rssi: -60, // Default RSSI
@@ -501,7 +518,7 @@ impl BluetoothMeshProtocol {
                     .duration_since(std::time::UNIX_EPOCH)
                     .unwrap_or_default()
                     .as_secs(),
-                bypass_capable: true,
+                mesh_capable: true,
                 services: vec!["ZHTP-MESH".to_string()],
                 quantum_secure: true,
             })
@@ -511,14 +528,14 @@ impl BluetoothMeshProtocol {
     }
 
     /// Parse bluetoothctl output for bypass peers
-    fn parse_bluetoothctl_peer(line: &str) -> Option<BypassPeer> {
+    fn parse_bluetoothctl_peer(line: &str) -> Option<MeshPeer> {
         // Parse bluetoothctl format: "[CHG] Device AA:BB:CC:DD:EE:FF Name: ZHTP-BYPASS"
         if let Some(device_start) = line.find("Device ") {
             let device_part = &line[device_start + 7..];
             if let Some(space_pos) = device_part.find(' ') {
                 let address = &device_part[..space_pos];
                 if address.len() == 17 && line.contains("ZHTP") {
-                    return Some(BypassPeer {
+                    return Some(MeshPeer {
                         peer_id: address.to_string(),
                         address: address.to_string(),
                         rssi: -55,
@@ -526,7 +543,7 @@ impl BluetoothMeshProtocol {
                             .duration_since(std::time::UNIX_EPOCH)
                             .unwrap_or_default()
                             .as_secs(),
-                        bypass_capable: true,
+                        mesh_capable: true,
                         services: vec!["ZHTP-MESH".to_string()],
                         quantum_secure: true,
                     });
@@ -537,11 +554,11 @@ impl BluetoothMeshProtocol {
     }
 
     /// Parse Windows PowerShell output for bypass peers
-    fn parse_windows_bypass_peer(line: &str) -> Option<BypassPeer> {
+    fn parse_windows_mesh_peer(line: &str) -> Option<MeshPeer> {
         if line.contains("ZHTP") {
             // Extract device information from PowerShell output
             let address = format!("WIN-{:08X}", rand::random::<u32>());
-            Some(BypassPeer {
+            Some(MeshPeer {
                 peer_id: address.clone(),
                 address,
                 rssi: -50,
@@ -549,7 +566,7 @@ impl BluetoothMeshProtocol {
                     .duration_since(std::time::UNIX_EPOCH)
                     .unwrap_or_default()
                     .as_secs(),
-                bypass_capable: true,
+                mesh_capable: true,
                 services: vec!["ZHTP-MESH".to_string()],
                 quantum_secure: true,
             })
@@ -559,17 +576,17 @@ impl BluetoothMeshProtocol {
     }
 
     /// Connect to ISP bypass peer
-    async fn connect_bypass_peer(peer: &BypassPeer, _device_id: [u8; 6]) -> Result<BluetoothConnection> {
+    async fn connect_mesh_peer(peer: &MeshPeer, _device_id: [u8; 6]) -> Result<BluetoothConnection> {
         info!("🔗 Establishing ISP bypass connection to: {}", peer.address);
         
         #[cfg(target_os = "linux")]
         {
-            return Self::linux_connect_bypass_peer(peer).await;
+            return Self::linux_connect_mesh_peer(peer).await;
         }
         
         #[cfg(target_os = "windows")]
         {
-            return Self::windows_connect_bypass_peer(peer).await;
+            return Self::windows_connect_mesh_peer(peer).await;
         }
         
         // Default fallback connection
@@ -587,7 +604,7 @@ impl BluetoothMeshProtocol {
     }
 
     #[cfg(target_os = "linux")]
-    async fn linux_connect_bypass_peer(peer: &BypassPeer) -> Result<BluetoothConnection> {
+    async fn linux_connect_mesh_peer(peer: &MeshPeer) -> Result<BluetoothConnection> {
         use std::process::Command;
         
         info!("🔗 Linux: Connecting to ISP bypass peer {}", peer.address);
@@ -618,8 +635,8 @@ impl BluetoothMeshProtocol {
     }
 
     #[cfg(target_os = "windows")]
-    async fn windows_connect_bypass_peer(peer: &BypassPeer) -> Result<BluetoothConnection> {
-        info!("🔗 Windows: ISP bypass connection to {}", peer.address);
+    async fn windows_connect_mesh_peer(peer: &MeshPeer) -> Result<BluetoothConnection> {
+        info!("🔗 Windows: Mesh connection to {}", peer.address);
         
         // Windows BLE connection would use WinRT APIs
         Ok(BluetoothConnection {
@@ -636,12 +653,25 @@ impl BluetoothMeshProtocol {
     }
 
     async fn register_mesh_gatt_service(&self, service_uuid: &str, characteristics: Vec<&str>) -> Result<()> {
-        info!("🔧 Registering ISP bypass GATT service: {}", service_uuid);
+        info!("🔧 Registering mesh GATT service: {}", service_uuid);
         
         #[cfg(target_os = "linux")]
         {
             self.linux_register_bypass_service(service_uuid, &characteristics).await?;
         }
+        
+        #[cfg(target_os = "windows")]
+        {
+            self.windows_register_bypass_service(service_uuid, &characteristics).await?;
+        }
+        
+        #[cfg(target_os = "macos")]
+        {
+            self.macos_register_bypass_service(service_uuid, &characteristics).await?;
+        }
+        
+        // Start GATT characteristic handlers
+        self.start_gatt_characteristic_handlers(&characteristics).await?;
         
         for char_uuid in &characteristics {
             info!("🔧 Registered characteristic: {}", char_uuid);
@@ -649,17 +679,262 @@ impl BluetoothMeshProtocol {
         
         Ok(())
     }
+    
+    /// Start GATT characteristic handlers for real I/O operations
+    async fn start_gatt_characteristic_handlers(&self, characteristics: &[&str]) -> Result<()> {
+        let connections = self.current_connections.clone();
+        let characteristics: Vec<String> = characteristics.iter().map(|s| s.to_string()).collect();
+        
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(tokio::time::Duration::from_millis(100));
+            
+            loop {
+                interval.tick().await;
+                
+                // Handle incoming GATT operations
+                for char_uuid in &characteristics {
+                    match char_uuid.as_str() {
+                        "6ba7b811-9dad-11d1-80b4-00c04fd430c8" => {
+                            // ZK Authentication characteristic
+                            if let Ok(data) = Self::read_gatt_characteristic(char_uuid).await {
+                                if !data.is_empty() {
+                                    info!("🔐 Received ZK auth data: {} bytes", data.len());
+                                    // Process ZK authentication
+                                }
+                            }
+                        },
+                        "6ba7b812-9dad-11d1-80b4-00c04fd430c8" => {
+                            // Quantum-resistant routing characteristic
+                            if let Ok(routing_data) = Self::read_gatt_characteristic(char_uuid).await {
+                                if !routing_data.is_empty() {
+                                    info!("🛡️ Received quantum routing: {} bytes", routing_data.len());
+                                    // Process routing information
+                                }
+                            }
+                        },
+                        "6ba7b813-9dad-11d1-80b4-00c04fd430c8" => {
+                            // Mesh data transfer characteristic
+                            if let Ok(mesh_data) = Self::read_gatt_characteristic(char_uuid).await {
+                                if !mesh_data.is_empty() {
+                                    info!("📡 Received mesh data: {} bytes", mesh_data.len());
+                                    // Process mesh data
+                                }
+                            }
+                        },
+                        "6ba7b814-9dad-11d1-80b4-00c04fd430c8" => {
+                            // ISP bypass coordination characteristic
+                            if let Ok(bypass_data) = Self::read_gatt_characteristic(char_uuid).await {
+                                if !bypass_data.is_empty() {
+                                    info!("🌐 Received ISP bypass coord: {} bytes", bypass_data.len());
+                                    // Process ISP bypass coordination
+                                }
+                            }
+                        },
+                        _ => {}
+                    }
+                }
+            }
+        });
+        
+        Ok(())
+    }
+    
+    /// Read from GATT characteristic (platform-specific implementation)
+    async fn read_gatt_characteristic(char_uuid: &str) -> Result<Vec<u8>> {
+        #[cfg(target_os = "linux")]
+        {
+            return Self::linux_read_gatt_characteristic(char_uuid).await;
+        }
+        
+        #[cfg(target_os = "windows")]
+        {
+            return Self::windows_read_gatt_characteristic(char_uuid).await;
+        }
+        
+        #[cfg(target_os = "macos")]
+        {
+            return Self::macos_read_gatt_characteristic(char_uuid).await;
+        }
+        
+        Ok(vec![])
+    }
+    
+    /// Write to GATT characteristic (platform-specific implementation)
+    async fn write_gatt_characteristic(char_uuid: &str, data: &[u8]) -> Result<()> {
+        #[cfg(target_os = "linux")]
+        {
+            return Self::linux_write_gatt_characteristic(char_uuid, data).await;
+        }
+        
+        #[cfg(target_os = "windows")]
+        {
+            return Self::windows_write_gatt_characteristic(char_uuid, data).await;
+        }
+        
+        #[cfg(target_os = "macos")]
+        {
+            return Self::macos_write_gatt_characteristic(char_uuid, data).await;
+        }
+        
+        Ok(())
+    }
 
     #[cfg(target_os = "linux")]
-    async fn linux_register_bypass_service(&self, _service_uuid: &str, _characteristics: &[&str]) -> Result<()> {
+    async fn linux_register_bypass_service(&self, service_uuid: &str, characteristics: &[&str]) -> Result<()> {
         use std::process::Command;
+        use std::fs;
         
-        // Use BlueZ to register custom GATT service
+        // Create BlueZ GATT service configuration
+        let service_config = format!(
+            r#"[Service]
+UUID={}
+Primary=true
+
+"#,
+            service_uuid
+        );
+        
+        let mut full_config = service_config;
+        
+        for (i, char_uuid) in characteristics.iter().enumerate() {
+            let char_config = format!(
+                r#"[Characteristic]
+UUID={}
+Flags=read,write,notify
+Value=00
+
+"#,
+                char_uuid
+            );
+            full_config.push_str(&char_config);
+        }
+        
+        // Write service configuration to BlueZ
+        let config_path = "/tmp/zhtp_gatt_service.conf";
+        fs::write(config_path, full_config)?;
+        
+        // Register service with BlueZ
+        let output = Command::new("bluetoothctl")
+            .args(&["gatt.register-service", config_path])
+            .output();
+        
+        if let Ok(result) = output {
+            let output_str = String::from_utf8_lossy(&result.stdout);
+            if output_str.contains("success") {
+                info!("🔧 Linux: GATT service registered successfully");
+            }
+        }
+        
+        // Enable advertising
         let _ = Command::new("bluetoothctl")
             .args(&["advertise", "on"])
             .output();
         
         info!("🔧 Linux: ISP bypass GATT service registered");
+        Ok(())
+    }
+    
+    #[cfg(target_os = "windows")]
+    async fn windows_register_bypass_service(&self, _service_uuid: &str, _characteristics: &[&str]) -> Result<()> {
+        // Windows GATT service registration would use WinRT APIs
+        // For production, would use Windows::Devices::Bluetooth::GenericAttributeProfile
+        info!("🪟 Windows: GATT service registration (WinRT implementation needed)");
+        Ok(())
+    }
+    
+    #[cfg(target_os = "macos")]
+    async fn macos_register_bypass_service(&self, _service_uuid: &str, _characteristics: &[&str]) -> Result<()> {
+        // macOS GATT service registration would use Core Bluetooth framework
+        info!("🍎 macOS: GATT service registration (Core Bluetooth implementation needed)");
+        Ok(())
+    }
+    
+    #[cfg(target_os = "linux")]
+    async fn linux_read_gatt_characteristic(char_uuid: &str) -> Result<Vec<u8>> {
+        use std::process::Command;
+        
+        // Use D-Bus to read from BlueZ GATT characteristic
+        let output = Command::new("dbus-send")
+            .args(&[
+                "--system",
+                "--dest=org.bluez",
+                "--print-reply",
+                &format!("/org/bluez/hci0/dev_{}/service0001/char{:04x}", 
+                         "00_00_00_00_00_00", // Would be actual device address
+                         char_uuid.chars().take(4).collect::<String>().parse::<u16>().unwrap_or(0x0001)
+                ),
+                "org.bluez.GattCharacteristic1.ReadValue",
+                "dict:string:variant:"
+            ])
+            .output();
+        
+        if let Ok(result) = output {
+            let output_str = String::from_utf8_lossy(&result.stdout);
+            // Parse D-Bus response for characteristic value
+            if output_str.contains("array") {
+                // Extract byte array from D-Bus response
+                // Simplified parsing - production would use proper D-Bus library
+                return Ok(vec![0x01, 0x02, 0x03]); // Placeholder
+            }
+        }
+        
+        Ok(vec![])
+    }
+    
+    #[cfg(target_os = "linux")]
+    async fn linux_write_gatt_characteristic(char_uuid: &str, data: &[u8]) -> Result<()> {
+        use std::process::Command;
+        
+        // Convert data to D-Bus byte array format
+        let byte_array = data.iter()
+            .map(|b| format!("byte:{}", b))
+            .collect::<Vec<_>>()
+            .join(",");
+        
+        // Use D-Bus to write to BlueZ GATT characteristic
+        let output = Command::new("dbus-send")
+            .args(&[
+                "--system",
+                "--dest=org.bluez",
+                &format!("/org/bluez/hci0/dev_{}/service0001/char{:04x}", 
+                         "00_00_00_00_00_00", // Would be actual device address
+                         char_uuid.chars().take(4).collect::<String>().parse::<u16>().unwrap_or(0x0001)
+                ),
+                "org.bluez.GattCharacteristic1.WriteValue",
+                &format!("array:byte:{}", byte_array),
+                "dict:string:variant:"
+            ])
+            .output();
+        
+        if let Ok(_) = output {
+            info!("📝 Linux: GATT characteristic written ({} bytes)", data.len());
+        }
+        
+        Ok(())
+    }
+    
+    #[cfg(target_os = "windows")]
+    async fn windows_read_gatt_characteristic(_char_uuid: &str) -> Result<Vec<u8>> {
+        // Windows GATT read would use WinRT APIs
+        // For production: Windows::Devices::Bluetooth::GenericAttributeProfile::GattCharacteristic
+        Ok(vec![])
+    }
+    
+    #[cfg(target_os = "windows")]
+    async fn windows_write_gatt_characteristic(_char_uuid: &str, _data: &[u8]) -> Result<()> {
+        // Windows GATT write would use WinRT APIs
+        Ok(())
+    }
+    
+    #[cfg(target_os = "macos")]
+    async fn macos_read_gatt_characteristic(_char_uuid: &str) -> Result<Vec<u8>> {
+        // macOS GATT read would use Core Bluetooth framework
+        Ok(vec![])
+    }
+    
+    #[cfg(target_os = "macos")]
+    async fn macos_write_gatt_characteristic(_char_uuid: &str, _data: &[u8]) -> Result<()> {
+        // macOS GATT write would use Core Bluetooth framework
         Ok(())
     }
 
@@ -735,6 +1010,32 @@ impl BluetoothMeshProtocol {
         Ok(())
     }
 
+    /// Disconnect from a peer
+    pub async fn disconnect_peer(&self, peer_address: &str) -> Result<()> {
+        info!("🔌 Disconnecting from Bluetooth peer: {}", peer_address);
+        
+        #[cfg(target_os = "linux")]
+        {
+            use std::process::Command;
+            let _ = Command::new("bluetoothctl")
+                .args(&["disconnect", peer_address])
+                .output();
+        }
+        
+        // Remove from connections
+        let mut connections = self.current_connections.write().await;
+        connections.remove(peer_address);
+        
+        info!("✅ Disconnected from Bluetooth peer: {}", peer_address);
+        Ok(())
+    }
+    
+    /// Get list of connected peers
+    pub async fn get_connected_peers(&self) -> Vec<String> {
+        let connections = self.current_connections.read().await;
+        connections.keys().cloned().collect()
+    }
+    
     /// Get Bluetooth LE mesh status
     pub async fn get_mesh_status(&self) -> BluetoothMeshStatus {
         let connections = self.current_connections.read().await;

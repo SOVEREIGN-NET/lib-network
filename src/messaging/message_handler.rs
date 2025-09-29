@@ -11,7 +11,7 @@ use lib_crypto::PublicKey;
 
 use crate::types::mesh_message::ZhtpMeshMessage;
 use crate::mesh::connection::MeshConnection;
-use crate::sharing::WiFiSharingNode;
+
 use crate::relays::LongRangeRelay;
 
 /// Central mesh message handler
@@ -19,8 +19,6 @@ use crate::relays::LongRangeRelay;
 pub struct MeshMessageHandler {
     /// Active mesh connections
     pub mesh_connections: Arc<RwLock<HashMap<PublicKey, MeshConnection>>>,
-    /// WiFi sharing nodes
-    pub wifi_sharing_nodes: Arc<RwLock<HashMap<PublicKey, WiFiSharingNode>>>,
     /// Long-range relays
     pub long_range_relays: Arc<RwLock<HashMap<String, LongRangeRelay>>>,
     /// Revenue pools
@@ -31,13 +29,11 @@ impl MeshMessageHandler {
     /// Create new message handler
     pub fn new(
         mesh_connections: Arc<RwLock<HashMap<PublicKey, MeshConnection>>>,
-        wifi_sharing_nodes: Arc<RwLock<HashMap<PublicKey, WiFiSharingNode>>>,
         long_range_relays: Arc<RwLock<HashMap<String, LongRangeRelay>>>,
         revenue_pools: Arc<RwLock<HashMap<String, u64>>>,
     ) -> Self {
         Self {
             mesh_connections,
-            wifi_sharing_nodes,
             long_range_relays,
             revenue_pools,
         }
@@ -84,26 +80,10 @@ impl MeshMessageHandler {
     ) -> Result<()> {
         info!("🔍 Discovered peer with {} capabilities", capabilities.len());
         
-        // Check if peer offers internet connectivity
+        // Process peer capabilities for legitimate mesh services
         for capability in &capabilities {
-            if let crate::types::mesh_capability::MeshCapability::InternetGateway { bandwidth_mbps } = capability {
-                // Add as WiFi sharing node
-                let mut wifi_nodes = self.wifi_sharing_nodes.write().await;
-                wifi_nodes.insert(peer.clone(), WiFiSharingNode {
-                    operator: peer.clone(),
-                    shared_bandwidth_mbps: *bandwidth_mbps,
-                    monthly_data_cap_gb: None, // Unlimited for now
-                    tokens_per_gb: 50, // Standard rate
-                    connection_type: crate::types::internet_connection::InternetConnectionType::Other { 
-                        description: "Mesh-shared connection".to_string(), 
-                        speed_mbps: *bandwidth_mbps 
-                    },
-                    location: location.clone(),
-                    data_shared_this_month_gb: 0,
-                    revenue_this_month: 0,
-                });
-                
-                info!("🌐 New internet gateway: {} Mbps", bandwidth_mbps);
+            if let crate::types::mesh_capability::MeshCapability::MeshRelay { capacity_mbps } = capability {
+                info!("🔗 Peer offers mesh relay service: {} Mbps capacity", capacity_mbps);
             }
         }
         
@@ -113,7 +93,7 @@ impl MeshMessageHandler {
             peer_id: peer,
             protocol: crate::protocols::NetworkProtocol::BluetoothLE, // Default for discovery
             signal_strength: 0.8, // Good signal
-            bandwidth_capacity: shared_resources.internet_bandwidth_kbps as u64 * 1024,
+            bandwidth_capacity: shared_resources.relay_bandwidth_kbps as u64 * 1024,
             latency_ms: 50, // Estimate
             connected_at: std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -127,56 +107,25 @@ impl MeshMessageHandler {
         Ok(())
     }
     
-    /// Handle connectivity request
+    /// Handle connectivity request - legitimate P2P mesh routing
     async fn handle_connectivity_request(
         &self, 
-        requester: PublicKey, 
+        _requester: PublicKey, 
         bandwidth_needed_kbps: u32, 
         duration_minutes: u32, 
-        payment_tokens: u64
+        _payment_tokens: u64
     ) -> Result<()> {
-        info!("📞 Connectivity request: {} kbps for {} minutes, {} tokens", 
-              bandwidth_needed_kbps, duration_minutes, payment_tokens);
+        info!("📞 P2P mesh routing request: {} kbps for {} minutes", 
+              bandwidth_needed_kbps, duration_minutes);
         
-        // Check if we can provide the requested connectivity
-        let wifi_nodes = self.wifi_sharing_nodes.read().await;
-        let mut best_provider: Option<(PublicKey, &WiFiSharingNode)> = None;
-        let mut best_bandwidth = 0u32;
-        
-        for (peer_id, node) in wifi_nodes.iter() {
-            let available_kbps = node.shared_bandwidth_mbps * 1024;
-            if available_kbps >= bandwidth_needed_kbps && available_kbps > best_bandwidth {
-                best_provider = Some((peer_id.clone(), node));
-                best_bandwidth = available_kbps;
-            }
-        }
-        
-        if let Some((provider_key, provider_node)) = best_provider {
-            // Calculate exact cost for the data transfer
-            let data_mb = (bandwidth_needed_kbps * duration_minutes * 60) / (8 * 1024); // Convert to MB
-            let total_cost = data_mb as u64 * provider_node.tokens_per_gb / 1024;
-            
-            // Verify payment is sufficient
-            if payment_tokens >= total_cost {
-                info!("✅ Can provide {} kbps connectivity for {} minutes", bandwidth_needed_kbps, duration_minutes);
-                info!("💰 Cost: {} tokens for {:.2} MB transfer", total_cost, data_mb as f64 / 1024.0);
-                
-                // Update provider's revenue tracking
-                let mut wifi_nodes_mut = self.wifi_sharing_nodes.write().await;
-                if let Some(provider_mut) = wifi_nodes_mut.get_mut(&provider_key) {
-                    provider_mut.revenue_this_month += total_cost;
-                    provider_mut.data_shared_this_month_gb += (data_mb as f64 / 1024.0) as u32;
-                }
-                
-                info!("📤 Sending connectivity acceptance to requester");
-            } else {
-                warn!("❌ Insufficient payment: {} tokens provided, {} tokens required", 
-                      payment_tokens, total_cost);
-                info!("📤 Sending connectivity rejection - insufficient payment");
-            }
+        // ZHTP provides direct peer-to-peer mesh routing without ISP bypass
+        let relays = self.long_range_relays.read().await;
+        if !relays.is_empty() {
+            info!("✅ Mesh relay capacity available for P2P routing");
+            info!("📤 Sending connectivity acceptance via legitimate mesh routing");
         } else {
-            warn!("❌ No WiFi nodes can provide {} kbps connectivity", bandwidth_needed_kbps);
-            info!("📤 Sending connectivity rejection - no capacity available");
+            warn!("❌ No mesh relay nodes available for routing");
+            info!("📤 Sending connectivity rejection - no relay capacity");
         }
         
         Ok(())
@@ -358,13 +307,11 @@ mod tests {
     #[tokio::test]
     async fn test_message_handler_creation() {
         let mesh_connections = Arc::new(RwLock::new(HashMap::new()));
-        let wifi_sharing_nodes = Arc::new(RwLock::new(HashMap::new()));
         let long_range_relays = Arc::new(RwLock::new(HashMap::new()));
         let revenue_pools = Arc::new(RwLock::new(HashMap::new()));
         
         let handler = MeshMessageHandler::new(
             mesh_connections,
-            wifi_sharing_nodes,
             long_range_relays,
             revenue_pools,
         );
@@ -376,13 +323,11 @@ mod tests {
     #[tokio::test]
     async fn test_health_report_handling() {
         let mesh_connections = Arc::new(RwLock::new(HashMap::new()));
-        let wifi_sharing_nodes = Arc::new(RwLock::new(HashMap::new()));
         let long_range_relays = Arc::new(RwLock::new(HashMap::new()));
         let revenue_pools = Arc::new(RwLock::new(HashMap::new()));
         
         let handler = MeshMessageHandler::new(
             mesh_connections.clone(),
-            wifi_sharing_nodes,
             long_range_relays,
             revenue_pools,
         );

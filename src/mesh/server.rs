@@ -14,8 +14,9 @@ use crate::types::mesh_message::ZhtpMeshMessage;
 use crate::types::api_response::ZhtpApiResponse;
 use crate::types::relay_type::LongRangeRelayType;
 use crate::relays::LongRangeRelay;
-use crate::sharing::WiFiSharingNode;
+
 use crate::protocols::NetworkProtocol;
+
 use crate::bootstrap::{start_tcp_bootstrap_server, start_udp_bootstrap_server};
 use crate::messaging::message_handler::MeshMessageHandler;
 use crate::monitoring::health_monitoring::HealthMonitor;
@@ -44,8 +45,7 @@ pub struct ZhtpMeshServer {
     pub mesh_connections: Arc<RwLock<HashMap<PublicKey, MeshConnection>>>,
     /// Long-range relay nodes (LoRaWAN gateways, satellite uplinks)
     pub long_range_relays: Arc<RwLock<HashMap<String, LongRangeRelay>>>,
-    /// WiFi sharing nodes (users sharing their internet)
-    pub wifi_sharing_nodes: Arc<RwLock<HashMap<PublicKey, WiFiSharingNode>>>,
+
     /// Revenue sharing pools for UBI distribution
     pub revenue_pools: Arc<RwLock<HashMap<String, u64>>>,
     /// Mesh protocol statistics
@@ -333,13 +333,13 @@ impl MeshNode {
     async fn send_discovery_message_static(node_id: [u8; 32], protocol: NetworkProtocol) -> Result<()> {
         let discovery_message = ZhtpMeshMessage::PeerDiscovery {
             capabilities: vec![
-                crate::types::mesh_capability::MeshCapability::InternetGateway { bandwidth_mbps: 100 },
+                crate::types::mesh_capability::MeshCapability::MeshRelay { capacity_mbps: 100 },
                 crate::types::mesh_capability::MeshCapability::DataStorage { capacity_gb: 100 },
                 crate::types::mesh_capability::MeshCapability::ZkProofGeneration,
             ],
             location: None, // Could be filled with real GPS coordinates
             shared_resources: crate::types::mesh_capability::SharedResources {
-                internet_bandwidth_kbps: 10000,
+                relay_bandwidth_kbps: 10000,
                 storage_gb: 100,
                 compute_power: 1000,
                 battery_percentage: Some(85),
@@ -417,7 +417,6 @@ impl ZhtpMeshServer {
         let storage = Arc::new(RwLock::new(storage));
         let mesh_connections = Arc::new(RwLock::new(HashMap::new()));
         let long_range_relays = Arc::new(RwLock::new(HashMap::new()));
-        let wifi_sharing_nodes = Arc::new(RwLock::new(HashMap::new()));
         let revenue_pools = Arc::new(RwLock::new(HashMap::new()));
         let stats = Arc::new(RwLock::new(MeshProtocolStats::default()));
         
@@ -427,7 +426,6 @@ impl ZhtpMeshServer {
         // Initialize message handler
         let message_handler = MeshMessageHandler::new(
             mesh_connections.clone(),
-            wifi_sharing_nodes.clone(),
             long_range_relays.clone(),
             revenue_pools.clone(),
         );
@@ -436,7 +434,6 @@ impl ZhtpMeshServer {
         let health_monitor = HealthMonitor::new(
             stats.clone(),
             mesh_connections.clone(),
-            wifi_sharing_nodes.clone(),
             long_range_relays.clone(),
         );
         
@@ -450,7 +447,6 @@ impl ZhtpMeshServer {
             storage,
             mesh_connections,
             long_range_relays,
-            wifi_sharing_nodes,
             revenue_pools,
             stats,
             message_handler,
@@ -486,8 +482,8 @@ impl ZhtpMeshServer {
             warn!("⚠️ Skipping long-range relay initialization - no hardware capabilities detected");
         }
         
-        // Start WiFi sharing discovery
-        self.start_wifi_sharing_discovery().await?;
+        // WiFi sharing discovery disabled for legal compliance
+        // self.start_wifi_sharing_discovery().await?;
         
         // Start mesh protocol message handling
         self.start_mesh_message_handler().await?;
@@ -621,12 +617,12 @@ impl ZhtpMeshServer {
                 relay_type: LongRangeRelayType::WiFiRelay,
                 coverage_radius_km: 0.1, // WiFi has short range but high bandwidth
                 max_throughput_mbps: wifi_info.bandwidth_estimate_mbps,
-                cost_per_mb_tokens: 5, // WiFi sharing is cheaper
+                cost_per_mb_tokens: 5, // P2P mesh relay cost
                 operator: lib_crypto::PublicKey::new(vec![rand::random(), rand::random(), rand::random()]), // Random operator key
                 ubi_share_percentage: 25.0,
             });
             
-            println!("📶 WiFi sharing network discovered: {} - {} Mbps", 
+            println!("📶 WiFi relay network discovered: {} - {} Mbps", 
                     wifi_info.ssid, wifi_info.bandwidth_estimate_mbps);
         }
         
@@ -710,18 +706,20 @@ impl ZhtpMeshServer {
         
         // Clear all in-memory state
         self.mesh_connections.write().await.clear();
-        self.wifi_sharing_nodes.write().await.clear();
+        // Mesh connections cleared above
         self.long_range_relays.write().await.clear();
         
         println!("✅ ZHTP Mesh Server stopped gracefully");
         Ok(())
     }
     
-    /// Start WiFi sharing discovery - find people sharing their internet
+    /// WiFi sharing discovery - DISABLED for legal compliance
+    /// This function is kept for reference but should not be called
+    #[allow(dead_code)]
     async fn start_wifi_sharing_discovery(&self) -> Result<()> {
-        info!("🏠 Starting WiFi sharing discovery...");
+        warn!("⚠️ WiFi sharing discovery is disabled for legal compliance");
         
-        let wifi_nodes = self.wifi_sharing_nodes.clone();
+        // WiFi sharing removed for legal compliance
         let server_id = self.server_id;
         let hardware_caps = self.hardware_capabilities.clone();
         
@@ -734,40 +732,19 @@ impl ZhtpMeshServer {
                 if let Some(ref caps) = hardware_caps {
                     match crate::discovery::wifi::discover_wifi_relays_with_capabilities(caps).await {
                         Ok(discovered_networks) => {
-                            let mut nodes = wifi_nodes.write().await;
-                        
-                        for wifi_info in discovered_networks {
-                            // Create deterministic key from BSSID
-                            let node_key = PublicKey::new(wifi_info.bssid.as_bytes().to_vec());
+                            info!("📡 Discovered {} WiFi relay networks for P2P mesh", discovered_networks.len());
                             
-                            if !nodes.contains_key(&node_key) {
-                                nodes.insert(node_key.clone(), WiFiSharingNode {
-                                    operator: node_key,
-                                    shared_bandwidth_mbps: wifi_info.bandwidth_estimate_mbps,
-                                    monthly_data_cap_gb: Some(1000), // 1TB default cap
-                                    tokens_per_gb: 100, // 100 tokens per GB shared
-                                    connection_type: crate::types::internet_connection::InternetConnectionType::Other {
-                                        description: format!("WiFi Network: {}", wifi_info.ssid),
-                                        speed_mbps: wifi_info.bandwidth_estimate_mbps,
-                                    },
-                                    location: None, // Could be determined from WiFi geolocation
-                                    data_shared_this_month_gb: 0,
-                                    revenue_this_month: 0,
-                                });
-                                
-                                info!("🏠 New WiFi sharing node discovered: {} - {} Mbps available", 
+                            for wifi_info in discovered_networks {
+                                info!("🔗 WiFi relay available: {} - {} Mbps capacity", 
                                       wifi_info.ssid, wifi_info.bandwidth_estimate_mbps);
                             }
-                        }
-                        
-                        info!("📊 Total WiFi sharing nodes: {}", nodes.len());
                         },
                         Err(e) => {
-                            warn!("⚠️ WiFi discovery failed: {}", e);
+                            warn!("⚠️ WiFi relay discovery failed: {}", e);
                         }
                     }
                 } else {
-                    warn!("⚠️ Skipping WiFi sharing discovery - no hardware capabilities detected");
+                    warn!("⚠️ Skipping WiFi relay discovery - no hardware capabilities detected");
                 }
             }
         });

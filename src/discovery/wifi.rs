@@ -34,12 +34,12 @@ pub async fn discover_wifi_relays_with_capabilities(capabilities: &HardwareCapab
         return Ok(Vec::new());
     }
     
-    // REAL WiFi network scanning for sharing-enabled networks
-    println!("📶 Scanning for REAL WiFi sharing networks...");
+    // REAL WiFi network scanning for relay-enabled networks
+    println!("📶 Scanning for ZHTP mesh relay networks...");
     
     let mut discovered_networks = Vec::new();
     
-    // Scan all WiFi channels for networks advertising ZHTP mesh sharing
+    // Scan all WiFi channels for networks advertising ZHTP mesh relay services
     let wifi_channels = vec![1, 6, 11, 36, 40, 44, 48, 149, 153, 157, 161];
     
     for channel in wifi_channels {
@@ -55,9 +55,9 @@ pub async fn discover_wifi_relays_with_capabilities(capabilities: &HardwareCapab
     
     // Only report real networks found - no fake data
     if discovered_networks.is_empty() {
-        println!("📶 No ZHTP WiFi sharing networks detected");
+        println!("📶 No ZHTP WiFi relay networks detected");
     } else {
-        println!("📶 Discovered {} real WiFi sharing networks", discovered_networks.len());
+        println!("📶 Discovered {} ZHTP mesh relay networks", discovered_networks.len());
     }
     
     Ok(discovered_networks)
@@ -475,9 +475,9 @@ async fn macos_discover_wifi_direct_peers() -> Result<Vec<WiFiNetworkInfo>> {
     Ok(vec![])
 }
 
-/// Check if WiFi network supports ZHTP mesh sharing
+/// Check if WiFi network supports ZHTP mesh relay services
 async fn is_lib_sharing_network(network: &WiFiNetworkInfo) -> bool {
-    // Check for ZHTP mesh sharing indicators:
+    // Check for ZHTP mesh relay indicators:
     // 1. SSID contains "ZHTP" or "Mesh"
     // 2. Open network with ZHTP beacon
     // 3. Special vendor-specific information elements

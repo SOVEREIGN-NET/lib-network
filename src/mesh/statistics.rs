@@ -13,8 +13,6 @@ pub struct MeshProtocolStats {
     pub total_data_routed: u64,
     /// Total tokens distributed as UBI
     pub total_ubi_distributed: u64,
-    /// Number of WiFi sharing nodes
-    pub wifi_sharing_nodes: u32,
     /// Number of long-range relays
     pub long_range_relays: u32,
     /// Average network latency (ms)

@@ -4,8 +4,8 @@ use crate::protocols::NetworkProtocol;
 /// Mesh node capabilities
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum MeshCapability {
-    /// Can provide internet connectivity
-    InternetGateway { bandwidth_mbps: u32 },
+    /// Can provide routing and relay services
+    MeshRelay { capacity_mbps: u32 },
     /// Can store data for the network
     DataStorage { capacity_gb: u32 },
     /// Can perform computations
@@ -21,8 +21,8 @@ pub enum MeshCapability {
 /// Resources shared by a mesh node
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SharedResources {
-    /// Internet bandwidth available for sharing (kbps)
-    pub internet_bandwidth_kbps: u32,
+    /// Mesh relay bandwidth available (kbps)
+    pub relay_bandwidth_kbps: u32,
     /// Storage space available (GB)
     pub storage_gb: u32,
     /// Compute power available (arbitrary units)
