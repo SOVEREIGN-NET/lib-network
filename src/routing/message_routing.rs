@@ -186,7 +186,7 @@ impl MeshMessageRouter {
     ) -> Result<u64> {
         let message_id = rand::random::<u64>();
         
-        info!("🚀 Routing message {} to destination {:?}", 
+        info!(" Routing message {} to destination {:?}", 
               message_id, hex::encode(&destination.key_id[0..4]));
         
         // Create delivery tracking
@@ -233,11 +233,11 @@ impl MeshMessageRouter {
         destination: &PublicKey,
         sender: &PublicKey,
     ) -> Result<Vec<RouteHop>> {
-        debug!("🔍 Finding optimal route to {:?}", hex::encode(&destination.key_id[0..4]));
+        debug!("Finding optimal route to {:?}", hex::encode(&destination.key_id[0..4]));
         
         // Check route cache first
         if let Some(cached_route) = self.get_cached_route(destination).await {
-            info!("📋 Using cached route to destination (quality: {:.2})", 
+            info!("Using cached route to destination (quality: {:.2})", 
                   cached_route.quality_score);
             return Ok(cached_route.hops);
         }
@@ -245,7 +245,7 @@ impl MeshMessageRouter {
         // Check for direct connection
         let connections = self.mesh_connections.read().await;
         if connections.contains_key(destination) {
-            info!("🎯 Direct connection available to destination");
+            info!("Direct connection available to destination");
             let connection = connections.get(destination).unwrap();
             return Ok(vec![RouteHop {
                 peer_id: destination.clone(),
@@ -257,13 +257,13 @@ impl MeshMessageRouter {
         
         // Find multi-hop route through mesh network
         if let Ok(mesh_route) = self.find_mesh_route(destination, sender).await {
-            info!("🕸️ Found multi-hop mesh route ({} hops)", mesh_route.len());
+            info!("Found multi-hop mesh route ({} hops)", mesh_route.len());
             return Ok(mesh_route);
         }
         
         // Try long-range relay routing
         if let Ok(relay_route) = self.find_long_range_route(destination).await {
-            info!("📡 Using long-range relay route");
+            info!("Using long-range relay route");
             return Ok(relay_route);
         }
         
@@ -282,7 +282,7 @@ impl MeshMessageRouter {
         destination: &PublicKey,
         sender: &PublicKey,
     ) -> Result<Vec<RouteHop>> {
-        debug!("🕸️ Searching mesh network for route");
+        debug!("Searching mesh network for route");
         
         let connections = self.mesh_connections.read().await;
         let routing_table = self.routing_table.read().await;
@@ -396,7 +396,7 @@ impl MeshMessageRouter {
     
     /// Find long-range relay route
     async fn find_long_range_route(&self, destination: &PublicKey) -> Result<Vec<RouteHop>> {
-        debug!("📡 Searching long-range relays for route");
+        debug!("Searching long-range relays for route");
         
         let relays = self.long_range_relays.read().await;
         let mut best_relay = None;
@@ -418,7 +418,7 @@ impl MeshMessageRouter {
         }
         
         if let Some((relay_id, relay)) = best_relay {
-            info!("📡 Selected relay {} for long-range routing (score: {:.2})", 
+            info!("Selected relay {} for long-range routing (score: {:.2})", 
                   relay_id, best_score);
             
             Ok(vec![RouteHop {
@@ -462,7 +462,7 @@ impl MeshMessageRouter {
         message: ZhtpMeshMessage,
         route: Vec<RouteHop>,
     ) -> Result<()> {
-        info!("🚀 Executing routing for message {} ({} hops)", message_id, route.len());
+        info!(" Executing routing for message {} ({} hops)", message_id, route.len());
         
         // Update delivery status
         {
@@ -519,7 +519,7 @@ impl MeshMessageRouter {
             }
         }
         
-        info!("✅ Message {} successfully delivered", message_id);
+        info!("Message {} successfully delivered", message_id);
         Ok(())
     }
     
@@ -540,8 +540,8 @@ impl MeshMessageRouter {
         }
         
         // Satellite routing enables PLANETARY reach
-        info!("🌍 Satellite uplink active - message can reach ANY location on Earth!");
-        info!("🚀 ZHTP revolutionizing global communications - no ISP needed!");
+        info!("Satellite uplink active - message can reach ANY location on Earth!");
+        info!(" ZHTP revolutionizing global communications - no ISP needed!");
         
         Ok(())
     }
@@ -553,12 +553,12 @@ impl MeshMessageRouter {
         message: &ZhtpMeshMessage,
         hop: &RouteHop,
     ) -> Result<()> {
-        info!("📡 Long-range relay routing: message {}", message_id);
+        info!("Long-range relay routing: message {}", message_id);
         
         if let Some(relay_id) = &hop.relay_id {
             let relays = self.long_range_relays.read().await;
             if let Some(relay) = relays.get(relay_id) {
-                info!("📡 Using {} relay: {:.0}km range, {} Mbps", 
+                info!("Using {} relay: {:.0}km range, {} Mbps", 
                       relay_id, relay.coverage_radius_km, relay.max_throughput_mbps);
             }
         }
@@ -573,7 +573,7 @@ impl MeshMessageRouter {
         message: &ZhtpMeshMessage,
         hop: &RouteHop,
     ) -> Result<()> {
-        debug!("🕸️ Mesh routing: message {} to {:?}", 
+        debug!("Mesh routing: message {} to {:?}", 
                message_id, hex::encode(&hop.peer_id.key_id[0..4]));
         
         let connections = self.mesh_connections.read().await;

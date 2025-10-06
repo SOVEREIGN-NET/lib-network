@@ -3,8 +3,7 @@
 //! Detects and initializes LoRaWAN radio hardware for mesh networking
 
 use anyhow::Result;
-use tracing::{info, warn, debug, error};
-use std::collections::HashMap;
+use tracing::{info, warn, debug};
 
 /// LoRaWAN hardware information
 #[derive(Debug, Clone)]
@@ -57,13 +56,13 @@ pub struct LoRaWANCapabilities {
 
 /// Detect LoRaWAN hardware on the system
 pub async fn detect_lorawan_hardware() -> Result<Option<LoRaWANHardware>> {
-    info!("🔍 Scanning for LoRaWAN radio hardware...");
+    info!("Scanning for LoRaWAN radio hardware...");
     
     // Try different detection methods based on platform
     #[cfg(target_os = "linux")]
     {
         if let Ok(hardware) = detect_linux_lorawan().await {
-            info!("✅ LoRaWAN hardware detected: {}", hardware.device_name);
+            info!("LoRaWAN hardware detected: {}", hardware.device_name);
             return Ok(Some(hardware));
         }
     }
@@ -71,7 +70,7 @@ pub async fn detect_lorawan_hardware() -> Result<Option<LoRaWANHardware>> {
     #[cfg(target_os = "windows")]
     {
         if let Ok(hardware) = detect_windows_lorawan().await {
-            info!("✅ LoRaWAN hardware detected: {}", hardware.device_name);
+            info!("LoRaWAN hardware detected: {}", hardware.device_name);
             return Ok(Some(hardware));
         }
     }
@@ -79,12 +78,12 @@ pub async fn detect_lorawan_hardware() -> Result<Option<LoRaWANHardware>> {
     #[cfg(target_os = "macos")]
     {
         if let Ok(hardware) = detect_macos_lorawan().await {
-            info!("✅ LoRaWAN hardware detected: {}", hardware.device_name);
+            info!("LoRaWAN hardware detected: {}", hardware.device_name);
             return Ok(Some(hardware));
         }
     }
     
-    info!("❌ No LoRaWAN hardware detected");
+    info!("No LoRaWAN hardware detected");
     Ok(None)
 }
 
@@ -97,7 +96,7 @@ pub async fn test_lorawan_hardware(hardware: &LoRaWANHardware) -> Result<bool> {
         "USB" => test_usb_lorawan_hardware(hardware).await,
         "I2C" => test_i2c_lorawan_hardware(hardware).await,
         _ => {
-            warn!("⚠️ Unknown connection type: {}", hardware.connection_type);
+            warn!("Unknown connection type: {}", hardware.connection_type);
             Ok(false)
         }
     }
@@ -169,7 +168,7 @@ async fn detect_spi_sx127x(spi_path: &str) -> Result<LoRaWANHardware> {
     use std::fs::OpenOptions;
     use std::io::{Read, Write};
     
-    debug!("🔍 Testing for SX127x on {}", spi_path);
+    debug!("Testing for SX127x on {}", spi_path);
     
     let mut file = OpenOptions::new()
         .read(true)
@@ -183,19 +182,19 @@ async fn detect_spi_sx127x(spi_path: &str) -> Result<LoRaWANHardware> {
     if file.write_all(&version_cmd).is_ok() && file.read_exact(&mut response).is_ok() {
         match response[1] {
             0x12 => {
-                info!("📡 SX1276 detected on {}", spi_path);
+                info!("SX1276 detected on {}", spi_path);
                 return Ok(create_sx127x_hardware("SX1276", spi_path));
             },
             0x22 => {
-                info!("📡 SX1277 detected on {}", spi_path);
+                info!("SX1277 detected on {}", spi_path);
                 return Ok(create_sx127x_hardware("SX1277", spi_path));
             },
             0x21 => {
-                info!("📡 SX1278 detected on {}", spi_path);
+                info!("SX1278 detected on {}", spi_path);
                 return Ok(create_sx127x_hardware("SX1278", spi_path));
             },
             0x24 => {
-                info!("📡 SX1279 detected on {}", spi_path);
+                info!("SX1279 detected on {}", spi_path);
                 return Ok(create_sx127x_hardware("SX1279", spi_path));
             },
             _ => debug!("Unknown SX127x version: 0x{:02X}", response[1]),
@@ -210,7 +209,7 @@ async fn detect_spi_sx130x(spi_path: &str) -> Result<LoRaWANHardware> {
     use std::fs::OpenOptions;
     use std::io::{Read, Write};
     
-    debug!("🔍 Testing for SX130x on {}", spi_path);
+    debug!("Testing for SX130x on {}", spi_path);
     
     let mut file = OpenOptions::new()
         .read(true)
@@ -223,11 +222,11 @@ async fn detect_spi_sx130x(spi_path: &str) -> Result<LoRaWANHardware> {
     
     if file.write_all(&version_cmd).is_ok() && file.read_exact(&mut response).is_ok() {
         if response[1] == 0x21 {
-            info!("📡 SX1301 concentrator detected on {}", spi_path);
+            info!("SX1301 concentrator detected on {}", spi_path);
             return Ok(create_sx130x_hardware("SX1301", spi_path));
         }
         if response[1] == 0x10 {
-            info!("📡 SX1302 concentrator detected on {}", spi_path);
+            info!("SX1302 concentrator detected on {}", spi_path);
             return Ok(create_sx130x_hardware("SX1302", spi_path));
         }
     }
@@ -304,7 +303,7 @@ async fn test_serial_lorawan_module(port: &str, chip_type: &str) -> Result<LoRaW
                 let version_response = String::from_utf8_lossy(&buffer[..bytes_read]);
                 
                 if version_response.to_lowercase().contains("lora") {
-                    info!("📡 LoRaWAN module detected on {} ({})", port.device_name().unwrap_or("unknown"), chip_type);
+                    info!("LoRaWAN module detected on {} ({})", port.device_name().unwrap_or("unknown"), chip_type);
                     
                     return Ok(LoRaWANHardware {
                         device_name: format!("{} LoRaWAN Module", chip_type),
@@ -361,7 +360,7 @@ async fn detect_raspberry_pi_lorawan_hat() -> Result<LoRaWANHardware> {
     use std::fs;
     use std::path::Path;
     
-    debug!("🔍 Checking for Raspberry Pi LoRaWAN HAT");
+    debug!("Checking for Raspberry Pi LoRaWAN HAT");
     
     // Check device tree for HAT information
     if Path::new("/proc/device-tree/hat").exists() {
@@ -371,7 +370,7 @@ async fn detect_raspberry_pi_lorawan_hat() -> Result<LoRaWANHardware> {
                     let content_lower = content.to_lowercase();
                     
                     if content_lower.contains("lora") || content_lower.contains("sx127") {
-                        info!("📡 LoRaWAN HAT detected via device tree");
+                        info!("LoRaWAN HAT detected via device tree");
                         
                         return Ok(LoRaWANHardware {
                             device_name: "Raspberry Pi LoRaWAN HAT".to_string(),
@@ -398,6 +397,7 @@ async fn detect_raspberry_pi_lorawan_hat() -> Result<LoRaWANHardware> {
     Err(anyhow::anyhow!("No Raspberry Pi LoRaWAN HAT detected"))
 }
 
+#[allow(dead_code)] // Used in SX127x hardware detection - false positive warning
 fn create_sx127x_hardware(chip_name: &str, spi_path: &str) -> LoRaWANHardware {
     LoRaWANHardware {
         device_name: format!("Semtech {} LoRa Transceiver", chip_name),
@@ -421,6 +421,7 @@ fn create_sx127x_hardware(chip_name: &str, spi_path: &str) -> LoRaWANHardware {
     }
 }
 
+#[allow(dead_code)] // Used in SX130x hardware detection - false positive warning
 fn create_sx130x_hardware(chip_name: &str, spi_path: &str) -> LoRaWANHardware {
     LoRaWANHardware {
         device_name: format!("Semtech {} LoRaWAN Concentrator", chip_name),
@@ -465,7 +466,7 @@ async fn detect_windows_lorawan() -> Result<LoRaWANHardware> {
         let device_output = String::from_utf8_lossy(&output.stdout);
         
         if !device_output.trim().is_empty() {
-            info!("📡 LoRaWAN device found in Device Manager");
+            info!("LoRaWAN device found in Device Manager");
             
             return Ok(LoRaWANHardware {
                 device_name: "Windows LoRaWAN Device".to_string(),
@@ -515,7 +516,7 @@ async fn test_windows_com_lorawan(port_name: &str) -> Result<LoRaWANHardware> {
                 let version_response = String::from_utf8_lossy(&buffer[..bytes_read]);
                 
                 if version_response.to_lowercase().contains("lora") {
-                    info!("📡 LoRaWAN module detected on {}", port_name);
+                    info!("LoRaWAN module detected on {}", port_name);
                     
                     return Ok(LoRaWANHardware {
                         device_name: format!("Windows LoRaWAN Module ({})", port_name),
@@ -588,7 +589,7 @@ async fn test_macos_usb_lorawan(device_path: &str) -> Result<LoRaWANHardware> {
                 let version_response = String::from_utf8_lossy(&buffer[..bytes_read]);
                 
                 if version_response.to_lowercase().contains("lora") {
-                    info!("📡 LoRaWAN module detected on {}", device_path);
+                    info!("LoRaWAN module detected on {}", device_path);
                     
                     return Ok(LoRaWANHardware {
                         device_name: format!("macOS LoRaWAN Module ({})", device_path),
@@ -632,7 +633,7 @@ async fn test_spi_lorawan_hardware(hardware: &LoRaWANHardware) -> Result<bool> {
                 
                 if file.write_all(&version_cmd).is_ok() && file.read_exact(&mut response).is_ok() {
                     if response[1] != 0x00 && response[1] != 0xFF {
-                        info!("✅ SPI LoRaWAN hardware test passed");
+                        info!("SPI LoRaWAN hardware test passed");
                         return Ok(true);
                     }
                 }
@@ -640,7 +641,7 @@ async fn test_spi_lorawan_hardware(hardware: &LoRaWANHardware) -> Result<bool> {
         }
     }
     
-    warn!("⚠️ SPI LoRaWAN hardware test failed");
+    warn!("SPI LoRaWAN hardware test failed");
     Ok(false)
 }
 
@@ -660,7 +661,7 @@ async fn test_usb_lorawan_hardware(hardware: &LoRaWANHardware) -> Result<bool> {
                     let response = String::from_utf8_lossy(&buffer[..bytes_read]);
                     
                     if response.contains("OK") || response.contains("AT") {
-                        info!("✅ USB LoRaWAN hardware test passed");
+                        info!("USB LoRaWAN hardware test passed");
                         return Ok(true);
                     }
                 }
@@ -668,14 +669,14 @@ async fn test_usb_lorawan_hardware(hardware: &LoRaWANHardware) -> Result<bool> {
         }
     }
     
-    warn!("⚠️ USB LoRaWAN hardware test failed");
+    warn!("USB LoRaWAN hardware test failed");
     Ok(false)
 }
 
-async fn test_i2c_lorawan_hardware(hardware: &LoRaWANHardware) -> Result<bool> {
+async fn test_i2c_lorawan_hardware(_hardware: &LoRaWANHardware) -> Result<bool> {
     // I2C testing would require actual I2C communication
     // For now, assume it works if detected
-    info!("✅ I2C LoRaWAN hardware assumed functional");
+    info!("I2C LoRaWAN hardware assumed functional");
     Ok(true)
 }
 

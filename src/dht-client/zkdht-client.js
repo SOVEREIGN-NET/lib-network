@@ -17,7 +17,7 @@ class ZkDHTClient {
     }
 
     async initialize(identity = null) {
-        console.log('🌐 Initializing zkDHT client...');
+        console.log('Initializing zkDHT client...');
         
         this.identity = identity;
         
@@ -26,7 +26,7 @@ class ZkDHTClient {
             if (identity && this.dhtApi) {
                 const dhtInitialized = await this.dhtApi.initialize(identity);
                 if (dhtInitialized) {
-                    console.log('✅ DHT API bridge initialized with lib-storage backend');
+                    console.log('DHT API bridge initialized with lib-storage backend');
                 }
             }
             
@@ -37,10 +37,10 @@ class ZkDHTClient {
             await this.discoverPeers();
             
             this.isConnected = true;
-            console.log('✅ zkDHT client initialized successfully');
+            console.log('zkDHT client initialized successfully');
             
         } catch (error) {
-            console.error('❌ Failed to initialize zkDHT client:', error);
+            console.error('Failed to initialize zkDHT client:', error);
             throw error;
         }
     }
@@ -64,7 +64,7 @@ class ZkDHTClient {
         // Try local nodes first (development environment)
         for (const node of localNodes) {
             try {
-                console.log(`🔗 Connecting to local node: ${node}`);
+                console.log(`Connecting to local node: ${node}`);
                 
                 // Use DHT API if available
                 if (this.dhtApi && this.dhtApi.isInitialized) {
@@ -75,17 +75,17 @@ class ZkDHTClient {
                 }
                 
                 this.peers.add(node);
-                console.log(`✅ Connected to local node: ${node}`);
+                console.log(`Connected to local node: ${node}`);
                 return; // Successfully connected to local node
             } catch (error) {
-                console.log(`⚠️ Failed to connect to ${node}, trying next...`);
+                console.log(`Failed to connect to ${node}, trying next...`);
             }
         }
 
         // Fallback to remote bootstrap nodes (production environment)
         for (const node of remoteBootstrapNodes) {
             try {
-                console.log(`🔗 Connecting to bootstrap node: ${node}`);
+                console.log(`Connecting to bootstrap node: ${node}`);
                 
                 // Use DHT API if available
                 if (this.dhtApi && this.dhtApi.isInitialized) {
@@ -98,19 +98,19 @@ class ZkDHTClient {
                 this.peers.add(node);
                 break; // Successfully connected to at least one
             } catch (error) {
-                console.log(`⚠️ Failed to connect to ${node}, trying next...`);
+                console.log(`Failed to connect to ${node}, trying next...`);
             }
         }
 
         if (this.peers.size === 0) {
-            console.log('⚠️ No bootstrap nodes available, operating in standalone mode');
+            console.log('No bootstrap nodes available, operating in standalone mode');
             // Don't throw error - allow operation with mock data
             this.peers.add('zhtp://localhost:8080'); // Add dummy local peer
         }
     }
 
     async discoverPeers() {
-        console.log('👥 Discovering zkDHT peers...');
+        console.log('Discovering zkDHT peers...');
         
         try {
             let discoveredPeers = [];
@@ -127,10 +127,10 @@ class ZkDHTClient {
                 this.peers.add(peer);
             }
             
-            console.log(`✅ Discovered ${discoveredPeers.length} peers`);
+            console.log(`Discovered ${discoveredPeers.length} peers`);
             
         } catch (error) {
-            console.log('⚠️ Peer discovery failed, continuing with bootstrap peers');
+            console.log('Peer discovery failed, continuing with bootstrap peers');
         }
     }
 
@@ -158,11 +158,11 @@ class ZkDHTClient {
             // Cache the content
             this.cache.set(cacheKey, content);
             
-            console.log('✅ Page loaded successfully from zkDHT');
+            console.log('Page loaded successfully from zkDHT');
             return content;
             
         } catch (error) {
-            console.error('❌ Failed to load page from zkDHT:', error);
+            console.error('Failed to load page from zkDHT:', error);
             
             // Fallback to mock content for development
             return this.generateMockContent(zhtpUrl);
@@ -184,7 +184,7 @@ class ZkDHTClient {
     }
 
     async resolveContent(domain, path) {
-        console.log(`🔍 Resolving content for ${domain}${path}...`);
+        console.log(`Resolving content for ${domain}${path}...`);
         
         try {
             let contentHash;
@@ -213,13 +213,13 @@ class ZkDHTClient {
             return contentHash;
             
         } catch (error) {
-            console.error('❌ Content resolution failed:', error);
+            console.error('Content resolution failed:', error);
             throw error;
         }
     }
 
     async fetchContent(contentHash) {
-        console.log(`📥 Fetching content: ${contentHash.substring(0, 16)}...`);
+        console.log(`Fetching content: ${contentHash.substring(0, 16)}...`);
         
         try {
             let content;
@@ -238,7 +238,7 @@ class ZkDHTClient {
                             break;
                         }
                     } catch (error) {
-                        console.log(`⚠️ Failed to fetch from ${peer}, trying next...`);
+                        console.log(`Failed to fetch from ${peer}, trying next...`);
                     }
                 }
                 
@@ -250,7 +250,7 @@ class ZkDHTClient {
             return content;
             
         } catch (error) {
-            console.error('❌ Content fetch failed:', error);
+            console.error('Content fetch failed:', error);
             throw error;
         }
     }
@@ -263,7 +263,7 @@ class ZkDHTClient {
             throw new Error('Content integrity verification failed');
         }
         
-        console.log('✅ Content integrity verified');
+        console.log('Content integrity verified');
     }
 
     async calculateContentHash(content) {
@@ -283,7 +283,7 @@ class ZkDHTClient {
             
             // Use DHT API if available
             if (this.dhtApi && this.dhtApi.isInitialized) {
-                console.log('🔄 Using DHT API for query...');
+                console.log(' Using DHT API for query...');
                 result = await this.dhtApi.queryDHT(query);
             } else {
                 // Check if we have a local node connection (fallback)
@@ -333,7 +333,7 @@ class ZkDHTClient {
             return result;
             
         } catch (error) {
-            console.error('❌ DHT query failed:', error);
+            console.error('DHT query failed:', error);
             throw error;
         }
     }
@@ -495,7 +495,7 @@ class ZkDHTClient {
                                 id: 'post_1',
                                 author: 'alice.zkdid',
                                 avatar: '👩‍💻',
-                                content: 'Just deployed my first Web4 dApp! The zero-knowledge privacy is incredible! 🚀 #Web4 #ZHTP',
+                                content: 'Just deployed my first Web4 dApp! The zero-knowledge privacy is incredible!  #Web4 #ZHTP',
                                 timestamp: '2 hours ago',
                                 likes: 47,
                                 shares: 12,
@@ -607,7 +607,7 @@ class ZkDHTClient {
                         activeChat: 'alice',
                         messages: [
                             { sender: 'alice', content: 'Hey! How\'s the Web4 project going?', time: '2:30 PM', type: 'received' },
-                            { sender: 'me', content: 'Going great! Just deployed the new features 🚀', time: '2:31 PM', type: 'sent' },
+                            { sender: 'me', content: 'Going great! Just deployed the new features ', time: '2:31 PM', type: 'sent' },
                             { sender: 'alice', content: 'Awesome! Can\'t wait to try them out', time: '2:32 PM', type: 'received' }
                         ]
                     },
@@ -642,12 +642,12 @@ class ZkDHTClient {
                         type: 'content',
                         html: `
                             <div style="text-align: center; padding: 2rem;">
-                                <h2>🌐 Welcome to ${domain}</h2>
+                                <h2>Welcome to ${domain}</h2>
                                 <p>This is a Web4 site hosted on the ZHTP network</p>
                                 <p>Content loaded from zkDHT (Zero-Knowledge Distributed Hash Table)</p>
                                 <div style="margin-top: 2rem;">
                                     <button onclick="window.browser?.showNotification('Feature coming soon!', 'info')">
-                                        🚀 Explore Features
+                                         Explore Features
                                     </button>
                                 </div>
                             </div>

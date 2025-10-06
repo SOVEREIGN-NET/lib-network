@@ -3,7 +3,7 @@
 //! Handles LoRaWAN long-range mesh networking for extended coverage
 
 use anyhow::Result;
-use tracing::{info, warn, error};
+use tracing::{info, warn};
 
 /// LoRaWAN mesh protocol handler
 pub struct LoRaWANMeshProtocol {
@@ -43,7 +43,7 @@ impl LoRaWANMeshProtocol {
     
     /// Start LoRaWAN discovery
     pub async fn start_discovery(&self) -> Result<()> {
-        info!("📡 Starting LoRaWAN mesh discovery...");
+        info!("Starting LoRaWAN mesh discovery...");
         
         // In production, this would:
         // 1. Initialize LoRaWAN radio module (e.g., SX1276, SX1301)
@@ -64,7 +64,7 @@ impl LoRaWANMeshProtocol {
         // Start mesh operations
         self.start_mesh_operations().await?;
         
-        info!("✅ LoRaWAN mesh discovery started");
+        info!("LoRaWAN mesh discovery started");
         Ok(())
     }
     
@@ -87,7 +87,7 @@ impl LoRaWANMeshProtocol {
             self.init_macos_lora_radio().await?;
         }
         
-        info!("✅ LoRaWAN radio module initialized");
+        info!("LoRaWAN radio module initialized");
         Ok(())
     }
     
@@ -100,7 +100,7 @@ impl LoRaWANMeshProtocol {
         
         // Check for SX127x/SX130x radio modules via SPI
         if Path::new("/dev/spidev0.0").exists() {
-            info!("🔧 SPI interface found: /dev/spidev0.0");
+            info!("SPI interface found: /dev/spidev0.0");
             
             // Initialize SX1276/SX1302 via SPI
             // In real implementation, would use proper SPI library
@@ -110,7 +110,7 @@ impl LoRaWANMeshProtocol {
                 
             if let Ok(result) = output {
                 if !result.stdout.is_empty() {
-                    info!("✅ SPI module loaded for LoRaWAN radio");
+                    info!("SPI module loaded for LoRaWAN radio");
                 }
             }
         }
@@ -122,7 +122,7 @@ impl LoRaWANMeshProtocol {
         if let Ok(result) = output {
             let usb_devices = String::from_utf8_lossy(&result.stdout);
             if usb_devices.contains("LoRa") || usb_devices.contains("1a86:7523") {
-                info!("📡 USB LoRaWAN adapter detected");
+                info!("USB LoRaWAN adapter detected");
             }
         }
         
@@ -134,7 +134,7 @@ impl LoRaWANMeshProtocol {
     
     #[cfg(target_os = "windows")]
     async fn init_windows_lora_radio(&self) -> Result<()> {
-        info!("🪟 Initializing Windows LoRaWAN radio...");
+        info!("Initializing Windows LoRaWAN radio...");
         
         // Windows would use COM port or USB interfaces for LoRaWAN modules
         // Check for available COM ports
@@ -165,7 +165,7 @@ impl LoRaWANMeshProtocol {
             let devices = String::from_utf8_lossy(&result.stdout);
             for device in devices.lines() {
                 if !device.is_empty() {
-                    info!("� Found USB serial device: {}", device);
+                    info!(" Found USB serial device: {}", device);
                 }
             }
         }
@@ -184,9 +184,9 @@ impl LoRaWANMeshProtocol {
             867_700_000, 867_900_000, // More channels
         ];
         
-        info!("📡 Configured {} EU868 channels", frequencies.len());
+        info!("Configured {} EU868 channels", frequencies.len());
         info!("⚡ Max TX Power: 14 dBm");
-        info!("📶 Spreading Factors: SF7-SF12");
+        info!("Spreading Factors: SF7-SF12");
         info!("🕐 Duty Cycle: 1% (36s per hour)");
         
         Ok(())
@@ -199,24 +199,24 @@ impl LoRaWANMeshProtocol {
         let upstream_channels = (0..64).map(|i| 902_300_000 + i * 200_000).collect::<Vec<_>>();
         let downstream_channels = (0..8).map(|i| 903_000_000 + i * 1_600_000).collect::<Vec<_>>();
         
-        info!("📡 Configured {} upstream channels", upstream_channels.len());
-        info!("📡 Configured {} downstream channels", downstream_channels.len());
+        info!("Configured {} upstream channels", upstream_channels.len());
+        info!("Configured {} downstream channels", downstream_channels.len());
         info!("⚡ Max TX Power: 30 dBm");
-        info!("📶 Spreading Factors: SF7-SF10");
+        info!("Spreading Factors: SF7-SF10");
         
         Ok(())
     }
     
     /// Join LoRaWAN network using OTAA
     async fn join_network(&self) -> Result<()> {
-        info!("🔗 Joining LoRaWAN network via OTAA...");
+        info!("Joining LoRaWAN network via OTAA...");
         
         info!("🔑 Device EUI: {:02X?}", self.device_eui);
         info!("🏢 App EUI: {:02X?}", self.app_eui);
         
         // Real OTAA process
         for attempt in 1..=3 {
-            info!("🔄 Join attempt {} of 3...", attempt);
+            info!(" Join attempt {} of 3...", attempt);
             
             // Send join request
             if let Ok(_) = self.send_join_request().await {
@@ -225,7 +225,7 @@ impl LoRaWANMeshProtocol {
                     // Derive session keys
                     self.derive_session_keys().await?;
                     
-                    info!("✅ Successfully joined LoRaWAN network");
+                    info!("Successfully joined LoRaWAN network");
                     return Ok(());
                 }
             }
@@ -239,7 +239,7 @@ impl LoRaWANMeshProtocol {
     }
     
     async fn send_join_request(&self) -> Result<()> {
-        info!("� Sending join request...");
+        info!(" Sending join request...");
         
         // Create join request packet
         let mut join_request = Vec::new();
@@ -255,7 +255,7 @@ impl LoRaWANMeshProtocol {
         // 2. Transmit via LoRaWAN radio
         // 3. Use appropriate data rate and frequency
         
-        info!("📡 Join request transmitted (DevNonce: 0x{:04X})", dev_nonce);
+        info!("Join request transmitted (DevNonce: 0x{:04X})", dev_nonce);
         Ok(())
     }
     
@@ -272,11 +272,11 @@ impl LoRaWANMeshProtocol {
             
             tokio::time::sleep(delay).await;
             
-            info!("👂 Listening in RX{} window...", window);
+            info!("Listening in RX{} window...", window);
             
             // Simulate receiving join accept
             if rand::random::<f32>() > 0.3 { // 70% success rate per window
-                info!("📨 Join accept received in RX{} window", window);
+                info!("Join accept received in RX{} window", window);
                 return Ok(());
             }
         }
@@ -285,7 +285,7 @@ impl LoRaWANMeshProtocol {
     }
     
     async fn derive_session_keys(&self) -> Result<()> {
-        info!("� Deriving session keys...");
+        info!(" Deriving session keys...");
         
         // In real implementation, would derive:
         // 1. Network Session Key (NwkSKey)
@@ -304,16 +304,16 @@ impl LoRaWANMeshProtocol {
         hasher.update(b"AppSKey");
         let app_s_key = hasher.finalize();
         
-        info!("📊 Network Session Key derived");
-        info!("🔐 Application Session Key derived");
-        info!("🎯 Device address assigned");
+        info!("Network Session Key derived");
+        info!("Application Session Key derived");
+        info!("Device address assigned");
         
         Ok(())
     }
     
     /// Start LoRaWAN mesh operations
     async fn start_mesh_operations(&self) -> Result<()> {
-        info!("🕸️ Starting LoRaWAN mesh operations...");
+        info!("Starting LoRaWAN mesh operations...");
         
         // In production, this would:
         // 1. Start periodic beacon transmission
@@ -332,7 +332,7 @@ impl LoRaWANMeshProtocol {
     
     /// Start beacon transmission for mesh discovery
     async fn start_beacon_transmission(&self) -> Result<()> {
-        info!("📡 Starting LoRaWAN beacon transmission...");
+        info!("Starting LoRaWAN beacon transmission...");
         
         let node_id = self.node_id;
         tokio::spawn(async move {
@@ -344,7 +344,7 @@ impl LoRaWANMeshProtocol {
                 // Create mesh beacon message
                 let beacon = format!("ZHTP_MESH_BEACON:{:02X?}", &node_id[0..4]);
                 
-                info!("📡 Transmitting LoRaWAN mesh beacon: {}", beacon);
+                info!("Transmitting LoRaWAN mesh beacon: {}", beacon);
                 
                 // In production, would transmit via LoRaWAN radio
             }
@@ -355,7 +355,7 @@ impl LoRaWANMeshProtocol {
     
     /// Start listening for mesh messages
     async fn start_message_listening(&self) -> Result<()> {
-        info!("👂 Starting LoRaWAN message listening...");
+        info!("Starting LoRaWAN message listening...");
         
         let node_id = self.node_id;
         tokio::spawn(async move {
@@ -366,7 +366,7 @@ impl LoRaWANMeshProtocol {
                 // Simulate receiving mesh message
                 if rand::random::<f32>() < 0.05 { // 5% chance of receiving message
                     let sender_id = format!("LORA_{:08X}", rand::random::<u32>());
-                    info!("📡 Received LoRaWAN mesh message from: {}", sender_id);
+                    info!("Received LoRaWAN mesh message from: {}", sender_id);
                     
                     // In production, would process and route message
                 }
@@ -384,7 +384,7 @@ impl LoRaWANMeshProtocol {
         let max_payload = self.get_max_payload_size().await?;
         
         if message.len() > max_payload {
-            warn!("⚠️ Message too large for LoRaWAN - fragmenting");
+            warn!("Message too large for LoRaWAN - fragmenting");
             return self.send_fragmented_message(target_address, message).await;
         }
         
@@ -394,7 +394,7 @@ impl LoRaWANMeshProtocol {
         // Transmit frame
         self.transmit_frame(&frame).await?;
         
-        info!("📡 LoRaWAN message transmitted successfully");
+        info!("LoRaWAN message transmitted successfully");
         Ok(())
     }
     
@@ -427,7 +427,7 @@ impl LoRaWANMeshProtocol {
             let frame = self.prepare_lorawan_frame(target_address, &fragment).await?;
             self.transmit_frame(&frame).await?;
             
-            info!("📡 Fragment {}/{} transmitted", fragment_id + 1, total_fragments);
+            info!("Fragment {}/{} transmitted", fragment_id + 1, total_fragments);
             
             // Delay between fragments to respect duty cycle
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
@@ -499,7 +499,7 @@ impl LoRaWANMeshProtocol {
     }
     
     async fn transmit_frame(&self, frame: &[u8]) -> Result<()> {
-        info!("📡 Transmitting LoRaWAN frame: {} bytes", frame.len());
+        info!("Transmitting LoRaWAN frame: {} bytes", frame.len());
         
         // In real implementation, would:
         // 1. Select appropriate channel and data rate
@@ -512,7 +512,7 @@ impl LoRaWANMeshProtocol {
         let data_rate = self.select_data_rate().await?;
         let tx_power = self.select_tx_power().await?;
         
-        info!("📶 Channel: {}, Data Rate: {}, TX Power: {} dBm", 
+        info!("Channel: {}, Data Rate: {}, TX Power: {} dBm", 
               channel, data_rate, tx_power);
         
         // Simulate transmission time

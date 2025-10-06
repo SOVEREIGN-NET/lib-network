@@ -5,6 +5,13 @@ pub mod wifi_direct;
 pub mod lorawan;
 pub mod satellite;
 
+// Enhanced protocol implementations with platform-specific optimizations
+#[cfg(feature = "enhanced-bluetooth")]
+pub mod enhanced_bluetooth;
+
+#[cfg(feature = "enhanced-wifi-direct")]
+pub mod enhanced_wifi_direct;
+
 /// Network protocol enumeration
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum NetworkProtocol {

@@ -4,6 +4,9 @@ pub mod wifi;
 pub mod hardware;
 pub mod lorawan_hardware;
 pub mod geo_location;
+pub mod local_network;
+pub mod network_monitor;
+pub mod smart_routing;
 
 pub use lorawan::*;
 pub use satellite::*;
@@ -11,6 +14,7 @@ pub use wifi::*;
 pub use hardware::*;
 pub use lorawan_hardware::*;
 pub use geo_location::GeographicLocation;
+pub use local_network::*;
 
 use anyhow::Result;
 

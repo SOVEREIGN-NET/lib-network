@@ -1,6 +1,6 @@
 use anyhow::{anyhow, Result};
 use tokio::time::Duration;
-use rand;
+// use rand; // Removed - unused import
 use lib_crypto::PublicKey;
 use crate::discovery::hardware::HardwareCapabilities;
 
@@ -85,7 +85,7 @@ async fn scan_satellite_network(network_name: &str, _satellite_count: u32) -> Re
     // 2. Attempt connection to satellite network
     // 3. Verify signal strength and capabilities
     
-    println!("🔍 Scanning for {} satellite access...", network_name);
+    println!("Scanning for {} satellite access...", network_name);
     tokio::time::sleep(Duration::from_millis(200)).await;
     
     // Only return satellites if real hardware is available

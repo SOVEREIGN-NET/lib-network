@@ -3,7 +3,7 @@
 //! Cross-platform hardware detection for mesh networking protocols
 
 use anyhow::Result;
-use tracing::{info, warn, debug};
+use tracing::{info, debug};
 use std::collections::HashMap;
 
 /// Hardware capabilities detected on the system
@@ -37,7 +37,7 @@ pub struct HardwareDevice {
 impl HardwareCapabilities {
     /// Detect all available hardware capabilities
     pub async fn detect() -> Result<Self> {
-        info!("🔍 Detecting available mesh networking hardware...");
+        info!("Detecting available mesh networking hardware...");
         
         let mut capabilities = Self::default();
         
@@ -50,10 +50,10 @@ impl HardwareCapabilities {
         // Detect WiFi Direct hardware
         capabilities.wifi_direct_available = detect_wifi_direct_hardware(&mut capabilities.hardware_details).await;
         
-        info!("✅ Hardware detection completed:");
-        info!("   📡 LoRaWAN: {}", if capabilities.lorawan_available { "✅ Available" } else { "❌ Not detected" });
-        info!("   📱 Bluetooth LE: {}", if capabilities.bluetooth_available { "✅ Available" } else { "❌ Not detected" });
-        info!("   📶 WiFi Direct: {}", if capabilities.wifi_direct_available { "✅ Available" } else { "❌ Not detected" });
+        info!("Hardware detection completed:");
+        info!("   LoRaWAN: {}", if capabilities.lorawan_available { "Available" } else { "Not detected" });
+        info!("    Bluetooth LE: {}", if capabilities.bluetooth_available { "Available" } else { "Not detected" });
+        info!("   WiFi Direct: {}", if capabilities.wifi_direct_available { "Available" } else { "Not detected" });
         
         Ok(capabilities)
     }
@@ -85,7 +85,7 @@ impl HardwareCapabilities {
 
 /// Detect LoRaWAN hardware across platforms
 async fn detect_lorawan_hardware(hardware_details: &mut HashMap<String, HardwareDevice>) -> bool {
-    debug!("🔍 Detecting LoRaWAN hardware...");
+    debug!("Detecting LoRaWAN hardware...");
     
     #[cfg(target_os = "linux")]
     {
@@ -104,14 +104,14 @@ async fn detect_lorawan_hardware(hardware_details: &mut HashMap<String, Hardware
     
     #[cfg(not(any(target_os = "linux", target_os = "windows", target_os = "macos")))]
     {
-        warn!("⚠️ LoRaWAN hardware detection not implemented for this platform");
+        warn!("LoRaWAN hardware detection not implemented for this platform");
         false
     }
 }
 
 /// Detect Bluetooth hardware across platforms
 async fn detect_bluetooth_hardware(hardware_details: &mut HashMap<String, HardwareDevice>) -> bool {
-    debug!("🔍 Detecting Bluetooth hardware...");
+    debug!("Detecting Bluetooth hardware...");
     
     #[cfg(target_os = "linux")]
     {
@@ -130,14 +130,14 @@ async fn detect_bluetooth_hardware(hardware_details: &mut HashMap<String, Hardwa
     
     #[cfg(not(any(target_os = "linux", target_os = "windows", target_os = "macos")))]
     {
-        warn!("⚠️ Bluetooth hardware detection not implemented for this platform");
+        warn!("Bluetooth hardware detection not implemented for this platform");
         false
     }
 }
 
 /// Detect WiFi Direct hardware across platforms
 async fn detect_wifi_direct_hardware(hardware_details: &mut HashMap<String, HardwareDevice>) -> bool {
-    debug!("🔍 Detecting WiFi Direct hardware...");
+    debug!("Detecting WiFi Direct hardware...");
     
     #[cfg(target_os = "linux")]
     {
@@ -156,7 +156,7 @@ async fn detect_wifi_direct_hardware(hardware_details: &mut HashMap<String, Hard
     
     #[cfg(not(any(target_os = "linux", target_os = "windows", target_os = "macos")))]
     {
-        warn!("⚠️ WiFi Direct hardware detection not implemented for this platform");
+        warn!("WiFi Direct hardware detection not implemented for this platform");
         false
     }
 }
@@ -173,7 +173,7 @@ async fn detect_linux_lorawan_hardware(hardware_details: &mut HashMap<String, Ha
     // Check for SPI devices (common for LoRaWAN modules like SX127x, SX130x)
     for spi_device in ["/dev/spidev0.0", "/dev/spidev0.1", "/dev/spidev1.0", "/dev/spidev1.1"] {
         if Path::new(spi_device).exists() {
-            debug!("🔧 Found SPI device: {}", spi_device);
+            debug!("Found SPI device: {}", spi_device);
             
             // Try to detect LoRaWAN module on this SPI bus
             if let Ok(device_info) = detect_spi_lorawan_module(spi_device).await {
@@ -227,7 +227,7 @@ async fn detect_linux_lorawan_hardware(hardware_details: &mut HashMap<String, Ha
         
         for address in &lorawan_i2c_addresses {
             if i2c_output.contains(address) {
-                debug!("📡 Found potential LoRaWAN I2C device at address: {}", address);
+                debug!("Found potential LoRaWAN I2C device at address: {}", address);
                 
                 hardware_details.insert(
                     format!("lorawan_i2c_{}", address),
@@ -257,7 +257,7 @@ async fn detect_linux_lorawan_hardware(hardware_details: &mut HashMap<String, Ha
                         for entry in entries.flatten() {
                             if let Ok(content) = fs::read_to_string(entry.path()) {
                                 if content.to_lowercase().contains("lora") {
-                                    debug!("📡 LoRaWAN HAT detected via device tree");
+                                    debug!("LoRaWAN HAT detected via device tree");
                                     
                                     hardware_details.insert(
                                         "lorawan_hat".to_string(),
@@ -287,7 +287,7 @@ async fn detect_spi_lorawan_module(spi_device: &str) -> Result<HardwareDevice> {
     use std::fs::OpenOptions;
     use std::io::{Read, Write};
     
-    debug!("🔍 Testing SPI device for LoRaWAN module: {}", spi_device);
+    debug!("Testing SPI device for LoRaWAN module: {}", spi_device);
     
     // Try to open SPI device
     let mut file = OpenOptions::new()
@@ -303,7 +303,7 @@ async fn detect_spi_lorawan_module(spi_device: &str) -> Result<HardwareDevice> {
     if file.write_all(&test_command).is_ok() && file.read_exact(&mut response).is_ok() {
         // Check if response looks like a LoRaWAN module
         if response[0] != 0xFF && response[0] != 0x00 {
-            debug!("📡 Potential LoRaWAN module detected on {}", spi_device);
+            debug!("Potential LoRaWAN module detected on {}", spi_device);
             
             return Ok(HardwareDevice {
                 name: format!("LoRaWAN SPI Module ({})", spi_device),
@@ -329,7 +329,7 @@ async fn detect_linux_bluetooth_hardware(hardware_details: &mut HashMap<String, 
         let bluetooth_info = String::from_utf8_lossy(&output.stdout);
         
         if bluetooth_info.contains("Controller") && !bluetooth_info.contains("No default controller") {
-            debug!("📱 Bluetooth controller detected");
+            debug!(" Bluetooth controller detected");
             
             // Parse controller information
             if let Some(controller_line) = bluetooth_info.lines().find(|line| line.contains("Controller")) {
@@ -353,7 +353,7 @@ async fn detect_linux_bluetooth_hardware(hardware_details: &mut HashMap<String, 
     if let Ok(output) = Command::new("hciconfig").output() {
         let hci_info = String::from_utf8_lossy(&output.stdout);
         if hci_info.contains("hci0") {
-            debug!("📱 Bluetooth HCI interface detected");
+            debug!(" Bluetooth HCI interface detected");
             return true;
         }
     }
@@ -375,7 +375,7 @@ async fn detect_linux_wifi_direct_hardware(hardware_details: &mut HashMap<String
                 let capabilities = String::from_utf8_lossy(&p2p_output.stdout);
                 
                 if capabilities.contains("P2P-client") || capabilities.contains("P2P-GO") {
-                    debug!("📶 WiFi Direct (P2P) support detected");
+                    debug!("WiFi Direct (P2P) support detected");
                     
                     hardware_details.insert(
                         "wifi_direct".to_string(),
@@ -431,7 +431,7 @@ async fn detect_windows_lorawan_hardware(hardware_details: &mut HashMap<String, 
         let device_output = String::from_utf8_lossy(&output.stdout);
         
         if !device_output.trim().is_empty() {
-            debug!("📡 Potential LoRaWAN devices found in Device Manager");
+            debug!("Potential LoRaWAN devices found in Device Manager");
             
             for line in device_output.lines() {
                 if line.contains("OK") && (line.contains("LoRa") || line.contains("CH340") || line.contains("CP210")) {
@@ -501,7 +501,7 @@ async fn detect_windows_bluetooth_hardware(hardware_details: &mut HashMap<String
         let bluetooth_info = String::from_utf8_lossy(&output.stdout);
         
         if !bluetooth_info.trim().is_empty() {
-            debug!("📱 Bluetooth hardware detected via WMI");
+            debug!(" Bluetooth hardware detected via WMI");
             
             hardware_details.insert(
                 "bluetooth_windows".to_string(),
@@ -531,7 +531,7 @@ async fn detect_windows_wifi_direct_hardware(hardware_details: &mut HashMap<Stri
         .output() {
         
         if output.status.success() {
-            debug!("📶 WiFi interface detected");
+            debug!("WiFi interface detected");
             
             // WiFi Direct support is generally available on Windows 8+ with compatible hardware
             hardware_details.insert(
@@ -586,7 +586,7 @@ async fn detect_macos_lorawan_hardware(hardware_details: &mut HashMap<String, Ha
         let usb_info = String::from_utf8_lossy(&output.stdout);
         
         if usb_info.contains("CH340") || usb_info.contains("CP210") || usb_info.contains("FTDI") {
-            debug!("📡 Potential LoRaWAN USB adapter detected");
+            debug!("Potential LoRaWAN USB adapter detected");
             lorawan_found = true;
         }
     }
@@ -622,7 +622,7 @@ async fn detect_macos_bluetooth_hardware(hardware_details: &mut HashMap<String, 
         let bluetooth_info = String::from_utf8_lossy(&output.stdout);
         
         if bluetooth_info.contains("Bluetooth") && !bluetooth_info.contains("No information found") {
-            debug!("📱 Bluetooth hardware detected");
+            debug!(" Bluetooth hardware detected");
             
             hardware_details.insert(
                 "bluetooth_macos".to_string(),
@@ -654,7 +654,7 @@ async fn detect_macos_wifi_direct_hardware(hardware_details: &mut HashMap<String
         let network_info = String::from_utf8_lossy(&output.stdout);
         
         if network_info.contains("Wi-Fi") {
-            debug!("📶 WiFi hardware detected");
+            debug!("WiFi hardware detected");
             
             hardware_details.insert(
                 "wifi_direct_macos".to_string(),

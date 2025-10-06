@@ -60,13 +60,13 @@ This document explains the correct architectural implementation where **lib-stor
 - `content/` module - Content management and access control
 
 **Responsibilities:**
-- ✅ Implement Kademlia DHT protocol
-- ✅ Manage DHT routing tables
-- ✅ Handle peer discovery and management
-- ✅ Provide economic storage contracts
-- ✅ Store and replicate content across the network
-- ✅ Handle erasure coding for reliability
-- ✅ Manage identity credentials storage
+- Implement Kademlia DHT protocol
+- Manage DHT routing tables
+- Handle peer discovery and management
+- Provide economic storage contracts
+- Store and replicate content across the network
+- Handle erasure coding for reliability
+- Manage identity credentials storage
 
 ### lib-network (DHT Client Layer)
 
@@ -79,11 +79,11 @@ This document explains the correct architectural implementation where **lib-stor
 - Web4 page serving capabilities
 
 **Responsibilities:**
-- ✅ Provide client API for DHT operations
-- ✅ Cache frequently accessed content
-- ✅ Integrate DHT with mesh networking protocols
-- ✅ Serve Web4 applications through DHT
-- ✅ Handle client-side routing and discovery
+- Provide client API for DHT operations
+- Cache frequently accessed content
+- Integrate DHT with mesh networking protocols
+- Serve Web4 applications through DHT
+- Handle client-side routing and discovery
 
 ## Integration Flow
 

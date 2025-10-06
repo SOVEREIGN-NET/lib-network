@@ -20,8 +20,11 @@ pub use crate::discovery::*;
 pub use crate::relays::*;
 
 
-// DHT client integration with lib-storage backend
-pub use crate::dht::{DHTClient, initialize_dht_client, serve_web4_page};
+// Native binary DHT protocol with lib-storage backend
+pub use crate::dht::{DHTClient, initialize_dht_client, serve_web4_page, call_native_dht_client};
+
+// Web4 domain registry and content publishing
+pub use crate::web4::{Web4Manager, DomainRegistry, ContentPublisher, initialize_web4_system};
 
 // Core modules
 pub mod types;
@@ -37,7 +40,8 @@ pub mod monitoring;
 pub mod zk_integration;
 pub mod testing;
 pub mod platform;
-pub mod dht; // DHT client layer that uses lib-storage
+pub mod dht; // Native binary DHT protocol with lib-storage backend
+pub mod web4; // Web4 domain registry and content publishing
 
 // External dependencies for economics, API, and storage
 pub use lib_economy as economics;
@@ -118,7 +122,7 @@ pub async fn get_latency_statistics() -> Result<LatencyStatistics> {
 
 /// Initialize complete mesh network with DHT client integration
 pub async fn initialize_mesh_with_dht(identity: lib_identity::ZhtpIdentity) -> Result<(ZhtpMeshServer, DHTClient)> {
-    info!("🌐 Initializing complete mesh network with DHT integration...");
+    info!("Initializing complete mesh network with DHT integration...");
     
     // Initialize mesh server
     let mesh_server = crate::testing::test_utils::create_test_mesh_server().await?;
@@ -126,7 +130,7 @@ pub async fn initialize_mesh_with_dht(identity: lib_identity::ZhtpIdentity) -> R
     // Initialize DHT client with lib-storage backend
     let dht_client = initialize_dht_client(identity).await?;
     
-    info!("✅ Mesh network with DHT client integration ready");
+    info!("Mesh network with DHT client integration ready");
     Ok((mesh_server, dht_client))
 }
 
@@ -135,7 +139,7 @@ pub async fn serve_web4_page_through_mesh(
     dht_client: &mut DHTClient, 
     url: &str
 ) -> Result<serde_json::Value> {
-    info!("🌐 Serving Web4 page through integrated mesh+DHT: {}", url);
+    info!("Serving Web4 page through integrated mesh+DHT: {}", url);
     
     // Use the DHT client to serve the page through lib-storage backend
     serve_web4_page(dht_client, url).await

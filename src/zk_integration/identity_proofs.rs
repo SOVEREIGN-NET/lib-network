@@ -101,7 +101,7 @@ impl IdentityCircuit {
             Some(proof),
         );
         
-        info!("✅ Generated identity verification proof");
+        info!("Generated identity verification proof");
         Ok(zk_proof)
     }
     
@@ -147,7 +147,7 @@ impl IdentityCircuit {
         // Verify proof using the real ZK system
         let is_valid = zk_system.verify_identity(&plonky2_proof)?;
         
-        info!("🔍 Identity proof verification result: {}", is_valid);
+        info!("Identity proof verification result: {}", is_valid);
         Ok(is_valid)
     }
 }
@@ -193,7 +193,7 @@ pub async fn generate_identity_proof() -> Result<Vec<u8>> {
 
 /// Generate identity proof with custom parameters
 pub async fn generate_identity_proof_with_params(params: &IdentityProofParams) -> Result<Vec<u8>> {
-    info!("🆔 Generating real identity proof for mesh network participation...");
+    info!("Generating real identity proof for mesh network participation...");
     
     // Initialize the real ZK proof system
     let zk_system = ZkProofSystem::new()?;
@@ -211,7 +211,7 @@ pub async fn generate_identity_proof_with_params(params: &IdentityProofParams) -
     };
     let credential_hash = generate_credential_hash(identity_secret, age)?;
     
-    info!("🔐 Identity parameters generated: age={}, min_age_required={}, jurisdiction={}, required_jurisdiction={}", 
+    info!("Identity parameters generated: age={}, min_age_required={}, jurisdiction={}, required_jurisdiction={}", 
           age, params.min_age, jurisdiction_hash, params.required_jurisdiction);
     
     // Create identity circuit
@@ -233,7 +233,7 @@ pub async fn generate_identity_proof_with_params(params: &IdentityProofParams) -
         params.verification_level,
     )?;
     
-    info!("✅ Generated identity proof with age={}, jurisdiction={}, min_age={}, required_jurisdiction={}", 
+    info!("Generated identity proof with age={}, jurisdiction={}, min_age={}, required_jurisdiction={}", 
           age, jurisdiction_hash, params.min_age, params.required_jurisdiction);
 
     // Convert Plonky2Proof to ZkProof for serialization
@@ -248,7 +248,7 @@ pub async fn generate_identity_proof_with_params(params: &IdentityProofParams) -
     // Serialize the proof for network transmission
     let proof_bytes = serialize_identity_proof(&zk_proof)?;
     
-    info!("✅ Real identity proof generated: {} bytes", proof_bytes.len());
+    info!("Real identity proof generated: {} bytes", proof_bytes.len());
     Ok(proof_bytes)
 }
 
@@ -259,7 +259,7 @@ pub async fn verify_identity_proof(proof_bytes: &[u8]) -> Result<bool> {
 
 /// Verify identity proof with custom parameters
 pub async fn verify_identity_proof_with_params(proof_bytes: &[u8], params: &IdentityProofParams) -> Result<bool> {
-    info!("🔍 Verifying real identity proof...");
+    info!("Verifying real identity proof...");
     
     // Initialize the real ZK proof system
     let zk_system = ZkProofSystem::new()?;
@@ -340,27 +340,27 @@ pub async fn verify_identity_proof_with_params(proof_bytes: &[u8], params: &Iden
         0 // Default no jurisdiction requirement
     };
     
-    info!("🔍 Proof validation: actual_age={}, required_min_age={}, actual_jurisdiction={}, required_jurisdiction={}", 
+    info!("Proof validation: actual_age={}, required_min_age={}, actual_jurisdiction={}, required_jurisdiction={}", 
           actual_age, params.min_age, actual_jurisdiction, params.required_jurisdiction);
     
     // Validate proof parameters match requirements - this is the key validation
     if actual_age < params.min_age {
-        warn!("⚠️ Identity proof age requirement not satisfied: {} < {}", actual_age, params.min_age);
+        warn!("Identity proof age requirement not satisfied: {} < {}", actual_age, params.min_age);
         return Ok(false);
     }
     
     if params.required_jurisdiction != 0 && actual_jurisdiction != params.required_jurisdiction {
-        warn!("⚠️ Identity proof jurisdiction requirement not satisfied: {} != {}", actual_jurisdiction, params.required_jurisdiction);
+        warn!("Identity proof jurisdiction requirement not satisfied: {} != {}", actual_jurisdiction, params.required_jurisdiction);
         return Ok(false);
     }
     
     if public_inputs.verification_level < params.verification_level {
-        warn!("⚠️ Identity proof verification level insufficient: {} < {}", public_inputs.verification_level, params.verification_level);
+        warn!("Identity proof verification level insufficient: {} < {}", public_inputs.verification_level, params.verification_level);
         return Ok(false);
     }
     
     if public_inputs.verification_level < params.verification_level {
-        warn!("⚠️ Identity proof verification level insufficient: {} < {}", public_inputs.verification_level, params.verification_level);
+        warn!("Identity proof verification level insufficient: {} < {}", public_inputs.verification_level, params.verification_level);
         return Ok(false);
     }
     
@@ -381,13 +381,13 @@ pub async fn verify_identity_proof_with_params(proof_bytes: &[u8], params: &Iden
             
             // Validate actual age meets verification requirement
             if actual_age < params.min_age {
-                warn!("⚠️ Actual age {} does not meet minimum requirement {}", actual_age, params.min_age);
+                warn!("Actual age {} does not meet minimum requirement {}", actual_age, params.min_age);
                 return Ok(false);
             }
             
             // Validate jurisdiction if required
             if params.required_jurisdiction != 0 && actual_jurisdiction != params.required_jurisdiction {
-                warn!("⚠️ Actual jurisdiction {} does not match requirement {}", actual_jurisdiction, params.required_jurisdiction);
+                warn!("Actual jurisdiction {} does not match requirement {}", actual_jurisdiction, params.required_jurisdiction);
                 return Ok(false);
             }
         }
@@ -398,9 +398,9 @@ pub async fn verify_identity_proof_with_params(proof_bytes: &[u8], params: &Iden
         .map_err(|e| anyhow!("Identity proof verification failed: {}", e))?;
     
     if is_valid {
-        info!("✅ Identity proof verification successful");
+        info!("Identity proof verification successful");
     } else {
-        warn!("❌ Identity proof verification failed");
+        warn!("Identity proof verification failed");
     }
     
     Ok(is_valid)

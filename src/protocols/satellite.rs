@@ -3,7 +3,7 @@
 //! Handles satellite uplink mesh networking for global coverage
 
 use anyhow::Result;
-use tracing::{info, warn, error};
+use tracing::{info, warn};
 
 /// Satellite mesh protocol handler
 pub struct SatelliteMeshProtocol {
@@ -66,13 +66,13 @@ impl SatelliteMeshProtocol {
         // Start global mesh operations
         self.start_global_mesh_operations().await?;
         
-        info!("✅ Satellite mesh discovery started");
+        info!("Satellite mesh discovery started");
         Ok(())
     }
     
     /// Search for available satellite constellations
     async fn search_constellations(&self) -> Result<()> {
-        info!("🔍 Searching for satellite constellations...");
+        info!("Searching for satellite constellations...");
         
         // In production, this would:
         // 1. Scan for satellite signals
@@ -100,7 +100,7 @@ impl SatelliteMeshProtocol {
     
     /// Establish satellite connection
     async fn establish_satellite_connection(&self) -> Result<()> {
-        info!("🔗 Establishing satellite connection...");
+        info!("Establishing satellite connection...");
         
         // In production, this would:
         // 1. Point antenna toward selected satellite
@@ -109,7 +109,7 @@ impl SatelliteMeshProtocol {
         // 4. Configure uplink/downlink parameters
         // 5. Test connection quality
         
-        info!("📡 Terminal ID: {}", self.terminal_id);
+        info!("Terminal ID: {}", self.terminal_id);
         info!("🛰️ Targeting {:?} constellation", self.constellation);
         
         // Simulate connection establishment
@@ -117,12 +117,12 @@ impl SatelliteMeshProtocol {
         
         // Simulate connection success/failure
         if rand::random::<f32>() > 0.2 { // 80% success rate
-            info!("✅ Satellite connection established");
-            info!("📊 Uplink: 50 Mbps, Downlink: 150 Mbps");
-            info!("⏱️ Latency: 25ms (LEO constellation)");
-            info!("🌍 Global coverage: ACTIVE");
+            info!("Satellite connection established");
+            info!("Uplink: 50 Mbps, Downlink: 150 Mbps");
+            info!("Latency: 25ms (LEO constellation)");
+            info!("Global coverage: ACTIVE");
         } else {
-            warn!("❌ Satellite connection failed - weather interference");
+            warn!("Satellite connection failed - weather interference");
             return Err(anyhow::anyhow!("Satellite connection failed"));
         }
         
@@ -131,7 +131,7 @@ impl SatelliteMeshProtocol {
     
     /// Start global mesh operations via satellite
     async fn start_global_mesh_operations(&self) -> Result<()> {
-        info!("🌍 Starting global satellite mesh operations...");
+        info!("Starting global satellite mesh operations...");
         
         // In production, this would:
         // 1. Register with global mesh registry
@@ -150,7 +150,7 @@ impl SatelliteMeshProtocol {
     
     /// Start global mesh beacon via satellite
     async fn start_global_beacon(&self) -> Result<()> {
-        info!("🌍 Starting global satellite beacon...");
+        info!("Starting global satellite beacon...");
         
         let node_id = self.node_id;
         let terminal_id = self.terminal_id.clone();
@@ -194,7 +194,7 @@ impl SatelliteMeshProtocol {
                         4 => "South America",
                         _ => "Oceania",
                     };
-                    info!("🌍 Received global mesh message from: {}", sender_continent);
+                    info!("Received global mesh message from: {}", sender_continent);
                     
                     // In production, would route message globally
                 }
@@ -217,7 +217,7 @@ impl SatelliteMeshProtocol {
         
         // Calculate transmission cost (satellite bandwidth is expensive)
         let transmission_cost = (message.len() as f64 * 0.001).max(0.01); // $0.001 per byte, min $0.01
-        info!("💰 Satellite transmission cost: ${:.3}", transmission_cost);
+        info!("Satellite transmission cost: ${:.3}", transmission_cost);
         
         Ok(())
     }

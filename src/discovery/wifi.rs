@@ -1,5 +1,5 @@
 use anyhow::Result;
-use tokio::time::Duration;
+// use tokio::time::Duration; // Removed - unused import
 use rand;
 use crate::types::wifi_security::WiFiSecurity;
 use crate::discovery::hardware::HardwareCapabilities;
@@ -30,12 +30,12 @@ pub async fn discover_wifi_relays() -> Result<Vec<WiFiNetworkInfo>> {
 pub async fn discover_wifi_relays_with_capabilities(capabilities: &HardwareCapabilities) -> Result<Vec<WiFiNetworkInfo>> {
     // Check if WiFi Direct hardware is available first
     if !capabilities.wifi_direct_available {
-        println!("📶 WiFi Direct hardware not detected - skipping relay discovery");
+        println!("WiFi Direct hardware not detected - skipping relay discovery");
         return Ok(Vec::new());
     }
     
     // REAL WiFi network scanning for relay-enabled networks
-    println!("📶 Scanning for ZHTP mesh relay networks...");
+    println!("Scanning for ZHTP mesh relay networks...");
     
     let mut discovered_networks = Vec::new();
     
@@ -55,9 +55,9 @@ pub async fn discover_wifi_relays_with_capabilities(capabilities: &HardwareCapab
     
     // Only report real networks found - no fake data
     if discovered_networks.is_empty() {
-        println!("📶 No ZHTP WiFi relay networks detected");
+        println!("No ZHTP WiFi relay networks detected");
     } else {
-        println!("📶 Discovered {} ZHTP mesh relay networks", discovered_networks.len());
+        println!("Discovered {} ZHTP mesh relay networks", discovered_networks.len());
     }
     
     Ok(discovered_networks)
@@ -65,7 +65,7 @@ pub async fn discover_wifi_relays_with_capabilities(capabilities: &HardwareCapab
 
 /// Scan specific WiFi channel for networks
 async fn scan_wifi_channel(channel: u8) -> Result<Vec<WiFiNetworkInfo>> {
-    println!("🔍 Scanning WiFi channel {} for networks...", channel);
+    println!("Scanning WiFi channel {} for networks...", channel);
     
     #[cfg(target_os = "linux")]
     {
@@ -82,8 +82,11 @@ async fn scan_wifi_channel(channel: u8) -> Result<Vec<WiFiNetworkInfo>> {
         return macos_scan_wifi_channel(channel).await;
     }
     
-    // Fallback for other platforms
-    Ok(vec![])
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    {
+        // Fallback for other platforms
+        Ok(vec![])
+    }
 }
 
 #[cfg(target_os = "linux")]
@@ -300,28 +303,11 @@ fn parse_airport_output(output: &str, target_channel: u8) -> Result<Vec<WiFiNetw
     Ok(networks)
 }
 
-fn estimate_channel_from_signal(signal: i32) -> u8 {
-    // Simple heuristic to estimate channel
-    match signal {
-        -30..=-20 => 6,   // Strong signal, probably 2.4GHz
-        -50..=-31 => 11,  // Medium signal
-        -70..=-51 => 1,   // Weaker signal
-        _ => 36,          // Very weak, assume 5GHz
-    }
-}
 
-fn estimate_bandwidth_from_signal(signal: i32) -> u32 {
-    match signal {
-        -30..=-20 => 300,  // Excellent signal
-        -50..=-31 => 150,  // Good signal
-        -70..=-51 => 54,   // Fair signal
-        _ => 11,           // Poor signal
-    }
-}
 
 /// Discover WiFi Direct peers for mesh networking
 pub async fn discover_wifi_direct_peers() -> Result<Vec<WiFiNetworkInfo>> {
-    println!("📱 Scanning for WiFi Direct peers...");
+    println!(" Scanning for WiFi Direct peers...");
     
     #[cfg(target_os = "linux")]
     {
@@ -338,8 +324,11 @@ pub async fn discover_wifi_direct_peers() -> Result<Vec<WiFiNetworkInfo>> {
         return macos_discover_wifi_direct_peers().await;
     }
     
-    // Fallback for other platforms
-    Ok(vec![])
+    #[cfg(not(any(target_os = "linux", target_os = "windows", target_os = "macos")))]
+    {
+        // Fallback for other platforms
+        Ok(vec![])
+    }
 }
 
 #[cfg(target_os = "linux")]
@@ -470,7 +459,7 @@ async fn windows_discover_wifi_direct_peers() -> Result<Vec<WiFiNetworkInfo>> {
 async fn macos_discover_wifi_direct_peers() -> Result<Vec<WiFiNetworkInfo>> {
     // macOS doesn't have native WiFi Direct support
     // Would need to use third-party solutions or Bluetooth for P2P
-    println!("📱 macOS WiFi Direct not natively supported, using fallback discovery");
+    println!(" macOS WiFi Direct not natively supported, using fallback discovery");
     
     Ok(vec![])
 }

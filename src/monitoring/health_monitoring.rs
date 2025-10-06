@@ -43,7 +43,7 @@ impl HealthMonitor {
     
     /// Start network health monitoring
     pub async fn start_monitoring(&self) -> Result<()> {
-        info!("🔍 Starting network health monitoring...");
+        info!("Starting network health monitoring...");
         
         // Set monitoring active
         *self.monitoring_active.write().await = true;
@@ -54,7 +54,7 @@ impl HealthMonitor {
         self.start_relay_health_check().await?;
         self.start_coverage_analysis().await?;
         
-        info!("✅ Network health monitoring started");
+        info!(" Network health monitoring started");
         Ok(())
     }
     
@@ -65,7 +65,7 @@ impl HealthMonitor {
         // Set monitoring inactive
         *self.monitoring_active.write().await = false;
         
-        info!("✅ Network health monitoring stopped");
+        info!(" Network health monitoring stopped");
         Ok(())
     }
     
@@ -129,16 +129,15 @@ impl HealthMonitor {
                     .map(|conn| conn.data_transferred)
                     .sum();
                 
-                info!("📊 Network Health Update:");
-                info!("   🔗 Active connections: {}", network_stats.active_connections);
-                let mesh_conn_final_read = mesh_connections.read().await;
-                info!("   📊 Mesh connections: {}", mesh_conn_final_read.len());
-                info!("   📡 Long-range relays: {}", network_stats.long_range_relays);
-                info!("   📊 Data routed: {:.2} MB", network_stats.total_data_routed as f64 / 1_000_000.0);
-                info!("   ⏱️ Average latency: {} ms", network_stats.average_latency_ms);
-                info!("   🌍 Coverage area: {:.0} km²", network_stats.coverage_area_km2);
-                info!("   👥 People with free internet: {}", network_stats.people_with_free_internet);
-                info!("   💰 UBI distributed: {} tokens", network_stats.total_ubi_distributed);
+                info!("Network Health Update:");
+                info!("   Active connections: {}", network_stats.active_connections);
+                info!("   Mesh connections: {}", mesh_conn_read.len());
+                info!("   Long-range relays: {}", network_stats.long_range_relays);
+                info!("   Data routed: {:.2} MB", network_stats.total_data_routed as f64 / 1_000_000.0);
+                info!("   Average latency: {} ms", network_stats.average_latency_ms);
+                info!("   Coverage area: {:.0} km²", network_stats.coverage_area_km2);
+                info!("   People with free internet: {}", network_stats.people_with_free_internet);
+                info!("   UBI distributed: {} tokens", network_stats.total_ubi_distributed);
             }
         });
         
@@ -195,12 +194,12 @@ impl HealthMonitor {
                 
                 // Remove unhealthy connections
                 for peer_id in unhealthy_connections {
-                    info!("🔄 Removing unhealthy connection: {}", 
+                    info!(" Removing unhealthy connection: {}", 
                           hex::encode(&peer_id.key_id[0..4]));
                     connections.remove(&peer_id);
                 }
                 
-                info!("💚 Connection health check completed: {} active connections", 
+                info!("Connection health check completed: {} active connections", 
                       connections.len());
             }
         });
@@ -239,17 +238,17 @@ impl HealthMonitor {
                         total_throughput += relay.max_throughput_mbps;
                         total_coverage += relay.coverage_radius_km;
                         
-                        info!("✅ Relay {} healthy: {} Mbps, {:.0} km coverage", 
+                        info!(" Relay {} healthy: {} Mbps, {:.0} km coverage", 
                               relay_id, relay.max_throughput_mbps, relay.coverage_radius_km);
                     } else {
-                        warn!("❌ Relay {} unhealthy or unreachable", relay_id);
+                        warn!("Relay {} unhealthy or unreachable", relay_id);
                     }
                 }
                 
-                info!("📡 Relay health summary:");
-                info!("   ✅ Healthy relays: {}/{}", healthy_relays, relays.len());
-                info!("   🚀 Total throughput: {} Mbps", total_throughput);
-                info!("   🌍 Total coverage: {:.0} km", total_coverage);
+                info!("Relay health summary:");
+                info!("    Healthy relays: {}/{}", healthy_relays, relays.len());
+                info!("   Total throughput: {} Mbps", total_throughput);
+                info!("   Total coverage: {:.0} km", total_coverage);
                 
                 // Alert if too few relays are healthy
                 if healthy_relays < relays.len() / 2 {
@@ -300,11 +299,11 @@ impl HealthMonitor {
                     .sum();
                 
                 // Update coverage analysis
-                info!("🌍 Network Coverage Analysis:");
-                info!("   📡 Total relay coverage: {:.0} km", total_relay_coverage);
-                info!("   🛰️ Satellite access: {}", if has_satellite { "✅ GLOBAL" } else { "❌ Regional only" });
-                info!("   🌐 Internet bridges: {}", if has_internet_bridge { "✅ Available" } else { "❌ None" });
-                info!("   � Total mesh bandwidth: {} Mbps", total_mesh_bandwidth);
+                info!("Network Coverage Analysis:");
+                info!("   Total relay coverage: {:.0} km", total_relay_coverage);
+                info!("   🛰️ Satellite access: {}", if has_satellite { " GLOBAL" } else { "Regional only" });
+                info!("   🌐 Internet bridges: {}", if has_internet_bridge { " Available" } else { "None" });
+                info!("  Total mesh bandwidth: {} Mbps", total_mesh_bandwidth);
                 
                 // Coverage quality assessment
                 let coverage_quality = if has_satellite && has_internet_bridge && total_relay_coverage > 1000.0 {
@@ -317,19 +316,19 @@ impl HealthMonitor {
                     "LIMITED"
                 };
                 
-                info!("   🎯 Coverage quality: {}", coverage_quality);
+                info!("   Coverage quality: {}", coverage_quality);
                 
                 // Identify coverage gaps
                 if !has_satellite {
-                    info!("   📋 Recommendation: Add satellite uplinks for global coverage");
+                    info!("   Recommendation: Add satellite uplinks for global coverage");
                 }
                 
                 if !has_internet_bridge {
-                    info!("   📋 Recommendation: Add internet bridges for external connectivity");
+                    info!("   Recommendation: Add internet bridges for external connectivity");
                 }
                 
                 if total_mesh_bandwidth < 100 {
-                    info!("   📋 Recommendation: Encourage more mesh connections for bandwidth");
+                    info!("   Recommendation: Encourage more mesh connections for bandwidth");
                 }
                 
                 // Performance analysis
@@ -340,7 +339,7 @@ impl HealthMonitor {
                     0.0
                 };
                 
-                info!("   📊 Average connection quality: {:.1} Mbps per node", avg_connection_quality);
+                info!("   Average connection quality: {:.1} Mbps per node", avg_connection_quality);
             }
         });
         

@@ -59,11 +59,11 @@ pub async fn generate_ubi_proof(
             let serialized = serde_json::to_vec(&ubi_proof)
                 .map_err(|e| anyhow!("Failed to serialize UBI proof: {}", e))?;
             
-            info!("✅ UBI proof generated successfully ({} bytes)", serialized.len());
+            info!("UBI proof generated successfully ({} bytes)", serialized.len());
             Ok(serialized)
         },
         Err(e) => {
-            error!("❌ Failed to generate UBI proof: {}", e);
+            error!("Failed to generate UBI proof: {}", e);
             Err(anyhow!("UBI proof generation failed: {}", e))
         }
     }
@@ -71,7 +71,7 @@ pub async fn generate_ubi_proof(
 
 /// Verify UBI distribution proof using lib-proofs circuits
 pub async fn verify_ubi_proof(proof: &[u8]) -> Result<bool> {
-    info!("🔍 Verifying UBI distribution proof ({} bytes)", proof.len());
+    info!("Verifying UBI distribution proof ({} bytes)", proof.len());
     
     // Parse the ZK proof
     let zk_proof: lib_proofs::ZeroKnowledgeProof = serde_json::from_slice(proof)
@@ -106,31 +106,31 @@ pub async fn verify_ubi_proof(proof: &[u8]) -> Result<bool> {
         match zk_system.verify_identity(plonky2_proof) {
             Ok(is_valid) => {
                 if is_valid {
-                    info!("✅ UBI distribution proof verified successfully for amount: {}, round: {}", amount, round);
+                    info!("UBI distribution proof verified successfully for amount: {}, round: {}", amount, round);
                     
                     // Additional validation against economics system
                     verify_ubi_economic_constraints(amount, round).await?;
                     
                     Ok(true)
                 } else {
-                    warn!("❌ UBI distribution proof verification failed");
+                    warn!("UBI distribution proof verification failed");
                     Ok(false)
                 }
             },
             Err(e) => {
-                error!("❌ UBI proof verification error: {}", e);
+                error!("UBI proof verification error: {}", e);
                 Ok(false)
             }
         }
     } else {
-        warn!("❌ No plonky2 proof found in UBI proof");
+        warn!("No plonky2 proof found in UBI proof");
         Ok(false)
     }
 }
 
 /// Verify UBI proof meets economic constraints
 async fn verify_ubi_economic_constraints(amount: u64, round: u64) -> Result<bool> {
-    info!("💰 Verifying UBI economic constraints for amount: {}, round: {}", amount, round);
+    info!("Verifying UBI economic constraints for amount: {}, round: {}", amount, round);
     
     // Basic UBI constraints (simplified implementation)
     const MAX_UBI_AMOUNT: u64 = 1000; // Maximum UBI tokens per distribution
@@ -138,7 +138,7 @@ async fn verify_ubi_economic_constraints(amount: u64, round: u64) -> Result<bool
     
     // Check if amount is within acceptable limits
     if amount > MAX_UBI_AMOUNT {
-        warn!("❌ UBI amount {} exceeds maximum {}", amount, MAX_UBI_AMOUNT);
+        warn!("UBI amount {} exceeds maximum {}", amount, MAX_UBI_AMOUNT);
         return Ok(false);
     }
     
@@ -150,12 +150,12 @@ async fn verify_ubi_economic_constraints(amount: u64, round: u64) -> Result<bool
     let estimated_current_round = current_time / 86400; // Daily rounds
     
     if round > estimated_current_round + MAX_ROUNDS_AHEAD {
-        warn!("❌ UBI round {} is too far in the future (estimated current: {})", round, estimated_current_round);
+        warn!("UBI round {} is too far in the future (estimated current: {})", round, estimated_current_round);
         return Ok(false);
     }
     
     // Additional economic validations would go here
-    info!("✅ UBI economic constraints verified");
+    info!("UBI economic constraints verified");
     Ok(true)
 }
 
@@ -174,41 +174,41 @@ pub async fn generate_batch_ubi_proofs(
     let mut proofs = Vec::with_capacity(recipients.len());
     
     for (i, (recipient, &amount)) in recipients.iter().zip(amounts.iter()).enumerate() {
-        info!("🔄 Generating UBI proof {}/{}", i + 1, recipients.len());
+        info!(" Generating UBI proof {}/{}", i + 1, recipients.len());
         
         match generate_ubi_proof(recipient, amount, round).await {
             Ok(proof) => proofs.push(proof),
             Err(e) => {
-                error!("❌ Failed to generate UBI proof for recipient {}: {}", i, e);
+                error!("Failed to generate UBI proof for recipient {}: {}", i, e);
                 return Err(anyhow!("Batch UBI proof generation failed at recipient {}: {}", i, e));
             }
         }
     }
     
-    info!("✅ Generated {} UBI proofs successfully", proofs.len());
+    info!("Generated {} UBI proofs successfully", proofs.len());
     Ok(proofs)
 }
 
 /// Verify batch UBI proofs
 pub async fn verify_batch_ubi_proofs(proofs: &[Vec<u8>]) -> Result<Vec<bool>> {
-    info!("🔍 Verifying batch of {} UBI proofs", proofs.len());
+    info!("Verifying batch of {} UBI proofs", proofs.len());
     
     let mut results = Vec::with_capacity(proofs.len());
     
     for (i, proof) in proofs.iter().enumerate() {
-        info!("🔄 Verifying UBI proof {}/{}", i + 1, proofs.len());
+        info!(" Verifying UBI proof {}/{}", i + 1, proofs.len());
         
         match verify_ubi_proof(proof).await {
             Ok(is_valid) => results.push(is_valid),
             Err(e) => {
-                warn!("❌ UBI proof {} verification failed: {}", i, e);
+                warn!("UBI proof {} verification failed: {}", i, e);
                 results.push(false);
             }
         }
     }
     
     let valid_count = results.iter().filter(|&&v| v).count();
-    info!("✅ Batch UBI verification complete: {}/{} proofs valid", valid_count, proofs.len());
+    info!("Batch UBI verification complete: {}/{} proofs valid", valid_count, proofs.len());
     
     Ok(results)
 }
@@ -217,7 +217,7 @@ pub async fn verify_batch_ubi_proofs(proofs: &[Vec<u8>]) -> Result<Vec<bool>> {
 pub async fn generate_ubi_eligibility_proof(
     identity: &PublicKey,
 ) -> Result<Vec<u8>> {
-    info!("🆔 Generating UBI eligibility proof for identity");
+    info!("Generating UBI eligibility proof for identity");
     
     let _identity_manager = IdentityManager::new();
     
@@ -238,7 +238,7 @@ pub async fn generate_ubi_eligibility_proof(
     let proof_data = format!("UBI_ELIGIBLE:{}", hex::encode(identity.as_bytes()));
     let eligibility_proof = proof_data.into_bytes();
     
-    info!("✅ UBI eligibility proof generated successfully");
+    info!("UBI eligibility proof generated successfully");
     Ok(eligibility_proof)
 }
 
@@ -247,7 +247,7 @@ pub async fn verify_ubi_eligibility_proof(
     proof: &[u8],
     identity: &PublicKey,
 ) -> Result<bool> {
-    info!("🔍 Verifying UBI eligibility proof for identity");
+    info!("Verifying UBI eligibility proof for identity");
     
     let _identity_manager = IdentityManager::new();
     
@@ -259,9 +259,9 @@ pub async fn verify_ubi_eligibility_proof(
     let is_valid = proof_str == expected_proof;
     
     if is_valid {
-        info!("✅ UBI eligibility proof verified successfully");
+        info!("UBI eligibility proof verified successfully");
     } else {
-        warn!("❌ UBI eligibility proof verification failed");
+        warn!("UBI eligibility proof verification failed");
     }
     
     Ok(is_valid)

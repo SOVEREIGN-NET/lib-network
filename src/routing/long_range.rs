@@ -238,7 +238,7 @@ impl LongRangeRoutingManager {
     
     /// Initialize global routing infrastructure
     pub async fn initialize_global_routing(&self) -> Result<()> {
-        info!("🌍 Initializing GLOBAL routing infrastructure...");
+        info!("Initializing GLOBAL routing infrastructure...");
         
         // Initialize satellite constellations
         self.initialize_satellite_constellations().await?;
@@ -255,7 +255,7 @@ impl LongRangeRoutingManager {
         // Initialize backbone routes
         self.initialize_backbone_routes().await?;
         
-        info!("✅ Global routing infrastructure initialized - PLANETARY mesh network ready!");
+        info!("Global routing infrastructure initialized - PLANETARY mesh network ready!");
         Ok(())
     }
     
@@ -339,14 +339,14 @@ impl LongRangeRoutingManager {
             lat += lat_step;
         }
         
-        info!("🌐 Generated {} global coverage areas (radius: {:.0}km each)", 
+        info!("Generated {} global coverage areas (radius: {:.0}km each)", 
               coverage_areas.len(), coverage_radius_km);
         coverage_areas
     }
     
     /// Initialize internet bridges for global connectivity
     async fn initialize_internet_bridges(&self) -> Result<()> {
-        info!("🌐 Initializing internet bridges for global connectivity...");
+        info!("Initializing internet bridges for global connectivity...");
         
         let mut routing_table = self.global_routing_table.write().await;
         
@@ -376,10 +376,10 @@ impl LongRangeRoutingManager {
             };
             
             routing_table.internet_bridges.insert(bridge.bridge_id.clone(), bridge);
-            info!("🌐 Added internet bridge: {} ({} Mbps)", name, bandwidth_mbps);
+            info!("Added internet bridge: {} ({} Mbps)", name, bandwidth_mbps);
         }
         
-        info!("✅ Initialized {} internet bridges for global connectivity", 
+        info!("Initialized {} internet bridges for global connectivity", 
               routing_table.internet_bridges.len());
         Ok(())
     }
@@ -451,14 +451,14 @@ impl LongRangeRoutingManager {
             info!("🌊 Created oceanic relay chain: {} ({:.0}km total)", chain_id, total_distance);
         }
         
-        info!("✅ Initialized {} oceanic relay chains for trans-oceanic routing", 
+        info!("Initialized {} oceanic relay chains for trans-oceanic routing", 
               routing_table.oceanic_relays.len());
         Ok(())
     }
     
     /// Build intercontinental routing table
     async fn build_intercontinental_routes(&self) -> Result<()> {
-        info!("🌍 Building intercontinental routing table...");
+        info!("Building intercontinental routing table...");
         
         let mut routing_table = self.global_routing_table.write().await;
         
@@ -485,7 +485,7 @@ impl LongRangeRoutingManager {
             }
         }
         
-        info!("✅ Built intercontinental routing table for {} continent pairs", 
+        info!("Built intercontinental routing table for {} continent pairs", 
               routing_table.continental_routes.len());
         Ok(())
     }
@@ -612,7 +612,7 @@ impl LongRangeRoutingManager {
     
     /// Initialize backbone routes for high-capacity traffic
     async fn initialize_backbone_routes(&self) -> Result<()> {
-        info!("🚀 Initializing backbone routes for high-capacity intercontinental traffic...");
+        info!(" Initializing backbone routes for high-capacity intercontinental traffic...");
         
         let mut backbone_routes = self.backbone_routes.write().await;
         
@@ -641,11 +641,11 @@ impl LongRangeRoutingManager {
             };
             
             backbone_routes.push(route);
-            info!("🚀 Added backbone route: {:?} → {:?} ({} Gbps)", 
+            info!(" Added backbone route: {:?} → {:?} ({} Gbps)", 
                   source, destination, capacity_gbps);
         }
         
-        info!("✅ Initialized {} backbone routes for high-capacity traffic", 
+        info!("Initialized {} backbone routes for high-capacity traffic", 
               backbone_routes.len());
         Ok(())
     }
@@ -657,7 +657,7 @@ impl LongRangeRoutingManager {
         destination_continent: Continent,
         quality_requirements: RouteQualityRequirements,
     ) -> Result<Vec<RouteHop>> {
-        info!("🌍 Finding optimal global route: {:?} → {:?}", 
+        info!("Finding optimal global route: {:?} → {:?}", 
               source_continent, destination_continent);
         
         let routing_table = self.global_routing_table.read().await;
@@ -670,7 +670,7 @@ impl LongRangeRoutingManager {
                 .collect();
             
             if let Some(best_path) = suitable_paths.first() {
-                info!("✅ Selected {} path with quality {:.2}", 
+                info!("Selected {} path with quality {:.2}", 
                       format!("{:?}", best_path.path_type), best_path.quality_score);
                 
                 // Convert global relay hops to route hops

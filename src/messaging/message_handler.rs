@@ -78,12 +78,12 @@ impl MeshMessageHandler {
         location: Option<crate::types::geographic::GeographicLocation>,
         shared_resources: crate::types::mesh_capability::SharedResources
     ) -> Result<()> {
-        info!("🔍 Discovered peer with {} capabilities", capabilities.len());
+        info!("Discovered peer with {} capabilities", capabilities.len());
         
         // Process peer capabilities for legitimate mesh services
         for capability in &capabilities {
             if let crate::types::mesh_capability::MeshCapability::MeshRelay { capacity_mbps } = capability {
-                info!("🔗 Peer offers mesh relay service: {} Mbps capacity", capacity_mbps);
+                info!("Peer offers mesh relay service: {} Mbps capacity", capacity_mbps);
             }
         }
         
@@ -121,10 +121,10 @@ impl MeshMessageHandler {
         // ZHTP provides direct peer-to-peer mesh routing without ISP bypass
         let relays = self.long_range_relays.read().await;
         if !relays.is_empty() {
-            info!("✅ Mesh relay capacity available for P2P routing");
+            info!("Mesh relay capacity available for P2P routing");
             info!("📤 Sending connectivity acceptance via legitimate mesh routing");
         } else {
-            warn!("❌ No mesh relay nodes available for routing");
+            warn!("No mesh relay nodes available for routing");
             info!("📤 Sending connectivity rejection - no relay capacity");
         }
         
@@ -141,10 +141,10 @@ impl MeshMessageHandler {
         connection_details: Option<crate::types::connection_details::ConnectionDetails>
     ) -> Result<()> {
         if accepted {
-            info!("✅ Connectivity accepted: {} kbps at {} tokens/MB", 
+            info!("Connectivity accepted: {} kbps at {} tokens/MB", 
                   available_bandwidth_kbps, cost_tokens_per_mb);
         } else {
-            info!("❌ Connectivity request denied");
+            info!("Connectivity request denied");
         }
         Ok(())
     }
@@ -157,7 +157,7 @@ impl MeshMessageHandler {
         payload: Vec<u8>, 
         max_hops: u8
     ) -> Result<()> {
-        info!("🌍 GLOBAL long-range route: {} bytes to destination via {} relays", 
+        info!("GLOBAL long-range route: {} bytes to destination via {} relays", 
               payload.len(), relay_chain.len());
         
         // ZHTP supports unlimited global routing through mesh relays
@@ -176,24 +176,24 @@ impl MeshMessageHandler {
                             info!("🛰️ GLOBAL satellite relay: {} - WORLDWIDE coverage", relay_id);
                         }
                         crate::types::relay_type::LongRangeRelayType::LoRaWAN => {
-                            info!("📡 LoRa relay: {} - {}km regional coverage", relay_id, relay.coverage_radius_km);
+                            info!("LoRa relay: {} - {}km regional coverage", relay_id, relay.coverage_radius_km);
                         }
                         crate::types::relay_type::LongRangeRelayType::WiFiRelay => {
-                            info!("🌐 Internet bridge: {} - GLOBAL internet access", relay_id);
+                            info!("Internet bridge: {} - GLOBAL internet access", relay_id);
                         }
                         _ => {
-                            info!("📡 Long-range relay: {} - {}km coverage", relay_id, relay.coverage_radius_km);
+                            info!("Long-range relay: {} - {}km coverage", relay_id, relay.coverage_radius_km);
                         }
                     }
                 }
             }
             
-            info!("🌍 TOTAL GLOBAL REACH: {:.0}km via path: {:?}", 
+            info!("TOTAL GLOBAL REACH: {:.0}km via path: {:?}", 
                   total_distance_km, routing_path);
             
             // With satellite + internet bridges, ZHTP reaches ANYWHERE on Earth!
             if total_distance_km > 10000.0 {
-                info!("🚀 INTERCONTINENTAL ZHTP routing active - Planet-wide mesh network!");
+                info!(" INTERCONTINENTAL ZHTP routing active - Planet-wide mesh network!");
             }
         }
         
@@ -208,14 +208,14 @@ impl MeshMessageHandler {
         distribution_round: u64, 
         proof: Vec<u8>
     ) -> Result<()> {
-        info!("💰 UBI distribution: {} tokens to recipient (round {})", 
+        info!("UBI distribution: {} tokens to recipient (round {})", 
               amount_tokens, distribution_round);
         
         // TODO: Implement UBI proof verification
         let verification_result = true;
         
         if !verification_result {
-            warn!("❌ Invalid ZK proof for UBI distribution - rejecting");
+            warn!("Invalid ZK proof for UBI distribution - rejecting");
             return Err(anyhow::anyhow!("Invalid ZK proof for UBI distribution"));
         }
         
@@ -225,7 +225,7 @@ impl MeshMessageHandler {
         let last_round = pools.get(&last_round_key).unwrap_or(&0);
         
         if distribution_round <= *last_round {
-            warn!("❌ UBI distribution round {} already processed for recipient", distribution_round);
+            warn!("UBI distribution round {} already processed for recipient", distribution_round);
             return Err(anyhow::anyhow!("UBI distribution round already processed"));
         }
         
@@ -236,7 +236,7 @@ impl MeshMessageHandler {
         let recipient_balance_key = format!("ubi_balance_{}", hex::encode(&recipient.key_id[0..8]));
         *pools.entry(recipient_balance_key).or_insert(0) += amount_tokens;
         
-        info!("✅ UBI distribution completed: {} tokens distributed (round {})", 
+        info!("UBI distribution completed: {} tokens distributed (round {})", 
               amount_tokens, distribution_round);
         
         Ok(())
@@ -251,7 +251,7 @@ impl MeshMessageHandler {
         connected_peers: u32, 
         uptime_hours: u32
     ) -> Result<()> {
-        info!("📊 Health report: quality={:.2}, bandwidth={} MB/s, peers={}, uptime={}h", 
+        info!("Health report: quality={:.2}, bandwidth={} MB/s, peers={}, uptime={}h", 
               network_quality, available_bandwidth / 1_000_000, connected_peers, uptime_hours);
         
         // Update connection statistics
@@ -274,7 +274,7 @@ impl MeshMessageHandler {
         body: Vec<u8>,
         timestamp: u64,
     ) -> Result<()> {
-        info!("🌐 Native ZHTP Request: {} {} from {:?}", method, uri, requester);
+        info!("Native ZHTP Request: {} {} from {:?}", method, uri, requester);
         
         // This would route to the ZHTP API handler
         // For now, just log the request
@@ -293,7 +293,7 @@ impl MeshMessageHandler {
         body: Vec<u8>,
         timestamp: u64,
     ) -> Result<()> {
-        info!("📥 ZHTP Response received: {} {} (request_id: {})", status, status_message, request_id);
+        info!("ZHTP Response received: {} {} (request_id: {})", status, status_message, request_id);
         Ok(())
     }
 }

@@ -26,12 +26,12 @@ pub async fn discover_lorawan_gateways() -> Result<Vec<LoRaWANGatewayInfo>> {
 pub async fn discover_lorawan_gateways_with_capabilities(capabilities: &HardwareCapabilities) -> Result<Vec<LoRaWANGatewayInfo>> {
     // Check if LoRaWAN hardware is available first
     if !capabilities.lorawan_available {
-        println!("📡 LoRaWAN hardware not detected - skipping gateway discovery");
+        println!("LoRaWAN hardware not detected - skipping gateway discovery");
         return Ok(Vec::new());
     }
     
     // REAL LoRaWAN gateway discovery using actual radio scanning
-    println!("📡 Scanning for REAL LoRaWAN gateways...");
+    println!("Scanning for REAL LoRaWAN gateways...");
     
     let mut discovered_gateways = Vec::new();
     
@@ -52,9 +52,9 @@ pub async fn discover_lorawan_gateways_with_capabilities(capabilities: &Hardware
     
     // Only report real gateways found - no fake data
     if discovered_gateways.is_empty() {
-        println!("📡 No LoRaWAN gateways detected in area");
+        println!("No LoRaWAN gateways detected in area");
     } else {
-        println!("📡 Discovered {} real LoRaWAN gateways", discovered_gateways.len());
+        println!("Discovered {} real LoRaWAN gateways", discovered_gateways.len());
     }
     
     Ok(discovered_gateways)
@@ -67,7 +67,7 @@ pub async fn discover_lorawan_nodes() -> Result<Vec<LoRaWANGatewayInfo>> {
 
 /// Scan specific LoRaWAN frequency for real gateways
 async fn scan_lorawan_frequency(frequency_hz: u32) -> Result<LoRaWANGatewayInfo> {
-    println!("🔍 Scanning {} Hz for LoRaWAN gateway...", frequency_hz);
+    println!("Scanning {} Hz for LoRaWAN gateway...", frequency_hz);
     
     #[cfg(target_os = "linux")]
     {
@@ -84,8 +84,11 @@ async fn scan_lorawan_frequency(frequency_hz: u32) -> Result<LoRaWANGatewayInfo>
         return macos_scan_lorawan_frequency(frequency_hz).await;
     }
     
-    // Fallback for other platforms
-    Err(anyhow!("LoRaWAN scanning not supported on this platform"))
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    {
+        // Fallback for other platforms
+        Err(anyhow!("LoRaWAN scanning not supported on this platform"))
+    }
 }
 
 #[cfg(target_os = "linux")]
@@ -111,7 +114,7 @@ async fn check_lorawan_hardware() -> bool {
     
     // Check for SPI interface (common for LoRaWAN modules)
     if Path::new("/dev/spidev0.0").exists() {
-        println!("🔧 SPI interface detected for LoRaWAN radio");
+        println!("SPI interface detected for LoRaWAN radio");
         
         // Check for specific LoRaWAN module drivers
         let output = Command::new("lsmod")
@@ -120,7 +123,7 @@ async fn check_lorawan_hardware() -> bool {
         if let Ok(result) = output {
             let modules = String::from_utf8_lossy(&result.stdout);
             if modules.contains("sx125") || modules.contains("sx127") || modules.contains("sx130") {
-                println!("📡 LoRaWAN radio module driver detected");
+                println!("LoRaWAN radio module driver detected");
                 return true;
             }
         }
@@ -152,7 +155,7 @@ async fn check_lorawan_hardware() -> bool {
         
         // Look for common LoRaWAN I2C addresses
         if i2c_scan.contains("48") || i2c_scan.contains("49") {
-            println!("� I2C LoRaWAN device detected");
+            println!(" I2C LoRaWAN device detected");
             return true;
         }
     }
@@ -164,7 +167,7 @@ async fn check_lorawan_hardware() -> bool {
 async fn perform_lorawan_scan(frequency_hz: u32) -> Result<LoRaWANGatewayInfo> {
     use std::process::Command;
     
-    println!("📡 Performing actual LoRaWAN scan on {} Hz...", frequency_hz);
+    println!("Performing actual LoRaWAN scan on {} Hz...", frequency_hz);
     
     // Try to use available LoRaWAN tools
     // Check for ChirpStack Gateway Bridge or similar
@@ -217,7 +220,7 @@ async fn perform_rtl_sdr_lorawan_scan(frequency_hz: u32) -> Result<LoRaWANGatewa
     
     if let Ok(result) = output {
         if !result.stdout.is_empty() {
-            println!("📡 LoRaWAN signal detected on {} Hz", frequency_hz);
+            println!("LoRaWAN signal detected on {} Hz", frequency_hz);
             
             // Analyze signal for gateway characteristics
             let signal_strength = analyze_rtl_sdr_output(&result.stdout);
@@ -236,6 +239,7 @@ async fn perform_rtl_sdr_lorawan_scan(frequency_hz: u32) -> Result<LoRaWANGatewa
     Err(anyhow!("No LoRaWAN gateway signals detected"))
 }
 
+#[allow(dead_code)] // Used in RTL-SDR signal analysis - false positive warning
 fn analyze_rtl_sdr_output(data: &[u8]) -> f64 {
     // Simple signal strength analysis
     let mut power_sum = 0.0;
@@ -253,6 +257,7 @@ fn analyze_rtl_sdr_output(data: &[u8]) -> f64 {
     signal_dbm
 }
 
+#[allow(dead_code)] // Used in signal coverage estimation - false positive warning
 fn estimate_coverage_from_signal(signal_dbm: f64) -> f64 {
     // Estimate coverage radius based on signal strength
     match signal_dbm {

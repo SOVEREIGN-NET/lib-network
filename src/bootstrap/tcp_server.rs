@@ -15,14 +15,14 @@ use uuid::Uuid;
 pub async fn start_tcp_bootstrap_server(server_id: Uuid, port: u16) -> Result<()> {
     let bind_addr = format!("0.0.0.0:{}", port);
     
-    info!("🔧 Starting TCP bootstrap server on {}...", bind_addr);
+    info!("Starting TCP bootstrap server on {}...", bind_addr);
     let listener = match TcpListener::bind(&bind_addr).await {
         Ok(l) => {
-            info!("🔗 TCP bootstrap server listening on {} (all interfaces)", bind_addr);
+            info!("TCP bootstrap server listening on {} (all interfaces)", bind_addr);
             l
         }
         Err(e) => {
-            error!("❌ Failed to bind TCP listener on {}: {}", bind_addr, e);
+            error!("Failed to bind TCP listener on {}: {}", bind_addr, e);
             return Err(anyhow!("TCP listener bind failed: {}", e));
         }
     };
@@ -31,17 +31,17 @@ pub async fn start_tcp_bootstrap_server(server_id: Uuid, port: u16) -> Result<()
         loop {
             match listener.accept().await {
                 Ok((mut stream, addr)) => {
-                    info!("🔗 TCP bootstrap connection from {}", addr);
+                    info!("TCP bootstrap connection from {}", addr);
                     
                     let server_id = server_id;
                     tokio::spawn(async move {
                         if let Err(e) = handle_tcp_bootstrap_connection(&mut stream, addr, server_id).await {
-                            warn!("❌ Error handling TCP bootstrap connection from {}: {}", addr, e);
+                            warn!("Error handling TCP bootstrap connection from {}: {}", addr, e);
                         }
                     });
                 },
                 Err(e) => {
-                    warn!("❌ Failed to accept TCP connection: {}", e);
+                    warn!("Failed to accept TCP connection: {}", e);
                 }
             }
         }
@@ -56,14 +56,14 @@ pub async fn handle_tcp_bootstrap_connection(
     addr: SocketAddr, 
     server_id: Uuid
 ) -> Result<()> {
-    info!("📥 Handling TCP bootstrap from {}", addr);
+    info!("Handling TCP bootstrap from {}", addr);
     
     // Read handshake with timeout
     let mut buffer = [0u8; 4096];
     let n = match timeout(Duration::from_secs(10), stream.read(&mut buffer)).await {
         Ok(Ok(bytes)) => bytes,
         Ok(Err(e)) => {
-            error!("❌ Error reading from TCP bootstrap connection {}: {}", addr, e);
+            error!("Error reading from TCP bootstrap connection {}: {}", addr, e);
             return Err(anyhow!("Read error: {}", e));
         },
         Err(_) => {
@@ -78,7 +78,7 @@ pub async fn handle_tcp_bootstrap_connection(
     }
     
     let handshake_str = String::from_utf8_lossy(&buffer[..n]);
-    info!("📋 TCP bootstrap handshake from {}: {}", addr, handshake_str);
+    info!("TCP bootstrap handshake from {}: {}", addr, handshake_str);
     
     // Try to parse handshake
     match serde_json::from_str::<serde_json::Value>(&handshake_str) {
@@ -86,7 +86,7 @@ pub async fn handle_tcp_bootstrap_connection(
             if handshake.get("type").and_then(|v| v.as_str()) == Some("handshake")
                && handshake.get("protocol").and_then(|v| v.as_str()) == Some("ZHTP") {
                 
-                info!("✅ Valid ZHTP handshake from {}", addr);
+                info!("Valid ZHTP handshake from {}", addr);
                 
                 // Send bootstrap response
                 let response = serde_json::json!({
@@ -108,21 +108,21 @@ pub async fn handle_tcp_bootstrap_connection(
                 let response_str = response.to_string();
                 match timeout(Duration::from_secs(5), stream.write_all(response_str.as_bytes())).await {
                     Ok(Ok(_)) => {
-                        info!("✅ Sent TCP bootstrap response to {}", addr);
+                        info!("Sent TCP bootstrap response to {}", addr);
                     },
                     Ok(Err(e)) => {
-                        error!("❌ Failed to send TCP bootstrap response to {}: {}", addr, e);
+                        error!("Failed to send TCP bootstrap response to {}: {}", addr, e);
                     },
                     Err(_) => {
                         warn!("⏰ Timeout sending TCP bootstrap response to {}", addr);
                     }
                 }
             } else {
-                warn!("❌ Invalid handshake from {}", addr);
+                warn!("Invalid handshake from {}", addr);
             }
         },
         Err(e) => {
-            warn!("❌ Failed to parse handshake from {}: {}", addr, e);
+            warn!("Failed to parse handshake from {}: {}", addr, e);
         }
     }
     

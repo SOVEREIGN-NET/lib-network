@@ -22,7 +22,7 @@ mod tests {
         assert!(proof_str.contains("public_inputs"), "Should contain public_inputs field");
         assert!(proof_str.contains("verification_key_hash"), "Should contain verification_key_hash field");
         
-        println!("✅ Identity proof generation test passed: {} bytes", proof_bytes.len());
+        println!("Identity proof generation test passed: {} bytes", proof_bytes.len());
         Ok(())
     }
 
@@ -37,7 +37,7 @@ mod tests {
         let is_valid = verify_identity_proof(&proof_bytes).await?;
         assert!(is_valid, "Generated identity proof should be valid");
         
-        println!("✅ Identity proof verification test passed");
+        println!("Identity proof verification test passed");
         Ok(())
     }
 
@@ -58,7 +58,7 @@ mod tests {
         let is_valid = verify_identity_proof_with_params(&proof_bytes, &custom_params).await?;
         assert!(is_valid, "Identity proof should be valid with matching parameters");
         
-        println!("✅ Custom parameter identity proof test passed");
+        println!("Custom parameter identity proof test passed");
         Ok(())
     }
 
@@ -85,7 +85,7 @@ mod tests {
         let is_valid = verify_identity_proof_with_params(&proof_bytes, &verification_params).await?;
         assert!(!is_valid, "Identity proof should be invalid with mismatched parameters");
         
-        println!("✅ Parameter mismatch test passed");
+        println!("Parameter mismatch test passed");
         Ok(())
     }
 
@@ -107,7 +107,7 @@ mod tests {
         let wrong_result = verify_identity_proof(wrong_structure).await;
         assert!(wrong_result.is_err(), "Wrong structure should fail verification");
         
-        println!("✅ Invalid data test passed");
+        println!("Invalid data test passed");
         Ok(())
     }
 
@@ -133,7 +133,7 @@ mod tests {
         let proof_str = String::from_utf8(proof_bytes)?;
         assert!(proof_str.contains("ZHTP-Optimized-Identity"), "Should use ZHTP identity proof system");
         
-        println!("✅ Mesh participation identity proof test passed");
+        println!("Mesh participation identity proof test passed");
         Ok(())
     }
 
@@ -162,7 +162,7 @@ mod tests {
             }
         }
         
-        println!("✅ Multiple identity proofs test passed");
+        println!("Multiple identity proofs test passed");
         Ok(())
     }
 
@@ -185,7 +185,7 @@ mod tests {
         
         // Note: This test might pass or fail depending on the random jurisdiction generated
         // In a real implementation, the jurisdiction would be controlled by the user
-        println!("🔍 Jurisdiction verification result: {}", is_valid);
+        println!("Jurisdiction verification result: {}", is_valid);
         
         // Test with no jurisdiction requirement (should always work)
         let no_jurisdiction_params = IdentityProofParams {
@@ -198,7 +198,7 @@ mod tests {
         let is_valid_2 = verify_identity_proof_with_params(&proof_bytes_2, &no_jurisdiction_params).await?;
         assert!(is_valid_2, "Identity proof with no jurisdiction requirement should be valid");
         
-        println!("✅ Jurisdiction requirements test passed");
+        println!("Jurisdiction requirements test passed");
         Ok(())
     }
 }

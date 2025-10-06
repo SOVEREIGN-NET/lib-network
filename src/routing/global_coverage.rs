@@ -67,7 +67,7 @@ impl GlobalCoverageAnalyzer {
     
     /// Calculate comprehensive global coverage
     pub async fn calculate_global_coverage(&mut self) -> Result<()> {
-        info!("🌍 Calculating GLOBAL mesh network coverage...");
+        info!("Calculating GLOBAL mesh network coverage...");
         
         // Reset coverage map
         self.coverage_map.continental_coverage.clear();
@@ -134,7 +134,7 @@ impl GlobalCoverageAnalyzer {
                     if rand::random::<f32>() < 0.3 {
                         total_coverage_area += relay_coverage_area;
                         continent_relays += 1;
-                        info!("📡 LoRaWAN {} provides {:.0} km² coverage in {}", 
+                        info!("LoRaWAN {} provides {:.0} km² coverage in {}", 
                               relay_id, relay_coverage_area, continent);
                     }
                 },
@@ -142,7 +142,7 @@ impl GlobalCoverageAnalyzer {
                     // WiFi relays provide internet bridge access - global through internet
                     total_coverage_area += relay_coverage_area * 0.5; // 50% effective global reach
                     continent_relays += 1;
-                    info!("🌐 Internet bridge {} provides {:.0} km² global access for {}", 
+                    info!("Internet bridge {} provides {:.0} km² global access for {}", 
                           relay_id, relay_coverage_area * 0.5, continent);
                 },
                 _ => {
@@ -216,14 +216,14 @@ impl GlobalCoverageAnalyzer {
     
     /// Log comprehensive coverage summary
     async fn log_coverage_summary(&self) {
-        info!("🌍 ZHTP GLOBAL COVERAGE SUMMARY:");
-        info!("   🌐 Global coverage: {:.1}% of Earth's land area", 
+        info!("ZHTP GLOBAL COVERAGE SUMMARY:");
+        info!("   Global coverage: {:.1}% of Earth's land area", 
               self.coverage_map.global_coverage_percentage);
-        info!("   👥 Population served: {} people ({:.1}% of global population)", 
+        info!("   Population served: {} people ({:.1}% of global population)", 
               self.coverage_map.population_served,
               self.coverage_map.population_served as f64 / 8_000_000_000.0 * 100.0);
         
-        info!("📊 CONTINENTAL BREAKDOWN:");
+        info!("CONTINENTAL BREAKDOWN:");
         for coverage in self.coverage_map.continental_coverage.values() {
             info!("   {} - {:.1}% coverage, {} people, {} relays", 
                   coverage.continent,
@@ -234,18 +234,18 @@ impl GlobalCoverageAnalyzer {
         
         // Coverage quality assessment
         if self.coverage_map.global_coverage_percentage > 50.0 {
-            info!("🚀 REVOLUTIONARY: ZHTP provides MAJORITY global internet coverage!");
+            info!(" REVOLUTIONARY: ZHTP provides MAJORITY global internet coverage!");
         } else if self.coverage_map.global_coverage_percentage > 25.0 {
             info!("🌟 EXCELLENT: ZHTP provides substantial global coverage");
         } else if self.coverage_map.global_coverage_percentage > 10.0 {
-            info!("✅ GOOD: ZHTP provides significant regional coverage");
+            info!("GOOD: ZHTP provides significant regional coverage");
         } else {
             info!("📈 GROWING: ZHTP network expanding coverage");
         }
         
         // Population impact assessment
         if self.coverage_map.population_served > 1_000_000_000 {
-            info!("🌍 GLOBAL IMPACT: Over 1 billion people have free internet access!");
+            info!("GLOBAL IMPACT: Over 1 billion people have free internet access!");
         } else if self.coverage_map.population_served > 100_000_000 {
             info!("🌟 MAJOR IMPACT: Over 100 million people served");
         } else if self.coverage_map.population_served > 10_000_000 {
@@ -262,11 +262,11 @@ impl GlobalCoverageAnalyzer {
             .count();
         
         if satellite_relays > 0 && internet_bridges > 0 {
-            info!("🚀 PLANETARY NETWORK: Satellite + Internet bridge = ANYWHERE on Earth reachable!");
+            info!(" PLANETARY NETWORK: Satellite + Internet bridge = ANYWHERE on Earth reachable!");
         } else if satellite_relays > 0 {
             info!("🛰️ GLOBAL REACH: Satellite uplinks enable worldwide mesh networking");
         } else if internet_bridges > 0 {
-            info!("🌐 INTERNET BRIDGE: Global reach through existing internet infrastructure");
+            info!("INTERNET BRIDGE: Global reach through existing internet infrastructure");
         }
     }
     

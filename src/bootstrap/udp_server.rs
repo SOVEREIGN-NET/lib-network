@@ -15,14 +15,14 @@ use crate::types::mesh_message::ZhtpMeshMessage;
 pub async fn start_udp_bootstrap_server(server_id: Uuid, port: u16) -> Result<()> {
     let bind_addr = format!("0.0.0.0:{}", port);
     
-    info!("🔧 Attempting to bind UDP socket on {}...", bind_addr);
+    info!("Attempting to bind UDP socket on {}...", bind_addr);
     let socket = match UdpSocket::bind(&bind_addr).await {
         Ok(s) => {
-            info!("🔗 ZHTP mesh server listening on UDP {} (all interfaces)", bind_addr);
+            info!("ZHTP mesh server listening on UDP {} (all interfaces)", bind_addr);
             s
         }
         Err(e) => {
-            error!("❌ Failed to bind UDP socket on {}: {}", bind_addr, e);
+            error!("Failed to bind UDP socket on {}: {}", bind_addr, e);
             return Err(anyhow!("UDP socket bind failed: {}", e));
         }
     };
@@ -33,14 +33,14 @@ pub async fn start_udp_bootstrap_server(server_id: Uuid, port: u16) -> Result<()
         loop {
             match socket.recv_from(&mut buf).await {
                 Ok((len, addr)) => {
-                    info!("📥 Received ZHTP mesh packet: {} bytes from {}", len, addr);
+                    info!("Received ZHTP mesh packet: {} bytes from {}", len, addr);
                     
                     if let Err(e) = handle_udp_bootstrap_packet(&socket, &buf[..len], addr, server_id).await {
-                        warn!("❌ Error handling UDP bootstrap packet from {}: {}", addr, e);
+                        warn!("Error handling UDP bootstrap packet from {}: {}", addr, e);
                     }
                 },
                 Err(e) => {
-                    warn!("❌ Error receiving UDP packet: {}", e);
+                    warn!("Error receiving UDP packet: {}", e);
                     tokio::time::sleep(Duration::from_millis(100)).await;
                 }
             }
@@ -59,13 +59,13 @@ async fn handle_udp_bootstrap_packet(
 ) -> Result<()> {
     // Parse incoming ZHTP mesh packet
     if let Ok(packet_str) = std::str::from_utf8(packet_data) {
-        info!("📋 ZHTP packet content: {}", packet_str);
+        info!("ZHTP packet content: {}", packet_str);
         
         // First try to parse as bootstrap discovery message
         if let Ok(discovery_msg) = serde_json::from_str::<serde_json::Value>(packet_str) {
             if discovery_msg.get("type").and_then(|v| v.as_str()) == Some("discovery") 
                && discovery_msg.get("request").and_then(|v| v.as_str()) == Some("bootstrap") {
-                info!("🔗 Handling bootstrap discovery request from {}", addr);
+                info!("Handling bootstrap discovery request from {}", addr);
                 
                 // Send bootstrap response
                 let bootstrap_response = create_bootstrap_discovery_response(server_id);
@@ -73,10 +73,10 @@ async fn handle_udp_bootstrap_packet(
                 
                 match socket.send_to(response_str.as_bytes(), addr).await {
                     Ok(bytes_sent) => {
-                        info!("✅ Sent bootstrap response: {} bytes to {}", bytes_sent, addr);
+                        info!("Sent bootstrap response: {} bytes to {}", bytes_sent, addr);
                     },
                     Err(e) => {
-                        error!("❌ Failed to send bootstrap response to {}: {}", addr, e);
+                        error!("Failed to send bootstrap response to {}: {}", addr, e);
                     }
                 }
                 return Ok(());
@@ -86,14 +86,14 @@ async fn handle_udp_bootstrap_packet(
         // Try to parse as ZHTP mesh message
         match serde_json::from_str::<ZhtpMeshMessage>(packet_str) {
             Ok(mesh_message) => {
-                info!("✅ Parsed ZHTP mesh message: {:?}", mesh_message);
+                info!("Parsed ZHTP mesh message: {:?}", mesh_message);
                 
                 if let Err(e) = handle_lib_mesh_message(socket, mesh_message, addr, server_id).await {
-                    warn!("❌ Error handling ZHTP mesh message: {}", e);
+                    warn!("Error handling ZHTP mesh message: {}", e);
                 }
             }
             Err(e) => {
-                warn!("⚠️ Failed to parse ZHTP mesh message: {}", e);
+                warn!("Failed to parse ZHTP mesh message: {}", e);
             }
         }
     }
@@ -110,7 +110,7 @@ async fn handle_lib_mesh_message(
 ) -> Result<()> {
     match message {
         ZhtpMeshMessage::ZhtpRequest { requester, method, uri, headers, body, timestamp } => {
-            info!("🔄 Processing ZHTP request: {} {}", method, uri);
+            info!(" Processing ZHTP request: {} {}", method, uri);
             
             // Create response based on request
             let (response_status, response_body) = match uri.as_str() {
@@ -144,13 +144,13 @@ async fn handle_lib_mesh_message(
                         info!("📤 Sent ZHTP mesh response: {} bytes to {}", sent_bytes, addr);
                     }
                     Err(e) => {
-                        error!("❌ Failed to send ZHTP response: {}", e);
+                        error!("Failed to send ZHTP response: {}", e);
                     }
                 }
             }
         }
         ZhtpMeshMessage::PeerDiscovery { capabilities, location, shared_resources } => {
-            info!("🔍 Received peer discovery from {}: {} capabilities", addr, capabilities.len());
+            info!("Received peer discovery from {}: {} capabilities", addr, capabilities.len());
             // Handle peer discovery logic here
         }
         ZhtpMeshMessage::ConnectivityRequest { requester, bandwidth_needed_kbps, duration_minutes, payment_tokens } => {
@@ -158,7 +158,7 @@ async fn handle_lib_mesh_message(
             // Handle connectivity request logic here
         }
         _ => {
-            info!("📨 Received other mesh message type from {}", addr);
+            info!("Received other mesh message type from {}", addr);
             // Handle other message types
         }
     }

@@ -16,13 +16,13 @@ async fn main() -> Result<()> {
     // Initialize logging
     tracing_subscriber::fmt::init();
     
-    info!("🚀 Starting DHT Client + Storage Backend Integration Demo");
+    info!(" Starting DHT Client + Storage Backend Integration Demo");
     
     // Create a test identity for DHT operations
     let identity = create_demo_identity();
     
     // Initialize DHT client with lib-storage backend
-    info!("📡 Initializing DHT client with lib-storage backend...");
+    info!("Initializing DHT client with lib-storage backend...");
     let mut dht_client = initialize_dht_client(identity.clone()).await?;
     
     // Demonstrate DHT operations through storage backend
@@ -37,13 +37,13 @@ async fn main() -> Result<()> {
     // Show statistics
     demo_statistics(&mut dht_client).await?;
     
-    info!("✅ DHT Client + Storage Backend Integration Demo completed successfully!");
+    info!("DHT Client + Storage Backend Integration Demo completed successfully!");
     Ok(())
 }
 
 /// Demonstrate basic DHT operations through storage backend
 async fn demo_dht_operations(dht_client: &mut DHTClient) -> Result<()> {
-    info!("📡 === DHT Operations Demo ===");
+    info!("=== DHT Operations Demo ===");
     
     // Store some content
     let domain = "example.zhtp";
@@ -52,24 +52,24 @@ async fn demo_dht_operations(dht_client: &mut DHTClient) -> Result<()> {
     
     info!("💾 Storing content for {}{}...", domain, path);
     let content_hash = dht_client.store_content(domain, path, content.to_vec()).await?;
-    info!("✅ Content stored with hash: {}", content_hash);
+    info!("Content stored with hash: {}", content_hash);
     
     // Resolve the same content
-    info!("🔍 Resolving content for {}{}...", domain, path);
+    info!("Resolving content for {}{}...", domain, path);
     let resolved_hash = dht_client.resolve_content(domain, path).await?;
-    info!("✅ Content resolved to hash: {}", resolved_hash);
+    info!("Content resolved to hash: {}", resolved_hash);
     
     // Fetch the content
-    info!("📥 Fetching content with hash: {}", resolved_hash);
+    info!("Fetching content with hash: {}", resolved_hash);
     let fetched_content = dht_client.fetch_content(&resolved_hash).await?;
     let content_str = String::from_utf8_lossy(&fetched_content);
-    info!("✅ Fetched content: {}", content_str);
+    info!("Fetched content: {}", content_str);
     
     // Verify it matches
     if fetched_content == content {
-        info!("✅ Content verification successful - DHT storage working correctly!");
+        info!("Content verification successful - DHT storage working correctly!");
     } else {
-        warn!("⚠️ Content mismatch - verification failed");
+        warn!("Content mismatch - verification failed");
     }
     
     Ok(())
@@ -77,7 +77,7 @@ async fn demo_dht_operations(dht_client: &mut DHTClient) -> Result<()> {
 
 /// Demonstrate Web4 page serving through DHT + storage
 async fn demo_web4_serving(dht_client: &mut DHTClient) -> Result<()> {
-    info!("🌐 === Web4 Page Serving Demo ===");
+    info!("=== Web4 Page Serving Demo ===");
     
     // First, store a Web4 page
     let domain = "webapp.zhtp";
@@ -95,21 +95,21 @@ async fn demo_web4_serving(dht_client: &mut DHTClient) -> Result<()> {
         </style>
     </head>
     <body>
-        <h1 class="zhtp-header">🌐 ZHTP Web4 Application</h1>
+        <h1 class="zhtp-header">ZHTP Web4 Application</h1>
         <div class="content">
             <h2>Revolutionary Internet Replacement</h2>
             <p>This page is served through the ZHTP mesh network using:</p>
             <div class="feature">
-                <strong>🔗 lib-network:</strong> DHT client layer for mesh networking
+                <strong>lib-network:</strong> DHT client layer for mesh networking
             </div>
             <div class="feature">
                 <strong>💾 lib-storage:</strong> DHT implementation backend with economic incentives
             </div>
             <div class="feature">
-                <strong>🔐 lib-crypto:</strong> Post-quantum cryptographic security
+                <strong>lib-crypto:</strong> Post-quantum cryptographic security
             </div>
             <div class="feature">
-                <strong>👤 lib-identity:</strong> Zero-knowledge identity management
+                <strong>lib-identity:</strong> Zero-knowledge identity management
             </div>
             <p><em>No ISPs required - pure mesh networking!</em></p>
         </div>
@@ -119,16 +119,16 @@ async fn demo_web4_serving(dht_client: &mut DHTClient) -> Result<()> {
     
     info!("💾 Storing Web4 page at {}{}...", domain, path);
     let page_hash = dht_client.store_content(domain, path, web4_content.as_bytes().to_vec()).await?;
-    info!("✅ Web4 page stored with hash: {}", page_hash);
+    info!("Web4 page stored with hash: {}", page_hash);
     
     // Serve the Web4 page
     let zhtp_url = format!("zhtp://{}{}", domain, path);
-    info!("🌐 Serving Web4 page: {}", zhtp_url);
+    info!("Serving Web4 page: {}", zhtp_url);
     
     let page_response = serve_web4_page_through_mesh(dht_client, &zhtp_url).await?;
     
     // Display the response
-    info!("✅ Web4 page response:");
+    info!("Web4 page response:");
     println!("{}", serde_json::to_string_pretty(&page_response)?);
     
     Ok(())
@@ -146,7 +146,7 @@ async fn demo_storage_integration(dht_client: &mut DHTClient) -> Result<()> {
         storage.get_node_info().clone()
     };
     
-    info!("📊 Storage Node Information:");
+    info!("Storage Node Information:");
     info!("  Node ID: {}", hex::encode(&node_info.id));
     info!("  Addresses: {:?}", node_info.addresses);
     info!("  Reputation: {}", node_info.reputation);
@@ -178,11 +178,11 @@ async fn demo_storage_integration(dht_client: &mut DHTClient) -> Result<()> {
 
 /// Demonstrate statistics and monitoring
 async fn demo_statistics(dht_client: &mut DHTClient) -> Result<()> {
-    info!("📊 === Statistics and Monitoring Demo ===");
+    info!("=== Statistics and Monitoring Demo ===");
     
     // Get DHT client statistics
     let dht_stats = dht_client.get_dht_statistics().await?;
-    info!("🔍 DHT Client Statistics:");
+    info!("DHT Client Statistics:");
     for (key, value) in &dht_stats {
         info!("  {}: {}", key, value);
     }
@@ -196,7 +196,7 @@ async fn demo_statistics(dht_client: &mut DHTClient) -> Result<()> {
     
     // Get network status
     let network_status = dht_client.get_network_status().await?;
-    info!("🌐 Network Status:");
+    info!("Network Status:");
     info!("  Connected: {}", network_status.connected);
     info!("  Peer Count: {}", network_status.peer_count);
     info!("  Cache Size: {}", network_status.cache_size);

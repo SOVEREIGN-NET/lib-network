@@ -297,12 +297,12 @@ impl MultiHopRouter {
         destination: &PublicKey,
         message_size: u64,
     ) -> Result<Vec<RouteHop>> {
-        debug!("🔍 Finding multi-hop path: {:?} → {:?}", 
+        debug!("Finding multi-hop path: {:?} → {:?}", 
                hex::encode(&source.key_id[0..4]), hex::encode(&destination.key_id[0..4]));
         
         // Check cache first
         if let Some(cached_path) = self.get_cached_path(source, destination).await {
-            info!("📋 Using cached path ({} hops, quality: {:.2})", 
+            info!("Using cached path ({} hops, quality: {:.2})", 
                   cached_path.hops.len(), cached_path.quality_score);
             return self.convert_path_to_route_hops(&cached_path.hops).await;
         }
@@ -342,7 +342,7 @@ impl MultiHopRouter {
         // Convert to route hops
         let route_hops = self.convert_path_to_route_hops(&path).await?;
         
-        info!("✅ Found multi-hop path: {} hops using {:?} algorithm", 
+        info!("Found multi-hop path: {} hops using {:?} algorithm", 
               route_hops.len(), algorithm);
         
         Ok(route_hops)
@@ -354,7 +354,7 @@ impl MultiHopRouter {
         source: &PublicKey,
         destination: &PublicKey,
     ) -> Result<Vec<PublicKey>> {
-        debug!("🎯 Using Dijkstra's algorithm for pathfinding");
+        debug!("Using Dijkstra's algorithm for pathfinding");
         
         let graph = self.topology_graph.read().await;
         let mut distances: HashMap<PublicKey, f64> = HashMap::new();
@@ -602,7 +602,7 @@ impl MultiHopRouter {
             RoutingAlgorithm::AStar
         };
         
-        debug!("🎯 Adaptive algorithm selected: {:?}", selected_algorithm);
+        debug!("Adaptive algorithm selected: {:?}", selected_algorithm);
         
         match selected_algorithm {
             RoutingAlgorithm::LoadAware => self.load_aware_pathfinding(source, destination, message_size).await,
@@ -873,7 +873,7 @@ impl MultiHopRouter {
                 .insert(connection.peer_id.clone());
         }
         
-        info!("🔄 Updated topology graph: {} nodes, {} edges", 
+        info!(" Updated topology graph: {} nodes, {} edges", 
               graph.nodes.len(), graph.edges.len());
         
         Ok(())

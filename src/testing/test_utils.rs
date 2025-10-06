@@ -21,7 +21,9 @@ pub async fn create_test_mesh_server() -> Result<ZhtpMeshServer> {
             NetworkProtocol::LoRaWAN,
         ];
         
-        ZhtpMeshServer::new(node_id, storage, protocols).await
+        // Create dummy owner key for testing 
+        let owner_key = lib_crypto::PublicKey::new(node_id.to_vec());
+        ZhtpMeshServer::new(node_id, owner_key, storage, protocols).await
     }
     
     #[cfg(not(feature = "lib-storage"))]
