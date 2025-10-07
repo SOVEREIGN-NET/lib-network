@@ -4,6 +4,8 @@ pub mod bluetooth;
 pub mod wifi_direct;
 pub mod lorawan;
 pub mod satellite;
+pub mod zhtp_auth;
+pub mod zhtp_encryption;
 
 // Enhanced protocol implementations with platform-specific optimizations
 #[cfg(feature = "enhanced-bluetooth")]

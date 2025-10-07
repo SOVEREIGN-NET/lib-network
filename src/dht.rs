@@ -30,10 +30,14 @@ const DEFAULT_REPLICATION_FACTOR: u8 = 3;
 pub mod bootstrap;  // Enhanced bootstrap with mDNS + peer exchange
 pub mod cache;      // Advanced LRU+TTL cache system  
 pub mod monitoring; // DHT-specific performance monitoring
+pub mod relay;      // ZHTP secure relay protocol
+pub mod peer_discovery; // ZHTP blockchain-verified peer discovery
 
 pub use bootstrap::{DHTBootstrap, DHTBootstrapEnhancements};
 pub use cache::{ThreadSafeDHTCache, CacheStats};
 pub use monitoring::{DHTPerformanceMonitor, DHTOperation as MonitorOperation, DHTPerformanceStats};
+pub use relay::ZhtpRelayProtocol;
+pub use peer_discovery::{ZhtpPeerRegistry, ZhtpPeerInfo, PeerQueryFilter, find_zhtp_peers, find_best_relay_peer};
 
 /// DHT Client with native binary protocol support
 #[derive(Debug)]
@@ -50,6 +54,8 @@ pub struct DHTClient {
     stats: Arc<Mutex<DHTStatistics>>,
     /// Native binary protocol handler
     protocol_handler: Arc<Mutex<Option<DhtProtocolHandler>>>,
+    /// ZHTP blockchain-verified peer registry
+    peer_registry: Arc<ZhtpPeerRegistry>,
 }
 
 /// DHT operation statistics
@@ -194,6 +200,9 @@ impl DHTClient {
         // Initialize storage system
         let storage_system = UnifiedStorageSystem::new(storage_config).await?;
         
+        // Initialize ZHTP peer registry
+        let peer_registry = Arc::new(ZhtpPeerRegistry::new(identity.clone()));
+        
         let client = Self {
             identity: identity.clone(),
             storage_system: Arc::new(RwLock::new(storage_system)),
@@ -204,6 +213,7 @@ impl DHTClient {
             peers: Arc::new(RwLock::new(Vec::new())),
             stats: Arc::new(Mutex::new(DHTStatistics::default())),
             protocol_handler: Arc::new(Mutex::new(None)),
+            peer_registry,
         };
         
         // Initialize native binary protocol handler
@@ -811,6 +821,63 @@ impl DHTClient {
             format!("result_1_for_{}", query),
             format!("result_2_for_{}", query),
         ])
+    }
+    
+    // ============= ZHTP Peer Discovery Methods =============
+    
+    /// Register a peer in the DHT peer registry
+    pub async fn register_peer(&self, peer_info: ZhtpPeerInfo) -> Result<()> {
+        self.peer_registry.register_peer(peer_info).await
+    }
+    
+    /// Find peers matching specific capabilities and reputation
+    pub async fn find_peers(&self, filter: PeerQueryFilter) -> Result<Vec<ZhtpPeerInfo>> {
+        self.peer_registry.find_peers(filter).await
+    }
+    
+    /// Find peers with DHT capability
+    pub async fn find_dht_peers(&self, min_reputation: f64) -> Result<Vec<ZhtpPeerInfo>> {
+        find_zhtp_peers(&self.peer_registry, "dht", min_reputation).await
+    }
+    
+    /// Find peers with relay capability
+    pub async fn find_relay_peers(&self, min_reputation: f64) -> Result<Vec<ZhtpPeerInfo>> {
+        find_zhtp_peers(&self.peer_registry, "relay", min_reputation).await
+    }
+    
+    /// Find the best relay peer for content queries
+    pub async fn find_best_relay_peer(&self, min_reputation: f64) -> Result<Option<ZhtpPeerInfo>> {
+        find_best_relay_peer(&self.peer_registry, min_reputation).await
+    }
+    
+    /// Get a specific peer by node ID
+    pub async fn get_peer(&self, node_id: &[u8; 32]) -> Result<Option<ZhtpPeerInfo>> {
+        self.peer_registry.get_peer(node_id).await
+    }
+    
+    /// Update reputation for a peer
+    pub async fn update_peer_reputation(&self, node_id: &[u8; 32], new_reputation: f64) -> Result<()> {
+        self.peer_registry.update_reputation(node_id, new_reputation).await
+    }
+    
+    /// Remove a peer from the registry
+    pub async fn remove_peer(&self, node_id: &[u8; 32]) -> Result<()> {
+        self.peer_registry.remove_peer(node_id).await
+    }
+    
+    /// Clean up expired peer entries
+    pub async fn cleanup_expired_peers(&self) -> Result<usize> {
+        self.peer_registry.cleanup_expired_peers().await
+    }
+    
+    /// Get total registered peer count
+    pub async fn peer_registry_count(&self) -> usize {
+        self.peer_registry.peer_count().await
+    }
+    
+    /// Get the peer registry for direct access
+    pub fn get_peer_registry(&self) -> Arc<ZhtpPeerRegistry> {
+        Arc::clone(&self.peer_registry)
     }
 }
 

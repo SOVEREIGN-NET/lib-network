@@ -11,6 +11,10 @@ use serde::{Serialize, Deserialize};
 
 use sha2::{Sha256, Digest};
 use lib_proofs::plonky2::{ZkProofSystem, Plonky2Proof};
+use lib_crypto::PublicKey;
+
+// Import ZHTP authentication
+use super::zhtp_auth::{ZhtpAuthManager, ZhtpAuthChallenge, ZhtpAuthResponse, NodeCapabilities, ZhtpAuthVerification};
 
 #[cfg(feature = "enhanced-parsing")]
 mod enhanced_bluetooth;
@@ -44,6 +48,10 @@ pub struct BluetoothMeshProtocol {
     pub address_mapping: Arc<RwLock<HashMap<String, String>>>,
     /// ZHTP transmission monitoring active flag
     pub zhtp_monitor_active: Arc<std::sync::atomic::AtomicBool>,
+    /// ZHTP authentication manager
+    pub auth_manager: Arc<RwLock<Option<ZhtpAuthManager>>>,
+    /// Authenticated peers (address -> verification)
+    pub authenticated_peers: Arc<RwLock<HashMap<String, ZhtpAuthVerification>>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -106,7 +114,116 @@ impl BluetoothMeshProtocol {
             tracked_devices: Arc::new(RwLock::new(HashMap::new())),
             address_mapping: Arc::new(RwLock::new(HashMap::new())),
             zhtp_monitor_active: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            auth_manager: Arc::new(RwLock::new(None)),
+            authenticated_peers: Arc::new(RwLock::new(HashMap::new())),
         })
+    }
+    
+    /// Initialize ZHTP authentication for this node
+    pub async fn initialize_zhtp_auth(&self, blockchain_pubkey: PublicKey) -> Result<()> {
+        info!("🔐 Initializing ZHTP authentication for Bluetooth mesh");
+        
+        let auth_manager = ZhtpAuthManager::new(blockchain_pubkey)?;
+        *self.auth_manager.write().await = Some(auth_manager);
+        
+        info!("✅ ZHTP authentication initialized for Bluetooth");
+        Ok(())
+    }
+    
+    /// Request authentication from a peer
+    pub async fn authenticate_peer(&self, peer_address: &str) -> Result<ZhtpAuthVerification> {
+        info!("🔐 Authenticating peer via ZHTP: {}", peer_address);
+        
+        let auth_manager = self.auth_manager.read().await;
+        let auth_manager = auth_manager.as_ref()
+            .ok_or_else(|| anyhow!("ZHTP authentication not initialized"))?;
+        
+        // Create challenge
+        let challenge = auth_manager.create_challenge().await?;
+        
+        // Send challenge to peer (TODO: implement actual Bluetooth message sending)
+        info!("📤 Sending ZHTP auth challenge to peer");
+        
+        // Receive response from peer (TODO: implement actual Bluetooth message receiving)
+        // For now, return error indicating authentication needs Bluetooth message layer
+        Err(anyhow!("Peer authentication requires Bluetooth message layer implementation"))
+    }
+    
+    /// Respond to authentication challenge from peer
+    pub fn respond_to_auth_challenge(
+        &self,
+        challenge: &ZhtpAuthChallenge,
+        capabilities: NodeCapabilities,
+    ) -> Result<ZhtpAuthResponse> {
+        info!("📝 Responding to ZHTP authentication challenge");
+        
+        // Note: This is synchronous and doesn't need async because auth_manager is cloned
+        Err(anyhow!("Must use async version: respond_to_auth_challenge_async"))
+    }
+    
+    /// Respond to authentication challenge from peer (async version)
+    pub async fn respond_to_auth_challenge_async(
+        &self,
+        challenge: &ZhtpAuthChallenge,
+        capabilities: NodeCapabilities,
+    ) -> Result<ZhtpAuthResponse> {
+        info!("📝 Responding to ZHTP authentication challenge");
+        
+        let auth_manager = self.auth_manager.read().await;
+        let auth_manager = auth_manager.as_ref()
+            .ok_or_else(|| anyhow!("ZHTP authentication not initialized"))?;
+        
+        auth_manager.respond_to_challenge(challenge, capabilities)
+    }
+    
+    /// Verify authentication response from peer
+    pub async fn verify_peer_auth_response(
+        &self,
+        peer_address: &str,
+        response: &ZhtpAuthResponse,
+    ) -> Result<ZhtpAuthVerification> {
+        info!("🔍 Verifying ZHTP authentication response from {}", peer_address);
+        
+        let auth_manager = self.auth_manager.read().await;
+        let auth_manager = auth_manager.as_ref()
+            .ok_or_else(|| anyhow!("ZHTP authentication not initialized"))?;
+        
+        let verification = auth_manager.verify_response(response).await?;
+        
+        if verification.authenticated {
+            // Store authenticated peer
+            self.authenticated_peers.write().await.insert(
+                peer_address.to_string(),
+                verification.clone(),
+            );
+            info!("✅ Peer {} authenticated (trust score: {:.2})", peer_address, verification.trust_score);
+        } else {
+            warn!("❌ Peer {} authentication failed", peer_address);
+        }
+        
+        Ok(verification)
+    }
+    
+    /// Check if peer is authenticated
+    pub async fn is_peer_authenticated(&self, peer_address: &str) -> bool {
+        self.authenticated_peers.read().await.contains_key(peer_address)
+    }
+    
+    /// Get authenticated peer info
+    pub async fn get_peer_auth_info(&self, peer_address: &str) -> Option<ZhtpAuthVerification> {
+        self.authenticated_peers.read().await.get(peer_address).cloned()
+    }
+    
+    /// Get node capabilities for advertising
+    pub fn get_node_capabilities(&self, has_dht: bool, reputation: u32) -> NodeCapabilities {
+        NodeCapabilities {
+            has_dht,
+            can_relay: true,
+            max_bandwidth: 5_000_000, // 5 MB/s
+            protocols: vec!["bluetooth".to_string(), "zhtp".to_string()],
+            reputation,
+            quantum_secure: true,
+        }
     }
     
     /// Get actual Bluetooth MAC address from system

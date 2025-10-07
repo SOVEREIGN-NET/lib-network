@@ -23,4 +23,23 @@ pub struct MeshConnection {
     pub tokens_earned: u64,
     /// Connection stability score
     pub stability_score: f64,
+    /// ZHTP authentication status
+    #[serde(default)]
+    pub zhtp_authenticated: bool,
+    /// Post-quantum encryption enabled
+    #[serde(default = "default_true")]
+    pub quantum_secure: bool,
+    /// Peer's Dilithium public key (for signature verification)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub peer_dilithium_pubkey: Option<Vec<u8>>,
+    /// Kyber shared secret (for encryption) - NOT serialized for security
+    #[serde(skip)]
+    pub kyber_shared_secret: Option<Vec<u8>>,
+    /// Peer trust score (0.0 - 1.0)
+    #[serde(default)]
+    pub trust_score: f64,
+}
+
+fn default_true() -> bool {
+    true
 }

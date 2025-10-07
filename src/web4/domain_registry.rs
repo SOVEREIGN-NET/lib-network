@@ -395,27 +395,31 @@ impl DomainRegistry {
             ).map_err(|e| anyhow!("Failed to create uploader identity: {}", e))?;
             
             // Store in DHT via UnifiedStorageSystem (NO CACHE FALLBACK - DHT ONLY)
-            match storage.upload_content(upload_request, uploader).await {
+            let actual_storage_hash = match storage.upload_content(upload_request, uploader).await {
                 Ok(storage_hash) => {
                     info!("✅ Stored in DHT: short_hash={}, storage_hash={:?}", 
                           short_hash, storage_hash);
+                    storage_hash
                 }
                 Err(e) => {
                     error!("❌ DHT storage FAILED (no cache fallback): {}", e);
                     return Err(anyhow!("Failed to store content in DHT: {}", e));
                 }
+            };
+            
+            // Convert storage_hash to hex string for content_mappings
+            let storage_hash_hex = hex::encode(actual_storage_hash.as_bytes());
+            
+            // Store in cache using the STORAGE hash (what's actually in DHT)
+            {
+                let mut cache = self.content_cache.write().await;
+                cache.insert(storage_hash_hex.clone(), content);
+                info!("📦 Cached content with storage hash: {}", storage_hash_hex);
             }
+            
+            // Return the storage hash (compressed) for proper DHT retrieval
+            Ok(storage_hash_hex)
         }
-        
-        // Store in cache for fast retrieval (but DHT is the source of truth)
-        {
-            let mut cache = self.content_cache.write().await;
-            cache.insert(full_content_hash.clone(), content);
-            info!("📦 Cached content with hash: {}", short_hash);
-        }
-        
-        // Return the FULL hash for proper DHT retrieval
-        Ok(full_content_hash)
     }
 
     /// Store domain record to persistent storage

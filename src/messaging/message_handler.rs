@@ -102,6 +102,11 @@ impl MeshMessageHandler {
             data_transferred: 0,
             tokens_earned: 0,
             stability_score: shared_resources.reliability_score,
+            zhtp_authenticated: false,
+            quantum_secure: true,
+            peer_dilithium_pubkey: None,
+            kyber_shared_secret: None,
+            trust_score: 0.0,
         });
         
         Ok(())

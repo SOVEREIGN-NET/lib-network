@@ -14,6 +14,10 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use std::sync::Arc;
 use tracing::{info, warn, debug};
 
+// Import ZHTP protocol types for secure relay
+use crate::protocols::zhtp_auth::{NodeCapabilities};
+use crate::protocols::zhtp_encryption::{ZhtpEncryptedMessage};
+
 /// DHT Protocol Version
 pub const DHT_PROTOCOL_VERSION: u16 = 1;
 
@@ -39,6 +43,18 @@ pub enum DhtOperation {
     Ping,
     /// Pong response to ping
     Pong,
+    /// ZHTP Relay Query (Node B -> Node A: request DHT content)
+    RelayQuery,
+    /// ZHTP Relay Response (Node A -> Node B: return DHT content)
+    RelayResponse,
+    /// ZHTP Peer Registration (register blockchain-verified peer)
+    PeerRegister,
+    /// ZHTP Peer Registration Acknowledgment
+    PeerRegisterAck,
+    /// ZHTP Peer Query (find peers with capabilities)
+    PeerQuery,
+    /// ZHTP Peer Query Response (return matching peers)
+    PeerQueryResponse,
 }
 
 /// DHT packet header (fixed size: 64 bytes)
@@ -149,6 +165,187 @@ pub struct DhtPeerInfo {
     pub reputation: f32,
 }
 
+// ============================================================================
+// ZHTP Relay Protocol (Secure DHT Relay Through Mesh Peers)
+// ============================================================================
+
+/// ZHTP Relay Query - Encrypted request for DHT content through peer
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ZhtpRelayQuery {
+    /// Request ID for tracking
+    pub request_id: String,
+    /// Domain to query
+    pub domain: String,
+    /// Path within domain
+    pub path: String,
+    /// Requester's blockchain public key (for verification)
+    pub requester_pubkey: Vec<u8>,
+    /// Encrypted query payload (encrypted with Kyber shared secret)
+    pub encrypted_payload: ZhtpEncryptedMessage,
+    /// Dilithium2 signature of (request_id + domain + path + timestamp)
+    pub signature: Vec<u8>,
+    /// Timestamp
+    pub timestamp: u64,
+}
+
+/// ZHTP Relay Response - Encrypted DHT content from peer
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ZhtpRelayResponse {
+    /// Request ID being responded to
+    pub request_id: String,
+    /// Content found flag
+    pub found: bool,
+    /// Content hash (if found)
+    pub content_hash: Option<Hash>,
+    /// Content MIME type (if found)
+    pub content_type: Option<String>,
+    /// Responder's blockchain public key
+    pub responder_pubkey: Vec<u8>,
+    /// Encrypted content (encrypted with Kyber shared secret)
+    pub encrypted_content: ZhtpEncryptedMessage,
+    /// Dilithium2 signature of (request_id + content_hash + timestamp)
+    pub signature: Vec<u8>,
+    /// Timestamp
+    pub timestamp: u64,
+    /// Relay node capabilities (for trust verification)
+    pub relay_capabilities: NodeCapabilities,
+}
+
+/// ZHTP Relay Query Payload (plaintext before encryption)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ZhtpRelayQueryPayload {
+    /// Domain to query
+    pub domain: String,
+    /// Path within domain
+    pub path: String,
+    /// Query options
+    pub options: ZhtpQueryOptions,
+}
+
+/// ZHTP Relay Response Payload (plaintext before encryption)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ZhtpRelayResponsePayload {
+    /// Content data (if found)
+    pub content: Option<Vec<u8>>,
+    /// Content MIME type
+    pub content_type: Option<String>,
+    /// Content hash
+    pub content_hash: Option<Hash>,
+    /// Error message (if not found)
+    pub error: Option<String>,
+    /// Cache TTL in seconds
+    pub ttl: u32,
+}
+
+/// Query options for ZHTP relay
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ZhtpQueryOptions {
+    /// Maximum content size to return (bytes)
+    pub max_size: Option<u64>,
+    /// Accept compression
+    pub accept_compression: bool,
+    /// Cache preference
+    pub cache_preference: CachePreference,
+}
+
+/// Cache preference for relay queries
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum CachePreference {
+    /// Prefer cached content (faster)
+    PreferCache,
+    /// Prefer fresh content (slower)
+    PreferFresh,
+    /// Only cached content (fail if not cached)
+    OnlyCache,
+    /// Only fresh content (bypass cache)
+    OnlyFresh,
+}
+
+// ============= ZHTP Peer Discovery Protocol Structures =============
+
+/// ZHTP Peer Registration message
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ZhtpPeerRegister {
+    /// Blockchain public key
+    pub blockchain_pubkey: PublicKey,
+    /// Dilithium2 public key for signatures
+    pub dilithium_pubkey: Vec<u8>,
+    /// Node capabilities
+    pub capabilities: NodeCapabilities,
+    /// Network addresses
+    pub addresses: Vec<String>,
+    /// Reputation score (0.0 - 1.0)
+    pub reputation: f64,
+    /// Registration TTL (seconds)
+    pub ttl: u64,
+    /// Timestamp
+    pub timestamp: u64,
+    /// Signature (signed with blockchain key)
+    pub signature: Vec<u8>,
+}
+
+/// ZHTP Peer Registration Acknowledgment
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ZhtpPeerRegisterAck {
+    /// Node ID assigned by DHT
+    pub node_id: [u8; 32],
+    /// Registration accepted
+    pub accepted: bool,
+    /// Error message if rejected
+    pub error: Option<String>,
+    /// Timestamp
+    pub timestamp: u64,
+}
+
+/// ZHTP Peer Query message
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ZhtpPeerQuery {
+    /// Require DHT capability
+    pub requires_dht: bool,
+    /// Require relay capability
+    pub requires_relay: bool,
+    /// Minimum bandwidth (bytes/sec)
+    pub min_bandwidth: Option<u64>,
+    /// Minimum reputation score (0.0 - 1.0)
+    pub min_reputation: Option<f64>,
+    /// Required protocol support
+    pub required_protocols: Vec<String>,
+    /// Require quantum security
+    pub require_quantum_secure: bool,
+    /// Maximum results to return
+    pub max_results: usize,
+}
+
+/// ZHTP Peer Query Response
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ZhtpPeerQueryResponse {
+    /// Matching peers
+    pub peers: Vec<ZhtpPeerInfo>,
+    /// Total matching peers (may be more than returned)
+    pub total_matches: usize,
+    /// Timestamp
+    pub timestamp: u64,
+}
+
+/// ZHTP Peer Info (minimal for network transmission)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ZhtpPeerInfo {
+    /// Node ID
+    pub node_id: [u8; 32],
+    /// Blockchain public key
+    pub blockchain_pubkey: PublicKey,
+    /// Dilithium2 public key
+    pub dilithium_pubkey: Vec<u8>,
+    /// Node capabilities
+    pub capabilities: NodeCapabilities,
+    /// Network addresses
+    pub addresses: Vec<String>,
+    /// Reputation score
+    pub reputation: f64,
+    /// Last seen timestamp
+    pub last_seen: u64,
+}
+
 /// Complete DHT packet structure
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DhtPacket {
@@ -171,6 +368,18 @@ pub enum DhtPacketPayload {
     PeerResponse(DhtPeerResponsePayload),
     Ping,
     Pong,
+    /// ZHTP Relay Query (encrypted)
+    RelayQuery(ZhtpRelayQuery),
+    /// ZHTP Relay Response (encrypted + signed)
+    RelayResponse(ZhtpRelayResponse),
+    /// ZHTP Peer Registration
+    PeerRegister(ZhtpPeerRegister),
+    /// ZHTP Peer Registration Ack
+    PeerRegisterAck(ZhtpPeerRegisterAck),
+    /// ZHTP Peer Query
+    PeerQuery(ZhtpPeerQuery),
+    /// ZHTP Peer Query Response
+    PeerQueryResponse(ZhtpPeerQueryResponse),
 }
 
 /// DHT Protocol Handler
@@ -313,9 +522,20 @@ impl DhtProtocolHandler {
             DhtOperation::Ping => {
                 Self::handle_ping_packet(packet, addr, socket, identity).await
             }
+            // ZHTP relay operations (handled separately in unified_server.rs)
+            DhtOperation::RelayQuery | DhtOperation::RelayResponse => {
+                debug!("🔐 ZHTP relay operation received (handled by MeshRouter)");
+                Ok(())
+            }
+            // ZHTP peer discovery operations
+            DhtOperation::PeerRegister | DhtOperation::PeerQuery => {
+                debug!("🔍 ZHTP peer discovery operation received (requires peer registry integration)");
+                Ok(())
+            }
             // Responses are handled by the request matching system
             DhtOperation::QueryResponse | DhtOperation::StoreAck | 
-            DhtOperation::PeerResponse | DhtOperation::Pong => {
+            DhtOperation::PeerResponse | DhtOperation::Pong |
+            DhtOperation::PeerRegisterAck | DhtOperation::PeerQueryResponse => {
                 debug!("📬 Response packet received (handled by request matcher)");
                 Ok(())
             }
