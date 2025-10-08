@@ -6,7 +6,7 @@ use anyhow::{Result, anyhow};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tracing::{info, warn};
+use tracing::{info, warn, debug};
 use serde::{Serialize, Deserialize};
 
 use sha2::{Sha256, Digest};
@@ -24,6 +24,19 @@ use enhanced_bluetooth::BlueZGattParser;
 
 #[cfg(target_os = "macos")]
 use enhanced_bluetooth::MacOSBluetoothManager;
+
+/// Message types that can be received from GATT characteristics
+#[derive(Debug, Clone)]
+pub enum GattMessage {
+    /// Raw data from GATT write (characteristic UUID, data)
+    RawData(String, Vec<u8>),
+    /// Mesh handshake
+    MeshHandshake(Vec<u8>),
+    /// DHT bridge message
+    DhtBridge(String),
+    /// ZHTP relay query
+    RelayQuery(Vec<u8>),
+}
 
 /// Bluetooth LE mesh protocol handler
 #[derive(Clone)]
@@ -52,6 +65,11 @@ pub struct BluetoothMeshProtocol {
     pub auth_manager: Arc<RwLock<Option<ZhtpAuthManager>>>,
     /// Authenticated peers (address -> verification)
     pub authenticated_peers: Arc<RwLock<HashMap<String, ZhtpAuthVerification>>>,
+    /// Windows GATT Service Provider (kept alive to maintain advertising)
+    #[cfg(all(target_os = "windows", feature = "windows-gatt"))]
+    pub gatt_service_provider: Arc<RwLock<Option<Box<dyn std::any::Any + Send + Sync>>>>,
+    /// Channel for forwarding GATT messages to unified server
+    pub gatt_message_tx: Arc<RwLock<Option<tokio::sync::mpsc::UnboundedSender<GattMessage>>>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -116,7 +134,16 @@ impl BluetoothMeshProtocol {
             zhtp_monitor_active: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             auth_manager: Arc::new(RwLock::new(None)),
             authenticated_peers: Arc::new(RwLock::new(HashMap::new())),
+            #[cfg(all(target_os = "windows", feature = "windows-gatt"))]
+            gatt_service_provider: Arc::new(RwLock::new(None)),
+            gatt_message_tx: Arc::new(RwLock::new(None)),
         })
+    }
+    
+    /// Set the GATT message channel for forwarding to unified server
+    pub async fn set_gatt_message_channel(&self, tx: tokio::sync::mpsc::UnboundedSender<GattMessage>) {
+        *self.gatt_message_tx.write().await = Some(tx);
+        info!("✅ GATT message channel configured");
     }
     
     /// Initialize ZHTP authentication for this node
@@ -1075,11 +1102,258 @@ Value=00
     }
     
     #[cfg(target_os = "windows")]
-    async fn windows_register_bypass_service(&self, _service_uuid: &str, _characteristics: &[&str]) -> Result<()> {
-        // Windows GATT service registration would use WinRT APIs
-        // For production, would use Windows::Devices::Bluetooth::GenericAttributeProfile
-        info!("Windows: GATT service registration (WinRT implementation needed)");
-        Ok(())
+    async fn windows_register_bypass_service(&self, service_uuid: &str, characteristics: &[&str]) -> Result<()> {
+        #[cfg(feature = "windows-gatt")]
+        {
+            use windows::{
+                Devices::Bluetooth::GenericAttributeProfile::*,
+                Devices::Bluetooth::Advertisement::*,
+                Storage::Streams::*,
+                Foundation::{TypedEventHandler, PropertyValue},
+                core::GUID,
+            };
+            
+            info!("🔧 Windows: Creating GATT Service Provider with UUID: {}", service_uuid);
+            
+            // Parse service UUID to GUID
+            let service_guid = self.parse_uuid_to_guid(service_uuid)?;
+            
+            // Create GATT Service Provider (without reference)
+            let service_provider_result = GattServiceProvider::CreateAsync(service_guid)?
+                .get()
+                .map_err(|e| anyhow::anyhow!("Failed to create GattServiceProvider: {:?}", e))?;
+            
+            // Get the service provider (not Service() method)
+            let service_provider = service_provider_result.ServiceProvider()
+                .map_err(|e| anyhow::anyhow!("Failed to get service provider: {:?}", e))?;
+                
+            let service = service_provider.Service()
+                .map_err(|e| anyhow::anyhow!("Failed to get service: {:?}", e))?;
+            
+            info!("✅ Windows: GATT Service Provider created successfully");
+            
+            // Create characteristics with read/write/notify properties
+            for (index, char_uuid_str) in characteristics.iter().enumerate() {
+                let char_guid = self.parse_uuid_to_guid(char_uuid_str)?;
+                
+                // Create characteristic parameters
+                let char_params = GattLocalCharacteristicParameters::new()
+                    .map_err(|e| anyhow::anyhow!("Failed to create characteristic parameters: {:?}", e))?;
+                
+                // Set properties: Read, Write, Notify
+                char_params.SetCharacteristicProperties(
+                    GattCharacteristicProperties::Read | 
+                    GattCharacteristicProperties::Write |
+                    GattCharacteristicProperties::Notify
+                ).map_err(|e| anyhow::anyhow!("Failed to set characteristic properties: {:?}", e))?;
+                
+                // Set permissions
+                char_params.SetReadProtectionLevel(GattProtectionLevel::Plain)
+                    .map_err(|e| anyhow::anyhow!("Failed to set read protection: {:?}", e))?;
+                char_params.SetWriteProtectionLevel(GattProtectionLevel::Plain)
+                    .map_err(|e| anyhow::anyhow!("Failed to set write protection: {:?}", e))?;
+                
+                // Create the characteristic (char_guid without reference)
+                let char_result = service.CreateCharacteristicAsync(char_guid, &char_params)?
+                    .get()
+                    .map_err(|e| anyhow::anyhow!("Failed to create characteristic: {:?}", e))?;
+                
+                let characteristic = char_result.Characteristic()
+                    .map_err(|e| anyhow::anyhow!("Failed to get characteristic: {:?}", e))?;
+                
+                info!("✅ Windows: Created GATT characteristic {}: {}", index + 1, char_uuid_str);
+                
+                // Set up ReadRequested handler
+                let char_uuid_owned = char_uuid_str.to_string();
+                characteristic.ReadRequested(&TypedEventHandler::new(
+                    move |_sender: &Option<GattLocalCharacteristic>, args: &Option<GattReadRequestedEventArgs>| {
+                        if let Some(args) = args {
+                            // Get deferral to handle async operation
+                            if let Ok(deferral) = args.GetDeferral() {
+                                // Use GetRequestAsync but handle it synchronously via blocking
+                                if let Ok(async_op) = args.GetRequestAsync() {
+                                    if let Ok(request) = async_op.get() {
+                                        info!("📖 GATT Read requested for characteristic: {}", char_uuid_owned);
+                                        
+                                        // Prepare response data based on characteristic type
+                                        let response_data = match char_uuid_owned.as_str() {
+                                            "6ba7b811-9dad-11d1-80b4-00c04fd430c8" => {
+                                                // ZK Authentication - send challenge
+                                                info!("🔐 Sending ZK auth challenge");
+                                                vec![0x01, 0x02, 0x03, 0x04] // Placeholder challenge
+                                            },
+                                            "6ba7b812-9dad-11d1-80b4-00c04fd430c8" => {
+                                                // Quantum routing info
+                                                info!("🛡️ Sending quantum routing data");
+                                                vec![0x05, 0x06, 0x07, 0x08]
+                                            },
+                                            "6ba7b813-9dad-11d1-80b4-00c04fd430c8" => {
+                                                // Mesh data
+                                                info!("📡 Sending mesh network data");
+                                                vec![0x09, 0x0A, 0x0B, 0x0C]
+                                            },
+                                            "6ba7b814-9dad-11d1-80b4-00c04fd430c8" => {
+                                                // ISP bypass info
+                                                info!("🌐 Sending ISP bypass coordination");
+                                                vec![0x0D, 0x0E, 0x0F, 0x10]
+                                            },
+                                            _ => vec![0x00]
+                                        };
+                                        
+                                        // Create DataWriter and write response
+                                        if let Ok(writer) = DataWriter::new() {
+                                            if writer.WriteBytes(&response_data).is_ok() {
+                                                if let Ok(buffer) = writer.DetachBuffer() {
+                                                    let _ = request.RespondWithValue(&buffer);
+                                                    info!("✅ Responded to GATT read with {} bytes", response_data.len());
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                                let _ = deferral.Complete();
+                            }
+                        }
+                        Ok(())
+                    }
+                )).map_err(|e| anyhow::anyhow!("Failed to set ReadRequested handler: {:?}", e))?;
+                
+                // Set up WriteRequested handler
+                let char_uuid_owned2 = char_uuid_str.to_string();
+                let gatt_tx_clone = self.gatt_message_tx.clone();
+                
+                characteristic.WriteRequested(&TypedEventHandler::new(
+                    move |_sender: &Option<GattLocalCharacteristic>, args: &Option<GattWriteRequestedEventArgs>| {
+                        if let Some(args) = args {
+                            // Get deferral to handle async operation
+                            if let Ok(deferral) = args.GetDeferral() {
+                                // Use GetRequestAsync but handle it synchronously via blocking
+                                if let Ok(async_op) = args.GetRequestAsync() {
+                                    if let Ok(request) = async_op.get() {
+                                        if let Ok(buffer) = request.Value() {
+                                            if let Ok(reader) = DataReader::FromBuffer(&buffer) {
+                                                let length = buffer.Length().unwrap_or(0) as usize;
+                                                if length > 0 {
+                                                    let mut data = vec![0u8; length];
+                                                    if reader.ReadBytes(&mut data).is_ok() {
+                                                        info!("✍️ GATT Write received for {}: {} bytes", char_uuid_owned2, data.len());
+                                                        
+                                                        // ✅ PROCESS AND FORWARD DATA
+                                                        let message = match char_uuid_owned2.as_str() {
+                                                            "6ba7b811-9dad-11d1-80b4-00c04fd430c8" => {
+                                                                // ZK auth characteristic - try to parse auth response
+                                                                info!("🔐 Received ZK auth data");
+                                                                Some(GattMessage::RawData(char_uuid_owned2.clone(), data.clone()))
+                                                            },
+                                                            "6ba7b812-9dad-11d1-80b4-00c04fd430c8" => {
+                                                                // Quantum routing characteristic
+                                                                info!("🛡️ Received quantum routing data");
+                                                                Some(GattMessage::RawData(char_uuid_owned2.clone(), data.clone()))
+                                                            },
+                                                            "6ba7b813-9dad-11d1-80b4-00c04fd430c8" => {
+                                                                // Mesh data transfer characteristic
+                                                                info!("📡 Processing mesh data transfer");
+                                                                
+                                                                // Try to parse as MeshHandshake
+                                                                if data.len() >= 8 {  // Minimum size check
+                                                                    Some(GattMessage::MeshHandshake(data.clone()))
+                                                                } else {
+                                                                    // Try as text message
+                                                                    if let Ok(text) = String::from_utf8(data.clone()) {
+                                                                        if text.starts_with("DHT:") {
+                                                                            info!("🌉 DHT bridge message via GATT");
+                                                                            Some(GattMessage::DhtBridge(text))
+                                                                        } else {
+                                                                            Some(GattMessage::RawData(char_uuid_owned2.clone(), data.clone()))
+                                                                        }
+                                                                    } else {
+                                                                        Some(GattMessage::RawData(char_uuid_owned2.clone(), data.clone()))
+                                                                    }
+                                                                }
+                                                            },
+                                                            "6ba7b814-9dad-11d1-80b4-00c04fd430c8" => {
+                                                                // Mesh coordination characteristic
+                                                                info!("🌐 Received mesh coordination data");
+                                                                Some(GattMessage::RawData(char_uuid_owned2.clone(), data.clone()))
+                                                            },
+                                                            _ => None
+                                                        };
+                                                        
+                                                        // Forward message through channel
+                                                        if let Some(msg) = message {
+                                                            // Use blocking call since we're in a sync callback
+                                                            let gatt_tx = gatt_tx_clone.clone();
+                                                            std::thread::spawn(move || {
+                                                                let rt = tokio::runtime::Handle::current();
+                                                                rt.block_on(async move {
+                                                                    if let Some(tx) = gatt_tx.read().await.as_ref() {
+                                                                        if let Err(e) = tx.send(msg) {
+                                                                            warn!("Failed to forward GATT message: {}", e);
+                                                                        } else {
+                                                                            debug!("✅ GATT message forwarded to unified server");
+                                                                        }
+                                                                    }
+                                                                });
+                                                            });
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        let _ = request.Respond();
+                                        info!("✅ Responded to GATT write");
+                                    }
+                                }
+                                let _ = deferral.Complete();
+                            }
+                        }
+                        Ok(())
+                    }
+                )).map_err(|e| anyhow::anyhow!("Failed to set WriteRequested handler: {:?}", e))?;
+            }
+            
+            // Configure advertising parameters
+            let adv_params = GattServiceProviderAdvertisingParameters::new()
+                .map_err(|e| anyhow::anyhow!("Failed to create advertising parameters: {:?}", e))?;
+            
+            adv_params.SetIsConnectable(true)
+                .map_err(|e| anyhow::anyhow!("Failed to set connectable: {:?}", e))?;
+            adv_params.SetIsDiscoverable(true)
+                .map_err(|e| anyhow::anyhow!("Failed to set discoverable: {:?}", e))?;
+            
+            // Start advertising with the GATT service using the parameters
+            service_provider.StartAdvertisingWithParameters(&adv_params)
+                .map_err(|e| anyhow::anyhow!("Failed to start GATT advertising: {:?}", e))?;
+            
+            info!("✅ Windows: GATT Service advertising started");
+            info!("📡 Windows: GATT Server is now accepting connections from phones/devices");
+            
+            // Store service_provider to keep it alive FIRST
+            // This must be done before spawn_blocking to maintain the reference
+            *self.gatt_service_provider.write().await = Some(Box::new(service_provider));
+            info!("🔒 Windows: GATT Service Provider stored - will remain active");
+            
+            // Note: Windows BLE Advertisement Publisher has known limitations
+            // The GATT Service Provider already makes the device discoverable
+            // Attempting to run a separate BLE advertiser can cause conflicts
+            warn!("⚠️  Windows limitation: GATT Service created but NOT phone-discoverable");
+            warn!("   Phones CANNOT discover this device without manual pairing");
+            info!("� Device is discoverable via GATT service UUID: 6ba7b810-9dad-11d1-80b4-00c04fd430c8");
+            info!("� Solution: Pair PC with phone in Windows Settings > Bluetooth first");
+            
+            // Skip separate BLE advertiser - GATT Service Provider handles discovery
+            // The separate advertiser fails on many Windows systems with E_INVALIDARG
+            // This is a known limitation of the Windows.Devices.Bluetooth.Advertisement API
+            
+            Ok(())
+        }
+        
+        #[cfg(not(feature = "windows-gatt"))]
+        {
+            info!("Windows: GATT service registration (WinRT implementation needed)");
+            info!("💡 Tip: Build with --features windows-gatt to enable full GATT server");
+            Ok(())
+        }
     }
     
     #[cfg(target_os = "macos")]
@@ -1723,6 +1997,33 @@ Value=00
         Ok(address_u64)
     }
     
+    #[cfg(all(target_os = "windows", feature = "windows-gatt"))]
+    fn parse_uuid_to_guid(&self, uuid_str: &str) -> Result<windows::core::GUID> {
+        // Parse UUID string (e.g., "6ba7b810-9dad-11d1-80b4-00c04fd430c8") to Windows GUID
+        let cleaned = uuid_str.replace("-", "").replace("{", "").replace("}", "");
+        
+        if cleaned.len() != 32 {
+            return Err(anyhow::anyhow!("Invalid UUID length: {}", uuid_str));
+        }
+        
+        // Parse components
+        let data1 = u32::from_str_radix(&cleaned[0..8], 16)?;
+        let data2 = u16::from_str_radix(&cleaned[8..12], 16)?;
+        let data3 = u16::from_str_radix(&cleaned[12..16], 16)?;
+        
+        let mut data4 = [0u8; 8];
+        for i in 0..8 {
+            data4[i] = u8::from_str_radix(&cleaned[16 + i*2..16 + i*2 + 2], 16)?;
+        }
+        
+        Ok(windows::core::GUID {
+            data1,
+            data2,
+            data3,
+            data4,
+        })
+    }
+    
     #[cfg(target_os = "macos")]
     async fn macos_read_gatt_characteristic(&self, device_address: &str, char_uuid: &str) -> Result<Vec<u8>> {
         // Use Core Bluetooth via system_profiler and blueutil for real operations
@@ -1972,159 +2273,15 @@ Value=00
 
     #[cfg(target_os = "windows")]
     async fn windows_broadcast_bypass_adv(&self, _adv_data: &[u8]) -> Result<()> {
-        info!("Windows: Starting Bluetooth LE advertising...");
+        warn!("⚠️  Windows BLE advertising limitation detected");
+        warn!("   Windows BluetoothLEAdvertisementPublisher API fails for custom GATT services");
+        warn!("   This is a known Windows platform restriction");
+        warn!("   Workaround: Manually pair PC with phone in Windows Settings first");
         
-        let device_name = format!("ZHTP-{}", hex::encode(&self.device_id[0..4]));
+        // The Windows BLE Advertisement API exists but consistently fails with E_INVALIDARG
+        // for custom GATT service UUIDs on most Windows systems
+        // This is a platform limitation, not a code bug
         
-        // Use multiple Windows Bluetooth approaches to ensure phone discoverability
-        let powershell_script = format!(r#"
-            # Enhanced Bluetooth advertising for phone discovery
-            Write-Host "Starting Bluetooth advertising for device: {0}"
-            
-            try {{
-                # Method 1: Set computer name temporarily for Bluetooth discovery
-                Write-Host " Setting discoverable computer name..."
-                try {{
-                    $currentName = $env:COMPUTERNAME
-                    Write-Host " Current computer name: $currentName"
-                    
-                    # Try to set NetBIOS name which affects Bluetooth discovery
-                    $regPath = "HKLM:\SYSTEM\CurrentControlSet\Control\ComputerName\ComputerName"
-                    if (Test-Path $regPath) {{
-                        $originalName = (Get-ItemProperty -Path $regPath -Name "ComputerName").ComputerName
-                        Write-Host " Attempting to set discoverable name to: {0}"
-                        # Note: This may require restart to take effect
-                    }}
-                }} catch {{
-                    Write-Host "⚠️  Computer name modification requires admin rights"
-                }}
-                
-                # Method 2: Use Bluetooth command line tools
-                Write-Host "Configuring Bluetooth adapter for discovery..."
-                try {{
-                    # Enable discoverable mode using fsutil (if available)
-                    $btctl = Get-Command "btpair" -ErrorAction SilentlyContinue
-                    if ($btctl) {{
-                        Write-Host " Found Bluetooth command line tools"
-                    }}
-                    
-                    # Try to enable discoverable mode
-                    Start-Process -FilePath "cmd" -ArgumentList "/c", "fsutil", "behavior", "set", "DisableLastAccess", "0" -Wait -WindowStyle Hidden -ErrorAction SilentlyContinue
-                }} catch {{
-                    Write-Host "⚠️  Bluetooth command tools not available"
-                }}
-                
-                # Method 3: Create a Bluetooth service advertisement
-                Write-Host " Creating Bluetooth service advertisement..."
-                try {{
-                    # Use netsh to configure Bluetooth settings
-                    $netshResult = Start-Process -FilePath "netsh" -ArgumentList "wlan", "show", "profiles" -Wait -PassThru -WindowStyle Hidden -ErrorAction SilentlyContinue
-                    Write-Host " Network configuration tools accessible"
-                }} catch {{
-                    Write-Host "⚠️  Network configuration tools limited"
-                }}
-                
-                # Method 4: Use Windows Bluetooth API via PowerShell .NET
-                Write-Host "Attempting native Bluetooth device registration..."
-                try {{
-                    # Try to use .NET Bluetooth classes (simpler than WinRT)
-                    Add-Type -AssemblyName System.Core
-                    Write-Host " .NET Core loaded for Bluetooth operations"
-                    
-                    # Create a simple Bluetooth service
-                    $serviceName = "{0}"
-                    Write-Host " Registering Bluetooth service: $serviceName"
-                }} catch {{
-                    Write-Host "⚠️  .NET Bluetooth registration failed"
-                }}
-                
-                # Method 5: Use WMI to enumerate and configure Bluetooth for discovery
-                Write-Host " Configuring Bluetooth adapters for phone discovery..."
-                try {{
-                    $btRadios = Get-WmiObject -Class Win32_PnPEntity | Where-Object {{ $_.Name -like "*Bluetooth*" -and $_.Status -eq "OK" }}
-                    if ($btRadios) {{
-                        Write-Host " Found $($btRadios.Count) Bluetooth adapter(s)"
-                        foreach ($radio in $btRadios) {{
-                            Write-Host " Adapter: $($radio.Name)"
-                            
-                            # Try to get device ID and make it discoverable
-                            if ($radio.DeviceID) {{
-                                Write-Host " Device ID: $($radio.DeviceID)"
-                            }}
-                        }}
-                    }}
-                    
-                    # Look for Bluetooth radio devices specifically
-                    $btRadioDevices = Get-WmiObject -Class Win32_PnPEntity | Where-Object {{ $_.Service -eq "BTHPORT" }}
-                    if ($btRadioDevices) {{
-                        Write-Host "📻 Found $($btRadioDevices.Count) Bluetooth radio device(s)"
-                        foreach ($btRadio in $btRadioDevices) {{
-                            Write-Host " Radio: $($btRadio.Name)"
-                        }}
-                    }}
-                }} catch {{
-                    Write-Host "⚠️  WMI Bluetooth query failed"
-                }}
-                
-                Write-Host ""
-                Write-Host "Device should be discoverable as: {0}"
-                Write-Host " Or as computer name: $env:COMPUTERNAME"
-                Write-Host " Try scanning for devices on your phone now!"
-                Write-Host ""
-                Write-Host " Phone discovery tips:"
-                Write-Host "   - Make sure phone Bluetooth is ON and actively scanning"
-                Write-Host "   - Look for either '{0}' or '$env:COMPUTERNAME' in device list"
-                Write-Host "   - Try refreshing/rescanning if not visible immediately"
-                Write-Host "   - Some phones show computer name instead of custom names"
-                Write-Host ""
-                
-                # Keep the process running and report status
-                $counter = 0
-                while ($true) {{
-                    Start-Sleep -Seconds 30
-                    $counter++
-                    Write-Host " Status Update ($counter): Device {0} advertising active"
-                    
-                    # Check Bluetooth service status
-                    $btService = Get-Service -Name "bthserv" -ErrorAction SilentlyContinue
-                    if ($btService) {{
-                        $status = if ($btService.Status -eq "Running") {{ " Running" }} else {{ "⚠️  $($btService.Status)" }}
-                        Write-Host " Bluetooth Service: $status"
-                    }}
-                }}
-            }}
-            catch {{
-                Write-Error "❌ Bluetooth setup failed: $($_.Exception.Message)"
-                Write-Host " Troubleshooting tips:"
-                Write-Host "  - Make sure Bluetooth is turned ON in Windows Settings"
-                Write-Host "  - Go to Settings > Bluetooth & devices > More Bluetooth settings"
-                Write-Host "  - Check 'Allow Bluetooth devices to discover this PC'"
-                Write-Host "  - Restart Bluetooth service: Restart-Service bthserv"
-                exit 1
-            }}
-        "#, device_name);
-        
-        // Execute PowerShell script in background (non-blocking)
-        let child = std::process::Command::new("powershell")
-            .args(&["-ExecutionPolicy", "Bypass", "-WindowStyle", "Normal", "-Command", &powershell_script])
-            .spawn();
-            
-        match child {
-            Ok(mut process) => {
-                info!(" Windows Bluetooth advertising process started (PID: {:?})", process.id());
-                info!("Device should be discoverable as: {}", device_name);
-                
-                // Store process handle for cleanup
-                std::thread::spawn(move || {
-                    let _ = process.wait();
-                });
-            }
-            Err(e) => {
-                warn!("❌ Failed to start PowerShell Bluetooth process: {}", e);
-            }
-        }
-        
-        info!("Windows: Bluetooth advertising started (using registry/WMI approach)");
         Ok(())
     }
 
@@ -2351,12 +2508,13 @@ Value=00
 
     /// Start advertising for phone discovery
     pub async fn start_advertising(&mut self) -> Result<()> {
-        info!("Starting Bluetooth advertising for phone discovery");
+        warn!("⚠️  Windows limitation: Phone discovery requires manual pairing");
         
-        // Use the existing discovery system which includes real advertising
+        // Start the GATT service and mesh discovery
         self.start_discovery().await?;
         
-        info!("Bluetooth advertising started - phones can now discover this device");
+        warn!("   GATT service active but NOT phone-discoverable");
+        warn!("   Solution: Pair PC with phone in Windows Settings first");
         Ok(())
     }
 
@@ -2365,46 +2523,42 @@ Value=00
         self.discovery_active
     }
 
-    /// Monitor ZHTP protocol transmissions and advertising
+    /// Monitor ZHTP Bluetooth status (real checks only)
     pub async fn start_zhtp_transmission_monitoring(&self) -> Result<()> {
         if self.zhtp_monitor_active.load(std::sync::atomic::Ordering::Relaxed) {
-            info!("📊 ZHTP transmission monitoring already active");
+            info!("Bluetooth monitoring already active");
             return Ok(());
         }
 
-        info!(" Starting comprehensive ZHTP Bluetooth protocol monitoring...");
+        info!("Starting Bluetooth status monitoring...");
         self.zhtp_monitor_active.store(true, std::sync::atomic::Ordering::Relaxed);
 
-        let device_id_hex = hex::encode(&self.device_id[0..4]);
         let monitor_active = self.zhtp_monitor_active.clone();
         
-        // Spawn monitoring task
+        // Spawn monitoring task - check actual service status only
         tokio::spawn(async move {
-            let mut interval = tokio::time::interval(std::time::Duration::from_secs(10));
-            let mut transmission_count = 0u64;
+            let mut interval = tokio::time::interval(std::time::Duration::from_secs(60));
             
             while monitor_active.load(std::sync::atomic::Ordering::Relaxed) {
                 interval.tick().await;
-                transmission_count += 1;
-
-                info!(" === ZHTP Bluetooth Transmission Monitor #{} ===", transmission_count);
                 
-                // Monitor 1: Check Windows Bluetooth service and discoverable status
-                Self::monitor_windows_bluetooth_service(&device_id_hex).await;
-                
-                // Monitor 2: Inspect actual Bluetooth advertising packets
-                Self::monitor_bluetooth_advertising_packets(&device_id_hex).await;
-                
-                // Monitor 3: Check if device appears in Windows Bluetooth device list
-                Self::monitor_windows_device_visibility(&device_id_hex).await;
-                
-                // Monitor 4: Test phone discovery simulation
-                Self::monitor_phone_discovery_simulation(&device_id_hex).await;
-                
-                info!("📊 ZHTP transmission monitoring cycle {} complete", transmission_count);
+                // Only check if Bluetooth service is running
+                use std::process::Command;
+                let output = Command::new("powershell")
+                    .args(&["-Command", "(Get-Service -Name bthserv).Status"])
+                    .output();
+                    
+                if let Ok(result) = output {
+                    let status = String::from_utf8_lossy(&result.stdout).trim().to_string();
+                    if status == "Running" {
+                        info!("Bluetooth service: Running");
+                    } else {
+                        warn!("Bluetooth service status: {}", status);
+                    }
+                }
             }
             
-            info!("🛑 ZHTP transmission monitoring stopped");
+            info!("Bluetooth monitoring stopped");
         });
 
         Ok(())
@@ -2412,224 +2566,7 @@ Value=00
 
     /// Stop ZHTP transmission monitoring
     pub fn stop_zhtp_transmission_monitoring(&self) {
-        info!("🛑 Stopping ZHTP transmission monitoring");
         self.zhtp_monitor_active.store(false, std::sync::atomic::Ordering::Relaxed);
-    }
-
-    /// Monitor Windows Bluetooth service status and configuration
-    async fn monitor_windows_bluetooth_service(device_id: &str) {
-        let powershell_script = format!(r#"
-            Write-Host "=== Bluetooth Service Monitor ==="
-            
-            # Check Bluetooth service status
-            $btService = Get-Service -Name "bthserv" -ErrorAction SilentlyContinue
-            if ($btService) {{
-                Write-Host "📊 Bluetooth Service Status: $($btService.Status)"
-                Write-Host "📊 Service Display Name: $($btService.DisplayName)"
-            }} else {{
-                Write-Host "❌ Bluetooth service not found"
-            }}
-            
-            # Check discoverable status
-            try {{
-                $btRadio = Get-WmiObject -Class Win32_PnPEntity | Where-Object {{ $_.Service -eq "BTHPORT" -and $_.Status -eq "OK" }} | Select-Object -First 1
-                if ($btRadio) {{
-                    Write-Host " Primary Bluetooth Radio: $($btRadio.Name)"
-                    Write-Host " Device ID: $($btRadio.DeviceID)"
-                    Write-Host " Status: $($btRadio.Status)"
-                }}
-            }} catch {{
-                Write-Host "⚠️  Could not query Bluetooth radio status"
-            }}
-            
-            # Check computer discoverable name
-            Write-Host "💻 Computer Name: $env:COMPUTERNAME"
-            Write-Host "💻 Expected ZHTP Name: ZHTP-{0}"
-            
-            Write-Host "=== Service Monitor Complete ==="
-        "#, device_id);
-
-        let _ = std::process::Command::new("powershell")
-            .args(&["-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden", "-Command", &powershell_script])
-            .output();
-    }
-
-    /// Monitor actual Bluetooth advertising packets
-    async fn monitor_bluetooth_advertising_packets(device_id: &str) {
-        let powershell_script = format!(r#"
-            Write-Host " === Bluetooth Advertising Monitor ==="
-            
-            try {{
-                # Try to capture advertising information using Windows APIs
-                Add-Type -AssemblyName System.Core
-                
-                # Check for active Bluetooth LE advertisements
-                Write-Host " Scanning for active Bluetooth LE advertisements..."
-                
-                # Use netsh to check wireless capabilities
-                $wlanProfiles = netsh wlan show profiles 2>$null
-                if ($wlanProfiles) {{
-                    Write-Host "📊 Wireless subsystem active"
-                }}
-                
-                # Check for Bluetooth LE Generic Attribute services
-                $bleServices = Get-WmiObject -Class Win32_PnPEntity | Where-Object {{ $_.Name -like "*Bluetooth LE Generic Attribute*" }}
-                Write-Host "📊 Found $($bleServices.Count) BLE GATT services"
-                
-                # Monitor device name propagation
-                Write-Host "Expected phone-visible name: ZHTP-{0}"
-                Write-Host "💻 Actual computer name: $env:COMPUTERNAME"
-                
-                # Check if custom name is being advertised
-                try {{
-                    $regPath = "HKLM:\SYSTEM\CurrentControlSet\Control\Class\{{e0cbf06c-cd8b-4647-bb8a-263b43f0f974}}"
-                    if (Test-Path $regPath) {{
-                        $adapters = Get-ChildItem $regPath -ErrorAction SilentlyContinue
-                        $customNameCount = 0
-                        foreach ($adapter in $adapters) {{
-                            $friendlyName = Get-ItemProperty -Path $adapter.PSPath -Name "FriendlyName" -ErrorAction SilentlyContinue
-                            if ($friendlyName -and $friendlyName.FriendlyName -like "*ZHTP*") {{
-                                $customNameCount++
-                                Write-Host " Found ZHTP name in adapter: $($friendlyName.FriendlyName)"
-                            }}
-                        }}
-                        if ($customNameCount -eq 0) {{
-                            Write-Host "⚠️  No ZHTP names found in Bluetooth adapters"
-                        }}
-                    }}
-                }} catch {{
-                    Write-Host "⚠️  Could not check registry for custom names"
-                }}
-                
-            }} catch {{
-                Write-Host "❌ Advertising monitor error: $($_.Exception.Message)"
-            }}
-            
-            Write-Host " === Advertising Monitor Complete ==="
-        "#, device_id);
-
-        let _ = std::process::Command::new("powershell")
-            .args(&["-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden", "-Command", &powershell_script])
-            .output();
-    }
-
-    /// Monitor Windows device visibility for phones
-    async fn monitor_windows_device_visibility(device_id: &str) {
-        let powershell_script = format!(r#"
-            Write-Host "👁️ === Device Visibility Monitor ==="
-            
-            # Check Windows Bluetooth settings that affect phone discovery
-            try {{
-                Write-Host " Checking Bluetooth discoverability settings..."
-                
-                # Method 1: Check Bluetooth discovery settings via registry
-                $discoveryPath = "HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters"
-                if (Test-Path $discoveryPath) {{
-                    Write-Host " Bluetooth port parameters accessible"
-                }} else {{
-                    Write-Host "⚠️  Bluetooth port parameters not accessible"
-                }}
-                
-                # Method 2: Check if Windows is set to be discoverable
-                Write-Host " Bluetooth discoverable name should be: ZHTP-{0}"
-                Write-Host "💻 Windows computer name is: $env:COMPUTERNAME"
-                
-                # Method 3: Test if device shows up in standard discovery
-                Write-Host "🔎 Simulating phone discovery process..."
-                
-                # Check paired devices (phones might see this)
-                try {{
-                    $pairedDevices = Get-WmiObject -Class Win32_PnPEntity | Where-Object {{ $_.Name -like "*Bluetooth*" -and $_.Status -eq "OK" }}
-                    Write-Host "📊 Total Bluetooth entities: $($pairedDevices.Count)"
-                    
-                    # Look for any ZHTP-related entries
-                    $zhtpDevices = $pairedDevices | Where-Object {{ $_.Name -like "*ZHTP*" }}
-                    if ($zhtpDevices) {{
-                        Write-Host " Found ZHTP device entries: $($zhtpDevices.Count)"
-                        foreach ($dev in $zhtpDevices) {{
-                            Write-Host " ZHTP Device: $($dev.Name)"
-                        }}
-                    }} else {{
-                        Write-Host "⚠️  No ZHTP device entries found in Windows device list"
-                        Write-Host " This means phones will likely see '$env:COMPUTERNAME' instead of 'ZHTP-{0}'"
-                    }}
-                }} catch {{
-                    Write-Host "❌ Could not enumerate Bluetooth devices"
-                }}
-                
-            }} catch {{
-                Write-Host "❌ Visibility monitor error: $($_.Exception.Message)"
-            }}
-            
-            Write-Host "👁️ === Visibility Monitor Complete ==="
-        "#, device_id);
-
-        let _ = std::process::Command::new("powershell")
-            .args(&["-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden", "-Command", &powershell_script])
-            .output();
-    }
-
-    /// Simulate phone discovery to test visibility
-    async fn monitor_phone_discovery_simulation(device_id: &str) {
-        let powershell_script = format!(r#"
-            Write-Host " === Phone Discovery Simulation ==="
-            
-            try {{
-                Write-Host " Simulating what a phone would see when scanning..."
-                
-                # Simulate Bluetooth LE scan from phone perspective
-                Write-Host " Phone scan would look for:"
-                Write-Host "   • Device name: ZHTP-{0}"
-                Write-Host "   • Computer name: $env:COMPUTERNAME" 
-                Write-Host "   • Bluetooth LE advertisements"
-                Write-Host "   • Discoverable mode devices"
-                
-                # Check what phones actually discover
-                Write-Host " Checking actual discoverable device name..."
-                
-                # Method 1: Check NetBIOS name (what phones often see)
-                $netbiosName = $env:COMPUTERNAME
-                Write-Host " NetBIOS broadcast name: $netbiosName"
-                
-                # Method 2: Check if custom Bluetooth name is active
-                Write-Host "🔎 Checking if custom Bluetooth device name is active..."
-                try {{
-                    # Look for Bluetooth name settings
-                    $btNamePath = "HKLM:\SYSTEM\CurrentControlSet\Control\ComputerName\ComputerName"
-                    if (Test-Path $btNamePath) {{
-                        $computerName = (Get-ItemProperty -Path $btNamePath -Name "ComputerName").ComputerName
-                        Write-Host "💻 Registry computer name: $computerName"
-                        
-                        if ($computerName -like "*ZHTP*") {{
-                            Write-Host " Computer name contains ZHTP - phones should see custom name"
-                        }} else {{
-                            Write-Host "⚠️  Computer name does not contain ZHTP"
-                            Write-Host " Phones will likely see: $computerName"
-                            Write-Host " Custom Bluetooth names require additional configuration"
-                        }}
-                    }}
-                }} catch {{
-                    Write-Host "⚠️  Could not check computer name registry"
-                }}
-                
-                # Method 3: Final discovery summary
-                Write-Host ""
-                Write-Host "📊 === Discovery Summary ==="
-                Write-Host "🎯 Target name: ZHTP-{0}"
-                Write-Host "💻 Actual name: $env:COMPUTERNAME"
-                Write-Host " Phone visibility: Check your phone's Bluetooth scan"
-                Write-Host " Look for either name in your phone's device list"
-                
-            }} catch {{
-                Write-Host "❌ Discovery simulation error: $($_.Exception.Message)"
-            }}
-            
-            Write-Host " === Phone Discovery Simulation Complete ==="
-        "#, device_id);
-
-        let _ = std::process::Command::new("powershell")
-            .args(&["-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden", "-Command", &powershell_script])
-            .output();
     }
 }
 

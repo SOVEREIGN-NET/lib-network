@@ -9,6 +9,9 @@ pub struct MeshConnection {
     pub peer_id: PublicKey,
     /// Connection protocol (Bluetooth, WiFi Direct, LoRaWAN, etc.)
     pub protocol: NetworkProtocol,
+    /// Peer's socket address for sending relay queries (IP:port or Bluetooth address)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub peer_address: Option<String>,
     /// Connection strength/quality (0.0 to 1.0)
     pub signal_strength: f64,
     /// Bandwidth capacity in bytes/second

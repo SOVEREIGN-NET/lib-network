@@ -92,6 +92,7 @@ impl MeshMessageHandler {
         connections.insert(peer.clone(), MeshConnection {
             peer_id: peer,
             protocol: crate::protocols::NetworkProtocol::BluetoothLE, // Default for discovery
+            peer_address: None, // Address not available in PeerDiscovery message
             signal_strength: 0.8, // Good signal
             bandwidth_capacity: shared_resources.relay_bandwidth_kbps as u64 * 1024,
             latency_ms: 50, // Estimate

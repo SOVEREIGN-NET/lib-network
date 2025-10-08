@@ -34,6 +34,12 @@ hex = "0.4"
 # Cryptographic hashing
 sha2 = "0.10"
 
+# Network IP detection
+local-ip-address = "0.5"
+
+# Async utilities
+futures = "0.3"
+
 # REQUIRED for LoRaWAN hardware communication
 serialport = "4.2"           # USB LoRaWAN modules (NEEDED)
 
@@ -57,7 +63,9 @@ windows = { version = "0.51", features = [        # Windows Runtime APIs
     "Foundation",
     "Foundation_Collections",                    # IVectorView and collection interfaces
     "Storage_Streams",                           # IBuffer interface for GATT data
-    "Devices_Bluetooth_GenericAttributeProfile",
+    "Devices_Bluetooth",                         # BluetoothLEDevice
+    "Devices_Bluetooth_GenericAttributeProfile", # GATT Client and Server
+    "Devices_Bluetooth_Advertisement",           # BLE Advertising
     "Devices_WiFiDirect",                        # Windows WiFi Direct APIs
     "Networking_Proximity"                       # P2P proximity APIs
 ], optional = true }

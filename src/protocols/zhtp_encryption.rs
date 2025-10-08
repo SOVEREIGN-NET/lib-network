@@ -152,6 +152,11 @@ impl ZhtpEncryptionSession {
         Ok(())
     }
     
+    /// Get the shared secret (if established)
+    pub fn get_shared_secret(&self) -> Option<[u8; 32]> {
+        self.shared_secret
+    }
+    
     /// Encrypt message with ChaCha20-Poly1305 using shared secret
     pub fn encrypt_message(
         &mut self,
