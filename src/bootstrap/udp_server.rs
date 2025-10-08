@@ -13,7 +13,7 @@ use crate::types::mesh_message::ZhtpMeshMessage;
 
 /// Start UDP bootstrap server for mesh packet handling
 pub async fn start_udp_bootstrap_server(server_id: Uuid, port: u16) -> Result<()> {
-    let bind_addr = format!("0.0.0.0:{}", port);
+    let bind_addr = format!("127.0.0.1:{}", port);
     
     info!("Attempting to bind UDP socket on {}...", bind_addr);
     let socket = match UdpSocket::bind(&bind_addr).await {

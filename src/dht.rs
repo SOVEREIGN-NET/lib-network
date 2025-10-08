@@ -222,7 +222,7 @@ impl DHTClient {
         // Try multiple ports for DHT protocol (start from 33446 to avoid conflicts with main port)
         let mut dht_initialized = false;
         for port in 33446..33456 {
-            if let Ok(bind_addr) = format!("0.0.0.0:{}", port).parse::<SocketAddr>() {
+            if let Ok(bind_addr) = format!("127.0.0.1:{}", port).parse::<SocketAddr>() {
                 match protocol_handler.initialize(bind_addr).await {
                     Ok(()) => {
                         *client.protocol_handler.lock().await = Some(protocol_handler);
@@ -919,7 +919,7 @@ pub async fn call_native_dht_client(function_name: &str, params: &serde_json::Va
             let mut protocol_handler = DhtProtocolHandler::new(temp_identity);
             
             // Try to initialize and query using binary protocol
-            if let Ok(bind_addr) = "0.0.0.0:0".parse::<SocketAddr>() {
+            if let Ok(bind_addr) = "127.0.0.1:0".parse::<SocketAddr>() {
                 if protocol_handler.initialize(bind_addr).await.is_ok() {
                     // Query DHT using native binary protocol
                     // In production, would query multiple peers

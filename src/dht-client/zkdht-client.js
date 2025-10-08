@@ -56,8 +56,7 @@ class ZkDHTClient {
         ];
         
         const remoteBootstrapNodes = [
-            'zhtp://bootstrap1.zhtp:7777',
-            'zhtp://bootstrap2.zhtp:7777',
+            'zhtp://127.0.0.1:7777',
             'zhtp://bootstrap3.zhtp:7777'
         ];
 

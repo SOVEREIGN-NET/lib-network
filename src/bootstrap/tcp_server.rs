@@ -13,7 +13,7 @@ use uuid::Uuid;
 
 /// Start TCP bootstrap server to accept incoming bootstrap connections
 pub async fn start_tcp_bootstrap_server(server_id: Uuid, port: u16) -> Result<()> {
-    let bind_addr = format!("0.0.0.0:{}", port);
+    let bind_addr = format!("127.0.0.1:{}", port);
     
     info!("Starting TCP bootstrap server on {}...", bind_addr);
     let listener = match TcpListener::bind(&bind_addr).await {

@@ -189,7 +189,7 @@ impl DHTBootstrap {
     async fn send_zhtp_ping(&self, target: std::net::SocketAddr) -> Result<Vec<u8>> {
         use crate::dht::protocol::*;
         
-        let socket = UdpSocket::bind("0.0.0.0:0").await?;
+        let socket = UdpSocket::bind("127.0.0.1:0").await?;
         
         // Generate random packet ID for ping
         let mut packet_id = [0u8; 16];
