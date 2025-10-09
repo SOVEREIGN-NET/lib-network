@@ -7,6 +7,10 @@ description = "ZHTP Mesh Protocol - Revolutionary Internet Replacement"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/SOVEREIGN-NETWORK/ZHTPDEV"
 
+[lib]
+name = "lib_network"
+path = "src/lib.rs"
+
 [dependencies]
 # Async runtime
 tokio = { version = "1.0", features = ["full"] }
@@ -82,10 +86,6 @@ windows = { version = "0.51", features = [        # Windows Runtime APIs
 tokio-test = "0.4"
 tracing-subscriber = "0.3"
 futures = "0.3"
-
-[lib]
-name = "lib_network"
-path = "src/lib.rs"
 
 [features]
 default = []                      # All lib-* dependencies are required and enabled by default
