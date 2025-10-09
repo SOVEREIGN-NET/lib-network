@@ -931,7 +931,9 @@ impl WiFiDirectMeshProtocol {
         
         #[cfg(target_os = "macos")]
         {
-            return self.macos_scan_wifi_direct_groups().await;
+            // macOS WiFi Direct is not directly supported, return empty list
+            info!("WiFi Direct scanning not available on macOS (no native API)");
+            return Ok(vec![]);
         }
         
         // Fallback for unsupported platforms
@@ -2332,7 +2334,7 @@ impl WiFiDirectMeshProtocol {
                     info!("🍎 macOS: Sent {} bytes via UDP broadcast", message.len());
                     
                     // Calculate realistic transmission delay
-                    let transmission_time_ms = (message.len() as f64 / (device.data_rate * 125.0)) * 1000.0;
+                    let transmission_time_ms = (message.len() as f64 / (device.data_rate as f64 * 125.0)) * 1000.0;
                     tokio::time::sleep(tokio::time::Duration::from_millis(transmission_time_ms as u64 + 10)).await;
                     
                     Ok(())

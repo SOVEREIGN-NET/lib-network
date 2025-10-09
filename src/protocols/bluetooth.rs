@@ -22,7 +22,7 @@ mod enhanced_bluetooth;
 #[cfg(all(target_os = "linux", feature = "enhanced-parsing"))]
 use enhanced_bluetooth::BlueZGattParser;
 
-#[cfg(target_os = "macos")]
+#[cfg(all(target_os = "macos", feature = "macos-corebluetooth"))]
 use enhanced_bluetooth::MacOSBluetoothManager;
 
 /// Message types that can be received from GATT characteristics
