@@ -74,8 +74,11 @@ windows = { version = "0.51", features = [        # Windows Runtime APIs
     "Devices_Bluetooth",                         # BluetoothLEDevice
     "Devices_Bluetooth_GenericAttributeProfile", # GATT Client and Server
     "Devices_Bluetooth_Advertisement",           # BLE Advertising
+    "Devices_Bluetooth_Rfcomm",                  # RFCOMM (Bluetooth Classic)
     "Devices_WiFiDirect",                        # Windows WiFi Direct APIs
-    "Networking_Proximity"                       # P2P proximity APIs
+    "Networking_Proximity",                      # P2P proximity APIs
+    "Networking_Sockets",                        # StreamSocket for RFCOMM
+    "Networking",                                # HostName and networking
 ], optional = true }
 
 # Cryptography (from lib-crypto package)

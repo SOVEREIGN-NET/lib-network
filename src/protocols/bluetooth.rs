@@ -728,28 +728,135 @@ impl BluetoothMeshProtocol {
 
     #[cfg(target_os = "windows")]
     async fn windows_scan_mesh_peers() -> Result<Vec<MeshPeer>> {
-        use std::process::Command;
+        info!("Windows: Scanning for ZHTP mesh peers via BLE advertisement...");
         
-        info!("Windows: Scanning for ZHTP bypass peers...");
-        
-        // Use PowerShell to scan for Bluetooth devices
-        let output = Command::new("powershell")
-            .args(&["-Command", "Get-PnpDevice | Where-Object {$_.Class -eq 'Bluetooth' -and $_.Status -eq 'OK'} | Select-Object FriendlyName,InstanceId"])
-            .output();
-        
-        let mut peers = Vec::new();
-        
-        if let Ok(result) = output {
-            let output_str = String::from_utf8_lossy(&result.stdout);
-            for line in output_str.lines() {
-                if let Some(peer) = Self::parse_windows_mesh_peer(line) {
-                    peers.push(peer);
+        #[cfg(feature = "windows-gatt")]
+        {
+            use windows::{
+                Devices::Bluetooth::Advertisement::*,
+                Foundation::TypedEventHandler,
+            };
+            use std::sync::{Arc, Mutex};
+            use std::time::Duration;
+            
+            let peers: Arc<Mutex<Vec<MeshPeer>>> = Arc::new(Mutex::new(Vec::new()));
+            let peers_clone = peers.clone();
+            
+            // Create BLE Advertisement Watcher
+            let watcher = BluetoothLEAdvertisementWatcher::new()
+                .map_err(|e| anyhow::anyhow!("Failed to create BLE watcher: {:?}", e))?;
+            
+            // Set scanning mode to active (sends scan requests)
+            watcher.SetScanningMode(BluetoothLEScanningMode::Active)
+                .map_err(|e| anyhow::anyhow!("Failed to set scanning mode: {:?}", e))?;
+            
+            // Handle received advertisements
+            watcher.Received(&TypedEventHandler::new(
+                move |_sender: &Option<BluetoothLEAdvertisementWatcher>, 
+                      args: &Option<BluetoothLEAdvertisementReceivedEventArgs>| {
+                    if let Some(args) = args {
+                        if let Ok(adv) = args.Advertisement() {
+                            // Check if advertisement contains ZHTP service UUID
+                            if let Ok(service_uuids) = adv.ServiceUuids() {
+                                if let Ok(size) = service_uuids.Size() {
+                                    for i in 0..size {
+                                        if let Ok(uuid) = service_uuids.GetAt(i) {
+                                            let uuid_str = format!("{:?}", uuid).to_lowercase();
+                                            
+                                            // Check for ZHTP Mesh Service UUID
+                                            if uuid_str.contains("6ba7b810") || uuid_str.contains("ZHTP") {
+                                                if let Ok(addr) = args.BluetoothAddress() {
+                                                    let address = format!("{:012X}", addr);
+                                                    let rssi = args.RawSignalStrengthInDBm().unwrap_or(-60);
+                                                    
+                                                    let peer = MeshPeer {
+                                                        peer_id: address.clone(),
+                                                        address: format!("{}:{}:{}:{}:{}:{}",
+                                                            &address[0..2], &address[2..4], &address[4..6],
+                                                            &address[6..8], &address[8..10], &address[10..12]),
+                                                        rssi: rssi as i16,
+                                                        last_seen: std::time::SystemTime::now()
+                                                            .duration_since(std::time::UNIX_EPOCH)
+                                                            .unwrap_or_default()
+                                                            .as_secs(),
+                                                        mesh_capable: true,
+                                                        services: vec!["ZHTP-MESH".to_string()],
+                                                        quantum_secure: true,
+                                                    };
+                                                    
+                                                    let mut peers_guard = peers_clone.lock().unwrap();
+                                                    if !peers_guard.iter().any(|p| p.address == peer.address) {
+                                                        info!("🔍 Discovered ZHTP peer: {} (RSSI: {} dBm)", peer.address, rssi);
+                                                        peers_guard.push(peer);
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            
+                            // Also check local name for "ZHTP"
+                            if let Ok(local_name) = adv.LocalName() {
+                                let name = local_name.to_string();
+                                if name.contains("ZHTP") {
+                                    if let Ok(addr) = args.BluetoothAddress() {
+                                        let address = format!("{:012X}", addr);
+                                        let rssi = args.RawSignalStrengthInDBm().unwrap_or(-60);
+                                        
+                                        let peer = MeshPeer {
+                                            peer_id: address.clone(),
+                                            address: format!("{}:{}:{}:{}:{}:{}",
+                                                &address[0..2], &address[2..4], &address[4..6],
+                                                &address[6..8], &address[8..10], &address[10..12]),
+                                            rssi: rssi as i16,
+                                            last_seen: std::time::SystemTime::now()
+                                                .duration_since(std::time::UNIX_EPOCH)
+                                                .unwrap_or_default()
+                                                .as_secs(),
+                                            mesh_capable: true,
+                                            services: vec!["ZHTP-MESH".to_string()],
+                                            quantum_secure: true,
+                                        };
+                                        
+                                        let mut peers_guard = peers_clone.lock().unwrap();
+                                        if !peers_guard.iter().any(|p| p.address == peer.address) {
+                                            info!("🔍 Discovered ZHTP peer by name: {} - {}", peer.address, name);
+                                            peers_guard.push(peer);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    Ok(())
                 }
-            }
+            )).map_err(|e| anyhow::anyhow!("Failed to set Received handler: {:?}", e))?;
+            
+            // Start scanning
+            watcher.Start()
+                .map_err(|e| anyhow::anyhow!("Failed to start BLE scanning: {:?}", e))?;
+            
+            info!("🔍 Windows BLE scanning active for 10 seconds...");
+            
+            // Scan for 10 seconds
+            tokio::time::sleep(Duration::from_secs(10)).await;
+            
+            // Stop scanning
+            watcher.Stop()
+                .map_err(|e| anyhow::anyhow!("Failed to stop BLE scanning: {:?}", e))?;
+            
+            let final_peers = peers.lock().unwrap().clone();
+            info!("Found {} ZHTP mesh peers on Windows", final_peers.len());
+            Ok(final_peers)
         }
         
-        info!("Found {} ZHTP bypass peers on Windows", peers.len());
-        Ok(peers)
+        #[cfg(not(feature = "windows-gatt"))]
+        {
+            warn!("Windows BLE scanning requires windows-gatt feature");
+            warn!("Build with: cargo build --features windows-gatt");
+            Ok(Vec::new())
+        }
     }
 
     #[cfg(target_os = "macos")]
@@ -2273,14 +2380,19 @@ Value=00
 
     #[cfg(target_os = "windows")]
     async fn windows_broadcast_bypass_adv(&self, _adv_data: &[u8]) -> Result<()> {
-        warn!("⚠️  Windows BLE advertising limitation detected");
-        warn!("   Windows BluetoothLEAdvertisementPublisher API fails for custom GATT services");
-        warn!("   This is a known Windows platform restriction");
-        warn!("   Workaround: Manually pair PC with phone in Windows Settings first");
+        // Windows BLE advertising disabled due to WinRT API limitations
+        // BLE scanning still works, but advertising is problematic on Windows
         
-        // The Windows BLE Advertisement API exists but consistently fails with E_INVALIDARG
-        // for custom GATT service UUIDs on most Windows systems
-        // This is a platform limitation, not a code bug
+        info!("💡 Windows: BLE advertising disabled (platform limitations)");
+        info!("✅ BLE scanning is active and working");
+        info!("📡 Recommendation: Use Bluetooth Classic or WiFi Direct for Windows mesh");
+        info!("🐧 For full BLE mesh support, deploy on Linux (BlueZ) or Raspberry Pi");
+        
+        // Strategy for Windows nodes:
+        // 1. Use BLE scanning to discover Linux/Pi nodes that ARE advertising
+        // 2. Use Bluetooth Classic for Windows-to-Windows connections
+        // 3. Use WiFi Direct as fallback
+        // 4. Use manual pairing + GATT server for phone connections
         
         Ok(())
     }

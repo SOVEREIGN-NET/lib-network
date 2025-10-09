@@ -4,6 +4,32 @@ use rand;
 use crate::types::wifi_security::WiFiSecurity;
 use crate::discovery::hardware::HardwareCapabilities;
 
+/// Estimate bandwidth from signal strength
+/// Returns estimated bandwidth in Mbps based on signal strength in dBm
+fn estimate_bandwidth_from_signal(signal_dbm: i32) -> u32 {
+    // WiFi bandwidth estimation based on signal strength
+    // Typical values:
+    // -30 dBm: Excellent (300+ Mbps)
+    // -50 dBm: Good (150-300 Mbps)
+    // -60 dBm: Fair (50-150 Mbps)
+    // -70 dBm: Weak (10-50 Mbps)
+    // -80 dBm: Very weak (1-10 Mbps)
+    
+    if signal_dbm >= -40 {
+        300 // Excellent signal
+    } else if signal_dbm >= -50 {
+        200 // Very good signal
+    } else if signal_dbm >= -60 {
+        100 // Good signal
+    } else if signal_dbm >= -70 {
+        30 // Fair signal
+    } else if signal_dbm >= -80 {
+        5 // Weak signal
+    } else {
+        1 // Very weak signal
+    }
+}
+
 /// Real WiFi network discovery information
 #[derive(Debug, Clone)]
 pub struct WiFiNetworkInfo {
@@ -19,22 +45,6 @@ pub struct WiFiNetworkInfo {
     pub security: WiFiSecurity,
     /// Available bandwidth estimate
     pub bandwidth_estimate_mbps: u32,
-}
-
-/// Estimate available bandwidth based on signal strength
-/// Uses realistic WiFi performance curves based on signal quality
-fn estimate_bandwidth_from_signal(signal_dbm: i32) -> u32 {
-    // Signal strength to bandwidth mapping (approximate)
-    // Based on typical 802.11n/ac performance
-    match signal_dbm {
-        s if s >= -30 => 300,  // Excellent signal: 300 Mbps
-        s if s >= -50 => 200,  // Very good signal: 200 Mbps
-        s if s >= -60 => 150,  // Good signal: 150 Mbps
-        s if s >= -67 => 100,  // Fair signal: 100 Mbps
-        s if s >= -70 => 50,   // Weak signal: 50 Mbps
-        s if s >= -80 => 20,   // Very weak signal: 20 Mbps
-        _ => 5,                // Unusable signal: 5 Mbps
-    }
 }
 
 /// Discover high-power WiFi relays
