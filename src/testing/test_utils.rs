@@ -6,54 +6,21 @@ use crate::mesh::server::{ZhtpMeshServer, NetworkConfig};
 
 /// Create a test mesh server for development with real implementations
 pub async fn create_test_mesh_server() -> Result<ZhtpMeshServer> {
+    use lib_storage::{UnifiedStorageSystem, UnifiedStorageConfig};
+    
     let node_id = hash_blake3(b"test-mesh-server");
+    let storage_config = UnifiedStorageConfig::default();
+    let storage = UnifiedStorageSystem::new(storage_config).await?;
     
-    // Use real storage system when feature is enabled
-    #[cfg(feature = "lib-storage")]
-    {
-        use lib_storage::{UnifiedStorageSystem, UnifiedStorageConfig};
-        let storage_config = UnifiedStorageConfig::default();
-        let storage = UnifiedStorageSystem::new(storage_config).await?;
-        
-        let protocols = vec![
-            NetworkProtocol::BluetoothLE,
-            NetworkProtocol::WiFiDirect,
-            NetworkProtocol::LoRaWAN,
-        ];
-        
-        // Create dummy owner key for testing 
-        let owner_key = lib_crypto::PublicKey::new(node_id.to_vec());
-        ZhtpMeshServer::new(node_id, owner_key, storage, protocols).await
-    }
+    let protocols = vec![
+        NetworkProtocol::BluetoothLE,
+        NetworkProtocol::WiFiDirect,
+        NetworkProtocol::LoRaWAN,
+    ];
     
-    #[cfg(not(feature = "lib-storage"))]
-    {
-        // Create temporary storage system for testing
-        let storage_config = TestStorageConfig {
-            node_id,
-            storage_path: PathBuf::from("./test-mesh-storage"),
-            capacity: 1024 * 1024 * 1024, // 1GB
-            replication_factor: 3,
-            addresses: vec![],
-            k_bucket_size: 20,
-            dht_replication: 3,
-            erasure_data_chunks: 4,
-            erasure_parity_chunks: 2,
-            chunk_size: 1024 * 64,
-        };
-        
-        let storage = TestStorageSystem::new(storage_config)?;
-        
-        let protocols = vec![
-            NetworkProtocol::BluetoothLE,
-            NetworkProtocol::WiFiDirect,
-            NetworkProtocol::LoRaWAN,
-        ];
-        
-        // This branch won't work anymore since ZhtpMeshServer expects UnifiedStorageSystem
-        // But we keep it for backward compatibility in case tests don't use the feature
-        compile_error!("TestStorageSystem no longer compatible - enable lib-storage feature")
-    }
+    // Create dummy owner key for testing 
+    let owner_key = lib_crypto::PublicKey::new(node_id.to_vec());
+    ZhtpMeshServer::new(node_id, owner_key, storage, protocols).await
 }
 
 /// Test storage system that implements the UnifiedStorageSystem interface
@@ -201,24 +168,16 @@ mod tests {
     }
     
     #[tokio::test]
-    #[cfg(feature = "lib-storage")]
     async fn test_storage_system() {
         // Test with real storage system
         use lib_storage::{UnifiedStorageSystem, UnifiedStorageConfig};
         
         let config = UnifiedStorageConfig::default();
-        let mut storage = UnifiedStorageSystem::new(config).await.unwrap();
+        let storage = UnifiedStorageSystem::new(config).await.unwrap();
         
         // Basic functionality test with real storage
         let stats = storage.get_statistics().await.unwrap();
         assert!(stats.storage_stats.total_uploads == 0); // Fresh system
-    }
-    
-    #[tokio::test]
-    #[cfg(not(feature = "lib-storage"))]
-    async fn test_storage_system() {
-        // Legacy test with TestStorageSystem - won't compile anymore
-        compile_error!("Enable lib-storage feature for tests");
     }
     
     #[tokio::test]

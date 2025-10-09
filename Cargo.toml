@@ -23,7 +23,7 @@ anyhow = "1.0"
 tracing = "0.1"
 
 # UUID generation
-uuid = { version = "1.0", features = ["v4"] }
+uuid = { version = "1.0", features = ["v4", "serde"] }
 
 # Random number generation
 rand = "0.8"
@@ -52,6 +52,14 @@ quick-xml = { version = "0.31", optional = true }  # XML parsing for D-Bus respo
 aes = { version = "0.8", optional = true }          # AES encryption for WPA3-SAE
 cmac = { version = "0.7", optional = true }         # CMAC for authentication protocols
 
+# ZHTP package dependencies
+lib-crypto = { path = "../lib-crypto" }
+lib-proofs = { path = "../lib-proofs" }
+lib-economy = { path = "../lib-economy" }
+lib-protocols = { path = "../lib-protocols" }
+lib-identity = { path = "../lib-identity" }
+lib-storage = { path = "../lib-storage" }
+
 # Platform-specific GATT and Bluetooth APIs
 [target.'cfg(target_os = "linux")'.dependencies]
 regex = "1.0"                                     # For parsing BlueZ responses
@@ -70,40 +78,21 @@ windows = { version = "0.51", features = [        # Windows Runtime APIs
     "Networking_Proximity"                       # P2P proximity APIs
 ], optional = true }
 
-# Cryptography (from lib-crypto package)
-lib-crypto = { path = "../lib-crypto" }
-
-# ZK proofs (from lib-proofs package) 
-lib-proofs = { path = "../lib-proofs" }
-
-# Economics system integration
-lib-economy = { path = "../lib-economy" }
-
-# Protocols and API system integration
-lib-protocols = { path = "../lib-protocols" }
-
-# Identity system integration
-lib-identity = { path = "../lib-identity" }
-
-# NOTE: lib-storage dependency added for DHT integration
-lib-storage = { path = "../lib-storage" }
-
-
 [dev-dependencies]
 tokio-test = "0.4"
 tracing-subscriber = "0.3"
 futures = "0.3"
 
+[lib]
+name = "lib_network"
+path = "src/lib.rs"
+
 [features]
-default = ["lib-storage"]         # Include storage by default for testing compatibility
+default = []                      # All lib-* dependencies are required and enabled by default
 windows-gatt = ["windows"]        # Windows WinRT GATT support
 macos-corebluetooth = []          # macOS Core Bluetooth support
 enhanced-bluetooth = ["windows-gatt"] # Enhanced Bluetooth functionality with Windows GATT support
 enhanced-security = ["aes", "cmac"] # Advanced cryptographic protocols
 enhanced-parsing = ["quick-xml"] # Enhanced XML parsing
 enhanced-wifi-direct = ["aes", "cmac", "quick-xml"] # Complete WiFi Direct enhancements
-testing = ["lib-storage"]         # Testing requires storage feature
 hardware-scanning = []
-lib-economy = []
-lib-storage = []
-lib-proofs = []

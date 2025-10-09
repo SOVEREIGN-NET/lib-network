@@ -18,6 +18,7 @@ pub use crate::mesh::statistics::MeshProtocolStats;
 pub use crate::types::*;
 pub use crate::discovery::*;
 pub use crate::relays::*;
+pub use crate::blockchain_sync::BlockchainSyncManager;
 
 
 // Native binary DHT protocol with lib-storage backend
@@ -42,6 +43,7 @@ pub mod testing;
 pub mod platform;
 pub mod dht; // Native binary DHT protocol with lib-storage backend
 pub mod web4; // Web4 domain registry and content publishing
+pub mod blockchain_sync; // Blockchain synchronization over mesh protocols
 
 // External dependencies for economics, API, and storage
 pub use lib_economy as economics;

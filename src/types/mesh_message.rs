@@ -69,4 +69,21 @@ pub enum ZhtpMeshMessage {
         body: Vec<u8>,
         timestamp: u64,
     },
+    /// Request blockchain data from peer (for sync)
+    BlockchainRequest {
+        requester: PublicKey,
+        request_id: u64,
+        /// Optional: request only blocks after this height
+        from_height: Option<u64>,
+    },
+    /// Send blockchain data in chunked format
+    BlockchainData {
+        request_id: u64,
+        chunk_index: u32,
+        total_chunks: u32,
+        /// Serialized blockchain data chunk (bincode format)
+        data: Vec<u8>,
+        /// Hash of the complete blockchain data (for verification)
+        complete_data_hash: [u8; 32],
+    },
 }

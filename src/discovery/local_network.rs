@@ -33,6 +33,18 @@ pub struct MeshHandshake {
     pub mesh_port: u16,
     pub protocols: Vec<String>,
     pub discovered_via: u8, // 0=multicast, 1=bluetooth, 2=wifi_direct, 3=manual
+    #[serde(default)]
+    pub capabilities: HandshakeCapabilities,
+}
+
+/// Protocol capabilities for hybrid negotiation
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct HandshakeCapabilities {
+    pub supports_bluetooth_classic: bool,  // Can upgrade to RFCOMM
+    pub supports_bluetooth_le: bool,       // BLE GATT available
+    pub supports_wifi_direct: bool,        // WiFi Direct capable
+    pub max_throughput: u32,               // Maximum bandwidth (bytes/sec)
+    pub prefers_high_throughput: bool,     // Prefer Classic over BLE
 }
 
 /// Start local network discovery service
@@ -161,6 +173,7 @@ async fn attempt_connect_to_discovered_peer(announcement: &NodeAnnouncement) {
                 mesh_port: announcement.mesh_port,
                 protocols: announcement.protocols.clone(),
                 discovered_via: 0, // 0 = local multicast discovery
+                capabilities: HandshakeCapabilities::default(), // Default capabilities
             };
             
             // Serialize with bincode (10x faster, 60% smaller than JSON)

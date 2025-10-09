@@ -124,8 +124,8 @@ impl BluetoothMeshProtocol {
         Ok(BluetoothMeshProtocol {
             node_id,
             device_id,
-            advertising_interval: 100, // 100ms
-            connection_interval: 50,   // 50ms
+            advertising_interval: 100, // 100ms - standard for discovery
+            connection_interval: 7,    // 7.5ms - minimum allowed by BLE spec for max throughput
             max_connections: 8,
             current_connections: Arc::new(RwLock::new(HashMap::new())),
             discovery_active: false,
@@ -246,7 +246,7 @@ impl BluetoothMeshProtocol {
         NodeCapabilities {
             has_dht,
             can_relay: true,
-            max_bandwidth: 5_000_000, // 5 MB/s
+            max_bandwidth: 250_000, // 250 KB/s - realistic BLE throughput with optimization (1ms delay + 7.5ms interval)
             protocols: vec!["bluetooth".to_string(), "zhtp".to_string()],
             reputation,
             quantum_secure: true,
@@ -573,8 +573,8 @@ impl BluetoothMeshProtocol {
                 info!("Sending fragment {}/{} ({} bytes)", i + 1, chunks.len(), chunk.len());
                 self.transmit_mesh_packet(chunk, target_address).await?;
                 
-                // Small delay between fragments to avoid overwhelming BLE stack
-                tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+                // Minimal delay for BLE flow control (1ms allows for ~250 KB/s theoretical max)
+                tokio::time::sleep(tokio::time::Duration::from_millis(1)).await;
             }
         }
         

@@ -8,6 +8,7 @@ use tokio::net::TcpStream;
 use tokio::time::{timeout, Duration};
 use tracing::{info, debug, warn};
 use std::net::{IpAddr, Ipv4Addr};
+use crate::discovery::local_network::HandshakeCapabilities;
 
 /// Common ZHTP ports to scan
 const ZHTP_COMMON_PORTS: &[u16] = &[
@@ -306,6 +307,7 @@ async fn attempt_auto_connect(node: &ScanResult, local_node_id: uuid::Uuid) -> R
         mesh_port: 9333,
         protocols: vec!["zhtp".to_string(), "dht".to_string()],
         discovered_via: 4, // 4 = network scan
+        capabilities: HandshakeCapabilities::default(), // Default capabilities
     };
     
     let handshake_bytes = bincode::serialize(&handshake)?;
