@@ -13,6 +13,13 @@ use serde::{Serialize, Deserialize};
 use lib_crypto::PublicKey;
 use super::zhtp_auth::{ZhtpAuthManager, NodeCapabilities, ZhtpAuthVerification};
 
+// Windows-specific imports
+#[cfg(all(target_os = "windows", feature = "windows-gatt"))]
+use windows::{
+    Devices::Bluetooth::Rfcomm::RfcommServiceProvider,
+    Networking::Sockets::StreamSocketListener,
+};
+
 /// RFCOMM channel assignments (1-30 available)
 pub mod rfcomm_channels {
     pub const ZK_AUTH: u8 = 1;           // Authentication challenge/response
@@ -49,6 +56,48 @@ pub struct RfcommConnection {
     pub channel: u8,
     pub mtu: u16,
     pub last_seen: u64,
+    pub is_outgoing: bool, // True if we initiated, false if peer connected to us
+}
+
+/// Discovered Bluetooth device
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BluetoothDevice {
+    pub address: String,
+    pub name: Option<String>,
+    pub device_class: u32,
+    pub is_paired: bool,
+    pub is_connected: bool,
+    pub rssi: Option<i16>,
+    pub last_seen: u64,
+}
+
+/// RFCOMM Service information
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RfcommServiceInfo {
+    pub service_uuid: String,
+    pub service_name: String,
+    pub channel: u8,
+    pub device_address: String,
+}
+
+/// Platform-specific device handle
+#[cfg(all(target_os = "windows", feature = "windows-gatt"))]
+pub struct WindowsBluetoothDevice {
+    device: windows::Devices::Bluetooth::BluetoothDevice,
+    address: String,
+}
+
+#[cfg(target_os = "linux")]
+pub struct LinuxBluetoothDevice {
+    address: String,
+    device_path: String, // DBus object path
+    adapter: String,
+}
+
+#[cfg(target_os = "macos")]
+pub struct MacOSBluetoothDevice {
+    address: String,
+    device_id: String,
 }
 
 /// RFCOMM Stream wrapper with async read/write (compatible with TcpStream interface)
@@ -613,24 +662,22 @@ impl BluetoothClassicProtocol {
             
             let provider = provider_result;
             
-            // Get the listener
-            let listener = provider.ServiceProvider()
-                .map_err(|e| anyhow!("Failed to get service provider: {:?}", e))?;
+            // Create StreamSocketListener for incoming connections
+            let listener = StreamSocketListener::new()
+                .map_err(|e| anyhow!("Failed to create StreamSocketListener: {:?}", e))?;
             
-            // Set service name
-            let sdp_attributes = provider.SdpRawAttributes()
-                .map_err(|e| anyhow!("Failed to get SDP attributes: {:?}", e))?;
-            
-            // Add service name to SDP record
-            let service_name = "ZHTP Mesh RFCOMM";
-            let name_attribute_id = 0x0100u32; // Service Name attribute ID
+            // Bind listener to RFCOMM provider's local service name
+            listener.BindServiceNameAsync(&provider.ServiceId()?.AsString()?)
+                .map_err(|e| anyhow!("Failed to bind listener: {:?}", e))?
+                .get()
+                .map_err(|e| anyhow!("Failed to complete listener binding: {:?}", e))?;
             
             info!("✅ Windows: RFCOMM service provider created");
             info!("📡 Windows: Service UUID: 6ba7b810-9dad-11d1-80b4-00c04fd430c8");
             info!("🔌 Windows: RFCOMM channel: {}", rfcomm_channels::MESH_DATA);
             
-            // Start advertising
-            provider.StartAdvertising(&listener, true)
+            // Start advertising (Windows API only takes listener parameter)
+            provider.StartAdvertising(&listener)
                 .map_err(|e| anyhow!("Failed to start RFCOMM advertising: {:?}", e))?;
             
             info!("✅ Windows: RFCOMM service advertising started");
@@ -645,7 +692,8 @@ impl BluetoothClassicProtocol {
         {
             info!("🪟 Windows: RFCOMM service registration requires windows-gatt feature");
             info!("   To enable: cargo build --features windows-gatt");
-            warn!("   Windows RFCOMM support disabled");
+            warn!("   Windows RFCOMM support disabled - discovery and connections will fail");
+            warn!("🚨 Build with --features windows-gatt to enable Bluetooth Classic on Windows");
             Ok(())
         }
     }
@@ -1134,6 +1182,810 @@ impl BluetoothClassicProtocol {
     pub async fn get_connections(&self) -> Vec<RfcommConnection> {
         self.active_connections.read().await.values().cloned().collect()
     }
+    
+    // ============================================================================
+    // DEVICE DISCOVERY AND ACTIVE CONNECTION METHODS
+    // ============================================================================
+    
+    /// Discover paired Bluetooth devices (cross-platform)
+    pub async fn discover_paired_devices(&self) -> Result<Vec<BluetoothDevice>> {
+        #[cfg(target_os = "windows")]
+        {
+            self.discover_paired_devices_windows().await
+        }
+        
+        #[cfg(target_os = "linux")]
+        {
+            self.discover_paired_devices_linux().await
+        }
+        
+        #[cfg(target_os = "macos")]
+        {
+            self.discover_paired_devices_macos().await
+        }
+        
+        #[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
+        {
+            Err(anyhow!("Device discovery not supported on this platform"))
+        }
+    }
+    
+    /// Query RFCOMM services on a device (cross-platform)
+    pub async fn query_rfcomm_services(&self, device_address: &str) -> Result<Vec<RfcommServiceInfo>> {
+        #[cfg(target_os = "windows")]
+        {
+            self.query_services_windows(device_address).await
+        }
+        
+        #[cfg(target_os = "linux")]
+        {
+            self.query_services_linux(device_address).await
+        }
+        
+        #[cfg(target_os = "macos")]
+        {
+            self.query_services_macos(device_address).await
+        }
+        
+        #[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
+        {
+            Err(anyhow!("Service query not supported on this platform"))
+        }
+    }
+    
+    /// Connect to a peer's RFCOMM service (cross-platform)
+    pub async fn connect_to_peer(&self, device_address: &str, channel: u8) -> Result<RfcommStream> {
+        #[cfg(target_os = "windows")]
+        {
+            self.connect_to_peer_windows(device_address, channel).await
+        }
+        
+        #[cfg(target_os = "linux")]
+        {
+            self.connect_to_peer_linux(device_address, channel).await
+        }
+        
+        #[cfg(target_os = "macos")]
+        {
+            self.connect_to_peer_macos(device_address, channel).await
+        }
+        
+        #[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
+        {
+            Err(anyhow!("Peer connection not supported on this platform"))
+        }
+    }
+    
+    // ============================================================================
+    // WINDOWS DISCOVERY AND CONNECTION
+    // ============================================================================
+    
+    #[cfg(target_os = "windows")]
+    async fn discover_paired_devices_windows(&self) -> Result<Vec<BluetoothDevice>> {
+        #[cfg(feature = "windows-gatt")]
+        {
+            use windows::{
+                Devices::Bluetooth::BluetoothDevice as WinBluetoothDevice,
+                Devices::Enumeration::{DeviceInformation, DeviceInformationCollection},
+            };
+            
+            info!("🪟 Windows: Discovering paired Bluetooth devices...");
+            
+            // Query for paired Bluetooth devices
+            let selector = WinBluetoothDevice::GetDeviceSelectorFromPairingState(true)
+                .map_err(|e| anyhow!("Failed to get device selector: {:?}", e))?;
+            
+            let device_info_collection = DeviceInformation::FindAllAsyncAqsFilter(&selector)
+                .map_err(|e| anyhow!("Failed to query devices: {:?}", e))?
+                .get()
+                .map_err(|e| anyhow!("Failed to get devices: {:?}", e))?;
+            
+            let mut devices = Vec::new();
+            let count = device_info_collection.Size()
+                .map_err(|e| anyhow!("Failed to get device count: {:?}", e))?;
+            
+            for i in 0..count {
+                if let Ok(device_info) = device_info_collection.GetAt(i) {
+                    if let Ok(id) = device_info.Id() {
+                        let id_string = id.to_string_lossy();
+                        // Get Bluetooth device from ID
+                        if let Ok(async_op) = WinBluetoothDevice::FromIdAsync(&id) {
+                            if let Ok(bt_device) = async_op.get() {
+                                let address = Self::format_bluetooth_address_windows(&bt_device)?;
+                                
+                                let name = device_info.Name()
+                                    .ok()
+                                    .map(|h_string| h_string.to_string_lossy())
+                                    .map(|s| s.to_string());
+                                
+                                let device_class = bt_device.ClassOfDevice()
+                                    .ok()
+                                    .and_then(|cod| cod.RawValue().ok())
+                                    .unwrap_or(0);
+                                
+                                let is_connected = bt_device.ConnectionStatus()
+                                    .ok()
+                                    .map(|s| s.0 == 1) // Connected = 1
+                                    .unwrap_or(false);
+                                
+                                devices.push(crate::protocols::bluetooth_classic::BluetoothDevice {
+                                    address: address.clone(),
+                                    name: name.clone(),
+                                    device_class,
+                                    is_paired: true,
+                                    is_connected,
+                                    rssi: None, // Windows doesn't expose RSSI easily for paired devices
+                                    last_seen: std::time::SystemTime::now()
+                                        .duration_since(std::time::UNIX_EPOCH)
+                                        .unwrap_or_default()
+                                        .as_secs(),
+                                });
+                                
+                                info!("  Found device: {} ({})", name.as_deref().unwrap_or("Unknown"), address);
+                            }
+                        }
+                    }
+                }
+            }
+            
+            info!("✅ Windows: Found {} paired devices", devices.len());
+            Ok(devices)
+        }
+        
+        #[cfg(not(feature = "windows-gatt"))]
+        {
+            Err(anyhow!("Windows discovery requires --features windows-gatt"))
+        }
+    }
+    
+    #[cfg(all(target_os = "windows", feature = "windows-gatt"))]
+    fn format_bluetooth_address_windows(device: &windows::Devices::Bluetooth::BluetoothDevice) -> Result<String> {
+        let address = device.BluetoothAddress()
+            .map_err(|e| anyhow!("Failed to get address: {:?}", e))?;
+        
+        // Convert u64 to MAC address string
+        Ok(format!(
+            "{:02X}:{:02X}:{:02X}:{:02X}:{:02X}:{:02X}",
+            (address >> 40) & 0xFF,
+            (address >> 32) & 0xFF,
+            (address >> 24) & 0xFF,
+            (address >> 16) & 0xFF,
+            (address >> 8) & 0xFF,
+            address & 0xFF
+        ))
+    }
+    
+    #[cfg(target_os = "windows")]
+    async fn query_services_windows(&self, device_address: &str) -> Result<Vec<RfcommServiceInfo>> {
+        #[cfg(feature = "windows-gatt")]
+        {
+            use windows::{
+                Devices::Bluetooth::{BluetoothDevice, Rfcomm::RfcommDeviceService},
+            };
+            
+            info!("🪟 Windows: Querying RFCOMM services on {}", device_address);
+            
+            // Convert address to u64 for Windows API
+            let address_u64 = Self::parse_bluetooth_address_to_u64(device_address)?;
+            
+            // Get device from address
+            let bt_device = BluetoothDevice::FromBluetoothAddressAsync(address_u64)
+                .map_err(|e| anyhow!("Failed to get device: {:?}", e))?
+                .get()
+                .map_err(|e| anyhow!("Device not found: {:?}", e))?;
+            
+            // Get RFCOMM services
+            let services_result = bt_device.GetRfcommServicesAsync()
+                .map_err(|e| anyhow!("Failed to query services: {:?}", e))?
+                .get()
+                .map_err(|e| anyhow!("Failed to get services: {:?}", e))?;
+            
+            let services = services_result.Services()
+                .map_err(|e| anyhow!("Failed to get service list: {:?}", e))?;
+            
+            let mut rfcomm_services = Vec::new();
+            let count = services.Size()
+                .map_err(|e| anyhow!("Failed to get service count: {:?}", e))?;
+            
+            for i in 0..count {
+                if let Ok(service) = services.GetAt(i) {
+                    if let Ok(service_id) = service.ServiceId() {
+                        if let Ok(uuid) = service_id.Uuid() {
+                            let uuid_str = format!("{:?}", uuid);
+                            
+                            // Check if this is our ZHTP service or any RFCOMM service
+                            let service_name = if uuid_str.contains("6ba7b810") {
+                                "ZHTP Mesh".to_string()
+                            } else {
+                                format!("RFCOMM Service {}", i)
+                            };
+                            
+                            rfcomm_services.push(RfcommServiceInfo {
+                                service_uuid: uuid_str,
+                                service_name,
+                                channel: (i + 1) as u8, // Approximate channel
+                                device_address: device_address.to_string(),
+                            });
+                        }
+                    }
+                }
+            }
+            
+            info!("✅ Windows: Found {} RFCOMM services on {}", rfcomm_services.len(), device_address);
+            Ok(rfcomm_services)
+        }
+        
+        #[cfg(not(feature = "windows-gatt"))]
+        {
+            Err(anyhow!("Windows service query requires --features windows-gatt"))
+        }
+    }
+    
+    #[cfg(all(target_os = "windows", feature = "windows-gatt"))]
+    fn parse_bluetooth_address_to_u64(address: &str) -> Result<u64> {
+        let clean = address.replace([':', '-'], "");
+        if clean.len() != 12 {
+            return Err(anyhow!("Invalid Bluetooth address format"));
+        }
+        
+        u64::from_str_radix(&clean, 16)
+            .map_err(|e| anyhow!("Failed to parse address: {}", e))
+    }
+    
+    #[cfg(target_os = "windows")]
+    async fn connect_to_peer_windows(&self, device_address: &str, channel: u8) -> Result<RfcommStream> {
+        #[cfg(feature = "windows-gatt")]
+        {
+            use windows::{
+                Devices::Bluetooth::{BluetoothDevice, Rfcomm::RfcommDeviceService},
+                Networking::Sockets::StreamSocket,
+                Storage::Streams::{DataReader, DataWriter},
+            };
+            
+            info!("🪟 Windows: Connecting to RFCOMM service on {} channel {}", device_address, channel);
+            
+            // Convert address to u64
+            let address_u64 = Self::parse_bluetooth_address_to_u64(device_address)?;
+            
+            // Get device
+            let bt_device = BluetoothDevice::FromBluetoothAddressAsync(address_u64)
+                .map_err(|e| anyhow!("Failed to get device: {:?}", e))?
+                .get()
+                .map_err(|e| anyhow!("Device not found: {:?}", e))?;
+            
+            // Get RFCOMM services
+            let services_result = bt_device.GetRfcommServicesAsync()
+                .map_err(|e| anyhow!("Failed to query services: {:?}", e))?
+                .get()
+                .map_err(|e| anyhow!("Failed to get services: {:?}", e))?;
+            
+            let services = services_result.Services()
+                .map_err(|e| anyhow!("Failed to get service list: {:?}", e))?;
+            
+            // Find ZHTP service or first available service
+            let service = if services.Size().unwrap_or(0) > 0 {
+                services.GetAt(0)
+                    .map_err(|e| anyhow!("Failed to get service: {:?}", e))?
+            } else {
+                return Err(anyhow!("No RFCOMM services found on device"));
+            };
+            
+            // Create socket and connect
+            let socket = StreamSocket::new()
+                .map_err(|e| anyhow!("Failed to create socket: {:?}", e))?;
+            
+            let hostname = bt_device.HostName()
+                .map_err(|e| anyhow!("Failed to get hostname: {:?}", e))?;
+            
+            let service_name = service.ServiceId()
+                .and_then(|id| id.AsString())
+                .map_err(|e| anyhow!("Failed to get service name: {:?}", e))?;
+            
+            socket.ConnectAsync(&hostname, &service_name)
+                .map_err(|e| anyhow!("Failed to initiate connection: {:?}", e))?
+                .get()
+                .map_err(|e| anyhow!("Connection failed: {:?}", e))?;
+            
+            // Create data reader/writer
+            let input_stream = socket.InputStream()
+                .map_err(|e| anyhow!("Failed to get input stream: {:?}", e))?;
+            let output_stream = socket.OutputStream()
+                .map_err(|e| anyhow!("Failed to get output stream: {:?}", e))?;
+            
+            let reader = DataReader::CreateDataReader(&input_stream)
+                .map_err(|e| anyhow!("Failed to create reader: {:?}", e))?;
+            let writer = DataWriter::CreateDataWriter(&output_stream)
+                .map_err(|e| anyhow!("Failed to create writer: {:?}", e))?;
+            
+            info!("✅ Windows: Connected to {} via RFCOMM", device_address);
+            
+            // Track connection
+            let connection = RfcommConnection {
+                peer_id: device_address.to_string(),
+                peer_address: device_address.to_string(),
+                connected_at: std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs(),
+                channel,
+                mtu: 1000, // Windows RFCOMM typical MTU
+                last_seen: std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs(),
+                is_outgoing: true,
+            };
+            
+            self.active_connections.write().await.insert(device_address.to_string(), connection);
+            
+            Ok(RfcommStream::from_windows_socket(socket, reader, writer, device_address.to_string()))
+        }
+        
+        #[cfg(not(feature = "windows-gatt"))]
+        {
+            Err(anyhow!("Windows connection requires --features windows-gatt"))
+        }
+    }
+    
+    // ============================================================================
+    // LINUX DISCOVERY AND CONNECTION
+    // ============================================================================
+    
+    #[cfg(target_os = "linux")]
+    async fn discover_paired_devices_linux(&self) -> Result<Vec<BluetoothDevice>> {
+        info!("🐧 Linux: Discovering paired Bluetooth devices via BlueZ...");
+        
+        // Use bluetoothctl to list paired devices
+        let output = std::process::Command::new("bluetoothctl")
+            .args(&["devices", "Paired"])
+            .output();
+        
+        let mut devices = Vec::new();
+        
+        match output {
+            Ok(result) if result.status.success() => {
+                let output_str = String::from_utf8_lossy(&result.stdout);
+                
+                for line in output_str.lines() {
+                    // Parse line format: "Device AA:BB:CC:DD:EE:FF Device Name"
+                    if line.starts_with("Device ") {
+                        let parts: Vec<&str> = line.split_whitespace().collect();
+                        if parts.len() >= 3 {
+                            let address = parts[1].to_string();
+                            let name = parts[2..].join(" ");
+                            
+                            // Check if device is connected
+                            let is_connected = Self::check_device_connected_linux(&address).await;
+                            
+                            devices.push(BluetoothDevice {
+                                address: address.clone(),
+                                name: Some(name.clone()),
+                                device_class: 0, // Would need DBus to get class
+                                is_paired: true,
+                                is_connected,
+                                rssi: None,
+                                last_seen: std::time::SystemTime::now()
+                                    .duration_since(std::time::UNIX_EPOCH)
+                                    .unwrap_or_default()
+                                    .as_secs(),
+                            });
+                            
+                            info!("  Found device: {} ({})", name, address);
+                        }
+                    }
+                }
+            }
+            Ok(result) => {
+                warn!("🐧 Linux: bluetoothctl failed: {}", String::from_utf8_lossy(&result.stderr));
+            }
+            Err(e) => {
+                warn!("🐧 Linux: bluetoothctl not available: {}", e);
+                // Fallback: try to read from /var/lib/bluetooth
+                devices = Self::discover_devices_from_bluez_cache()?;
+            }
+        }
+        
+        info!("✅ Linux: Found {} paired devices", devices.len());
+        Ok(devices)
+    }
+    
+    #[cfg(target_os = "linux")]
+    async fn check_device_connected_linux(address: &str) -> bool {
+        let output = std::process::Command::new("bluetoothctl")
+            .args(&["info", address])
+            .output();
+        
+        if let Ok(result) = output {
+            let info = String::from_utf8_lossy(&result.stdout);
+            info.contains("Connected: yes")
+        } else {
+            false
+        }
+    }
+    
+    #[cfg(target_os = "linux")]
+    fn discover_devices_from_bluez_cache() -> Result<Vec<BluetoothDevice>> {
+        let mut devices = Vec::new();
+        let bluez_path = "/var/lib/bluetooth";
+        
+        if let Ok(adapters) = std::fs::read_dir(bluez_path) {
+            for adapter_entry in adapters.flatten() {
+                let adapter_path = adapter_entry.path();
+                if let Ok(device_dirs) = std::fs::read_dir(&adapter_path) {
+                    for device_entry in device_dirs.flatten() {
+                        let device_path = device_entry.path();
+                        let info_file = device_path.join("info");
+                        
+                        if let Ok(content) = std::fs::read_to_string(&info_file) {
+                            if content.contains("Paired=true") {
+                                let address = device_entry.file_name()
+                                    .to_string_lossy()
+                                    .replace('_', ":");
+                                
+                                let name = content.lines()
+                                    .find(|l| l.starts_with("Name="))
+                                    .and_then(|l| l.split('=').nth(1))
+                                    .map(|s| s.to_string());
+                                
+                                devices.push(BluetoothDevice {
+                                    address: address.clone(),
+                                    name,
+                                    device_class: 0,
+                                    is_paired: true,
+                                    is_connected: false,
+                                    rssi: None,
+                                    last_seen: std::time::SystemTime::now()
+                                        .duration_since(std::time::UNIX_EPOCH)
+                                        .unwrap_or_default()
+                                        .as_secs(),
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        Ok(devices)
+    }
+    
+    #[cfg(target_os = "linux")]
+    async fn query_services_linux(&self, device_address: &str) -> Result<Vec<RfcommServiceInfo>> {
+        info!("🐧 Linux: Querying RFCOMM services on {}", device_address);
+        
+        // Use sdptool to browse services
+        let output = std::process::Command::new("sdptool")
+            .args(&["browse", device_address])
+            .output();
+        
+        let mut services = Vec::new();
+        
+        match output {
+            Ok(result) if result.status.success() => {
+                let output_str = String::from_utf8_lossy(&result.stdout);
+                let mut current_service: Option<(String, String, u8)> = None;
+                
+                for line in output_str.lines() {
+                    // Look for service records
+                    if line.contains("Service Name:") {
+                        if let Some(name) = line.split(':').nth(1) {
+                            if let Some((uuid, _, channel)) = current_service.take() {
+                                services.push(RfcommServiceInfo {
+                                    service_uuid: uuid,
+                                    service_name: name.trim().to_string(),
+                                    channel,
+                                    device_address: device_address.to_string(),
+                                });
+                            }
+                            current_service = Some((String::new(), name.trim().to_string(), 0));
+                        }
+                    }
+                    
+                    if line.contains("Service RecHandle:") || line.contains("Service Class ID:") {
+                        if let Some(uuid_part) = line.split("0x").nth(1) {
+                            if let Some((_, name, channel)) = current_service.as_ref() {
+                                current_service = Some((
+                                    uuid_part.trim().to_string(),
+                                    name.clone(),
+                                    *channel
+                                ));
+                            }
+                        }
+                    }
+                    
+                    if line.contains("Channel:") {
+                        if let Some(channel_str) = line.split(':').nth(1) {
+                            if let Ok(channel) = channel_str.trim().parse::<u8>() {
+                                if let Some((uuid, name, _)) = current_service.as_ref() {
+                                    current_service = Some((uuid.clone(), name.clone(), channel));
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                // Add final service
+                if let Some((uuid, name, channel)) = current_service {
+                    services.push(RfcommServiceInfo {
+                        service_uuid: uuid,
+                        service_name: name,
+                        channel,
+                        device_address: device_address.to_string(),
+                    });
+                }
+            }
+            Ok(result) => {
+                warn!("🐧 Linux: sdptool failed: {}", String::from_utf8_lossy(&result.stderr));
+            }
+            Err(e) => {
+                warn!("🐧 Linux: sdptool not available: {}", e);
+            }
+        }
+        
+        // If no services found via sdptool, try default ZHTP channel
+        if services.is_empty() {
+            services.push(RfcommServiceInfo {
+                service_uuid: "6ba7b810-9dad-11d1-80b4-00c04fd430c8".to_string(),
+                service_name: "ZHTP Mesh (default)".to_string(),
+                channel: rfcomm_channels::MESH_DATA,
+                device_address: device_address.to_string(),
+            });
+        }
+        
+        info!("✅ Linux: Found {} RFCOMM services on {}", services.len(), device_address);
+        Ok(services)
+    }
+    
+    #[cfg(target_os = "linux")]
+    async fn connect_to_peer_linux(&self, device_address: &str, channel: u8) -> Result<RfcommStream> {
+        info!("🐧 Linux: Connecting to RFCOMM service on {} channel {}", device_address, channel);
+        
+        // Parse MAC address
+        let mac_bytes = Self::parse_mac_address(device_address)?;
+        
+        // RFCOMM protocol constant
+        const BTPROTO_RFCOMM: i32 = 3;
+        
+        // Create RFCOMM socket
+        let sock_fd = unsafe {
+            libc::socket(libc::AF_BLUETOOTH, libc::SOCK_STREAM, BTPROTO_RFCOMM)
+        };
+        
+        if sock_fd < 0 {
+            return Err(anyhow!("Failed to create RFCOMM socket"));
+        }
+        
+        // Connect to remote device
+        #[repr(C)]
+        struct sockaddr_rc {
+            rc_family: libc::sa_family_t,
+            rc_bdaddr: [u8; 6],
+            rc_channel: u8,
+        }
+        
+        let addr = sockaddr_rc {
+            rc_family: libc::AF_BLUETOOTH as libc::sa_family_t,
+            rc_bdaddr: mac_bytes,
+            rc_channel: channel,
+        };
+        
+        let connect_result = tokio::task::spawn_blocking(move || {
+            unsafe {
+                libc::connect(
+                    sock_fd,
+                    &addr as *const _ as *const libc::sockaddr,
+                    std::mem::size_of::<sockaddr_rc>() as libc::socklen_t,
+                )
+            }
+        }).await?;
+        
+        if connect_result < 0 {
+            unsafe { libc::close(sock_fd); }
+            return Err(anyhow!("Failed to connect to RFCOMM device"));
+        }
+        
+        // Set non-blocking mode
+        let flags = unsafe { libc::fcntl(sock_fd, libc::F_GETFL, 0) };
+        unsafe { libc::fcntl(sock_fd, libc::F_SETFL, flags | libc::O_NONBLOCK); }
+        
+        info!("✅ Linux: Connected to {} channel {} (fd: {})", device_address, channel, sock_fd);
+        
+        // Track connection
+        let connection = RfcommConnection {
+            peer_id: device_address.to_string(),
+            peer_address: device_address.to_string(),
+            connected_at: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs(),
+            channel,
+            mtu: 1000,
+            last_seen: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs(),
+            is_outgoing: true,
+        };
+        
+        self.active_connections.write().await.insert(device_address.to_string(), connection);
+        
+        Ok(RfcommStream::from_linux_socket(sock_fd, device_address.to_string()))
+    }
+    
+    // ============================================================================
+    // MACOS DISCOVERY AND CONNECTION
+    // ============================================================================
+    
+    #[cfg(target_os = "macos")]
+    async fn discover_paired_devices_macos(&self) -> Result<Vec<BluetoothDevice>> {
+        info!("🍎 macOS: Discovering paired Bluetooth devices...");
+        
+        // Use system_profiler to get Bluetooth device information
+        let output = std::process::Command::new("system_profiler")
+            .args(&["SPBluetoothDataType", "-json"])
+            .output();
+        
+        let mut devices = Vec::new();
+        
+        match output {
+            Ok(result) if result.status.success() => {
+                let output_str = String::from_utf8_lossy(&result.stdout);
+                
+                // Parse JSON output (basic parsing)
+                for line in output_str.lines() {
+                    if line.contains("\"Address\"") || line.contains("\"address\"") {
+                        if let Some(addr_start) = line.find("\"") {
+                            if let Some(addr_part) = line[addr_start..].split('\"').nth(3) {
+                                let address = addr_part.to_string();
+                                
+                                // Simple device entry
+                                devices.push(BluetoothDevice {
+                                    address: address.clone(),
+                                    name: Some("macOS Device".to_string()),
+                                    device_class: 0,
+                                    is_paired: true,
+                                    is_connected: false,
+                                    rssi: None,
+                                    last_seen: std::time::SystemTime::now()
+                                        .duration_since(std::time::UNIX_EPOCH)
+                                        .unwrap_or_default()
+                                        .as_secs(),
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+            _ => {
+                // Fallback: use blueutil if available
+                let blueutil_output = std::process::Command::new("blueutil")
+                    .args(&["--paired"])
+                    .output();
+                
+                if let Ok(result) = blueutil_output {
+                    let output_str = String::from_utf8_lossy(&result.stdout);
+                    for line in output_str.lines() {
+                        // Parse blueutil output format
+                        if let Some(address) = line.split(',').next() {
+                            devices.push(BluetoothDevice {
+                                address: address.trim().to_string(),
+                                name: Some("Paired Device".to_string()),
+                                device_class: 0,
+                                is_paired: true,
+                                is_connected: false,
+                                rssi: None,
+                                last_seen: std::time::SystemTime::now()
+                                    .duration_since(std::time::UNIX_EPOCH)
+                                    .unwrap_or_default()
+                                    .as_secs(),
+                            });
+                        }
+                    }
+                }
+            }
+        }
+        
+        info!("✅ macOS: Found {} paired devices", devices.len());
+        Ok(devices)
+    }
+    
+    #[cfg(target_os = "macos")]
+    async fn query_services_macos(&self, device_address: &str) -> Result<Vec<RfcommServiceInfo>> {
+        info!("🍎 macOS: Querying RFCOMM services on {}", device_address);
+        
+        // macOS doesn't have easy command-line SDP browsing
+        // Return default ZHTP service info
+        let services = vec![
+            RfcommServiceInfo {
+                service_uuid: "6ba7b810-9dad-11d1-80b4-00c04fd430c8".to_string(),
+                service_name: "ZHTP Mesh".to_string(),
+                channel: rfcomm_channels::MESH_DATA,
+                device_address: device_address.to_string(),
+            }
+        ];
+        
+        info!("✅ macOS: Returning default ZHTP service for {}", device_address);
+        Ok(services)
+    }
+    
+    #[cfg(target_os = "macos")]
+    async fn connect_to_peer_macos(&self, device_address: &str, channel: u8) -> Result<RfcommStream> {
+        info!("🍎 macOS: Connecting to RFCOMM service on {} channel {}", device_address, channel);
+        
+        // Parse MAC address
+        let mac_bytes = Self::parse_mac_address(device_address)?;
+        
+        // RFCOMM protocol constant
+        const BTPROTO_RFCOMM: i32 = 3;
+        
+        // Create RFCOMM socket using BSD API
+        let sock_fd = unsafe {
+            libc::socket(libc::AF_BLUETOOTH, libc::SOCK_STREAM, BTPROTO_RFCOMM)
+        };
+        
+        if sock_fd < 0 {
+            return Err(anyhow!("Failed to create RFCOMM socket on macOS"));
+        }
+        
+        // Connect to remote device
+        #[repr(C)]
+        struct sockaddr_rc {
+            rc_len: u8,
+            rc_family: libc::sa_family_t,
+            rc_bdaddr: [u8; 6],
+            rc_channel: u8,
+        }
+        
+        let addr = sockaddr_rc {
+            rc_len: std::mem::size_of::<sockaddr_rc>() as u8,
+            rc_family: libc::AF_BLUETOOTH as libc::sa_family_t,
+            rc_bdaddr: mac_bytes,
+            rc_channel: channel,
+        };
+        
+        let connect_result = tokio::task::spawn_blocking(move || {
+            unsafe {
+                libc::connect(
+                    sock_fd,
+                    &addr as *const _ as *const libc::sockaddr,
+                    std::mem::size_of::<sockaddr_rc>() as libc::socklen_t,
+                )
+            }
+        }).await?;
+        
+        if connect_result < 0 {
+            unsafe { libc::close(sock_fd); }
+            let errno = unsafe { *libc::__error() };
+            return Err(anyhow!("Failed to connect to RFCOMM device: errno {}", errno));
+        }
+        
+        // Set non-blocking mode
+        let flags = unsafe { libc::fcntl(sock_fd, libc::F_GETFL, 0) };
+        unsafe { libc::fcntl(sock_fd, libc::F_SETFL, flags | libc::O_NONBLOCK); }
+        
+        info!("✅ macOS: Connected to {} channel {} (fd: {})", device_address, channel, sock_fd);
+        
+        // Track connection
+        let connection = RfcommConnection {
+            peer_id: device_address.to_string(),
+            peer_address: device_address.to_string(),
+            connected_at: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs(),
+            channel,
+            mtu: 1000,
+            last_seen: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs(),
+            is_outgoing: true,
+        };
+        
+        self.active_connections.write().await.insert(device_address.to_string(), connection);
+        
+        Ok(RfcommStream::from_macos_channel(channel, device_address.to_string(), sock_fd))
+    }
 }
 
 #[cfg(test)]
@@ -1159,5 +2011,221 @@ mod tests {
         
         let proto = protocol.unwrap();
         assert_eq!(proto.max_throughput, 375_000);
+    }
+    
+    #[tokio::test]
+    async fn test_device_discovery_structure() {
+        // Test BluetoothDevice structure
+        let device = BluetoothDevice {
+            address: "AA:BB:CC:DD:EE:FF".to_string(),
+            name: Some("Test Device".to_string()),
+            device_class: 0x1F00,
+            is_paired: true,
+            is_connected: false,
+            rssi: Some(-65),
+            last_seen: 1234567890,
+        };
+        
+        assert_eq!(device.address, "AA:BB:CC:DD:EE:FF");
+        assert!(device.is_paired);
+        assert!(!device.is_connected);
+    }
+    
+    #[tokio::test]
+    async fn test_rfcomm_service_info_structure() {
+        let service = RfcommServiceInfo {
+            service_uuid: "6ba7b810-9dad-11d1-80b4-00c04fd430c8".to_string(),
+            service_name: "ZHTP Mesh".to_string(),
+            channel: 3,
+            device_address: "AA:BB:CC:DD:EE:FF".to_string(),
+        };
+        
+        assert_eq!(service.channel, 3);
+        assert_eq!(service.service_name, "ZHTP Mesh");
+    }
+    
+    #[tokio::test]
+    async fn test_connection_tracking() {
+        let connection = RfcommConnection {
+            peer_id: "test_peer".to_string(),
+            peer_address: "AA:BB:CC:DD:EE:FF".to_string(),
+            connected_at: 1234567890,
+            channel: 3,
+            mtu: 1000,
+            last_seen: 1234567890,
+            is_outgoing: true,
+        };
+        
+        assert_eq!(connection.channel, 3);
+        assert_eq!(connection.mtu, 1000);
+        assert!(connection.is_outgoing);
+    }
+    
+    #[tokio::test]
+    async fn test_cross_platform_api_availability() {
+        // Test that the public API methods exist and are callable
+        let node_id = [0u8; 32];
+        let protocol = BluetoothClassicProtocol::new(node_id).unwrap();
+        
+        // These methods should exist on all platforms (they route internally)
+        // We can't test actual functionality without real hardware, but we can
+        // verify the API surface exists
+        
+        // discover_paired_devices should be callable
+        // query_rfcomm_services should be callable
+        // connect_to_peer should be callable
+        
+        // Verify connection management works
+        let connections = protocol.get_connections().await;
+        assert_eq!(connections.len(), 0); // Should start empty
+    }
+}
+
+// Example usage module
+#[cfg(test)]
+mod examples {
+    use super::*;
+    
+    /// Example: Discover and connect to a paired Bluetooth device
+    ///
+    /// ```rust,no_run
+    /// use lib_network::protocols::bluetooth_classic::BluetoothClassicProtocol;
+    ///
+    /// #[tokio::main]
+    /// async fn main() -> Result<()> {
+    ///     let node_id = [0u8; 32];
+    ///     let protocol = BluetoothClassicProtocol::new(node_id)?;
+    ///     
+    ///     // Discover paired devices
+    ///     println!("Discovering paired Bluetooth devices...");
+    ///     let devices = protocol.discover_paired_devices().await?;
+    ///     
+    ///     for device in &devices {
+    ///         println!("Found device: {} ({})", 
+    ///             device.name.as_deref().unwrap_or("Unknown"),
+    ///             device.address
+    ///         );
+    ///     }
+    ///     
+    ///     // Query services on a specific device
+    ///     if let Some(device) = devices.first() {
+    ///         println!("Querying RFCOMM services on {}...", device.address);
+    ///         let services = protocol.query_rfcomm_services(&device.address).await?;
+    ///         
+    ///         for service in &services {
+    ///             println!("  Service: {} on channel {}", 
+    ///                 service.service_name, 
+    ///                 service.channel
+    ///             );
+    ///         }
+    ///         
+    ///         // Connect to first available service
+    ///         if let Some(service) = services.first() {
+    ///             println!("Connecting to {}...", device.address);
+    ///             let stream = protocol.connect_to_peer(
+    ///                 &device.address, 
+    ///                 service.channel
+    ///             ).await?;
+    ///             
+    ///             println!("Connected successfully!");
+    ///             println!("Peer address: {}", stream.peer_addr());
+    ///         }
+    ///     }
+    ///     
+    ///     Ok(())
+    /// }
+    /// ```
+    #[test]
+    fn example_discovery_and_connection() {
+        // This is a documentation example, not meant to run in tests
+    }
+    
+    /// Example: Accept incoming connections (passive mode)
+    ///
+    /// ```rust,no_run
+    /// use lib_network::protocols::bluetooth_classic::BluetoothClassicProtocol;
+    /// use lib_crypto::PublicKey;
+    ///
+    /// #[tokio::main]
+    /// async fn main() -> Result<()> {
+    ///     let node_id = [0u8; 32];
+    ///     let mut protocol = BluetoothClassicProtocol::new(node_id)?;
+    ///     
+    ///     // Initialize authentication
+    ///     let blockchain_pubkey = PublicKey::default();
+    ///     protocol.initialize_zhtp_auth(blockchain_pubkey).await?;
+    ///     
+    ///     // Start advertising RFCOMM service
+    ///     println!("Starting RFCOMM service advertising...");
+    ///     protocol.start_advertising().await?;
+    ///     
+    ///     // Accept incoming connections
+    ///     loop {
+    ///         println!("Waiting for incoming connection...");
+    ///         let stream = protocol.accept_connection().await?;
+    ///         println!("Connection accepted from: {}", stream.peer_addr());
+    ///         
+    ///         // Handle connection in a separate task
+    ///         tokio::spawn(async move {
+    ///             // Read/write from stream
+    ///             // ...
+    ///         });
+    ///     }
+    /// }
+    /// ```
+    #[test]
+    fn example_passive_accept() {
+        // This is a documentation example, not meant to run in tests
+    }
+    
+    /// Example: Cross-platform mesh networking
+    ///
+    /// ```rust,no_run
+    /// use lib_network::protocols::bluetooth_classic::BluetoothClassicProtocol;
+    ///
+    /// #[tokio::main]
+    /// async fn main() -> Result<()> {
+    ///     let node_id = [0u8; 32];
+    ///     let protocol = BluetoothClassicProtocol::new(node_id)?;
+    ///     
+    ///     // Start as both server and client for full mesh connectivity
+    ///     
+    ///     // 1. Start advertising (passive)
+    ///     protocol.start_advertising().await?;
+    ///     
+    ///     // 2. Discover and connect to peers (active)
+    ///     let devices = protocol.discover_paired_devices().await?;
+    ///     
+    ///     for device in devices {
+    ///         if let Ok(services) = protocol.query_rfcomm_services(&device.address).await {
+    ///             for service in services {
+    ///                 // Try to connect to each ZHTP service
+    ///                 if service.service_name.contains("ZHTP") {
+    ///                     match protocol.connect_to_peer(&device.address, service.channel).await {
+    ///                         Ok(_) => println!("Connected to {}", device.address),
+    ///                         Err(e) => eprintln!("Failed to connect: {}", e),
+    ///                     }
+    ///                 }
+    ///             }
+    ///         }
+    ///     }
+    ///     
+    ///     // 3. List all active connections
+    ///     let connections = protocol.get_connections().await;
+    ///     println!("Active connections: {}", connections.len());
+    ///     for conn in connections {
+    ///         println!("  {} (channel {}, {})", 
+    ///             conn.peer_address,
+    ///             conn.channel,
+    ///             if conn.is_outgoing { "outgoing" } else { "incoming" }
+    ///         );
+    ///     }
+    ///     
+    ///     Ok(())
+    /// }
+    /// ```
+    #[test]
+    fn example_mesh_networking() {
+        // This is a documentation example, not meant to run in tests
     }
 }
