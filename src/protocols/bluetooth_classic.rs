@@ -2,6 +2,12 @@
 //! 
 //! Provides high-throughput mesh networking using Bluetooth Classic with RFCOMM
 //! Parallel to BLE GATT but optimized for data transfer (2-3 Mbps vs 250 KB/s)
+//!
+//! ## Build & Run
+//! ```bash
+//! cargo build --bin zhtp --features macos-corebluetooth
+//! ./target/debug/zhtp node start
+//! ```
 
 use anyhow::{Result, anyhow};
 use std::collections::HashMap;
