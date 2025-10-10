@@ -582,7 +582,7 @@ impl WiFiDirectMeshProtocol {
         Ok(vec![])
     }
     
-    /// Perform real P2P Group Owner negotiation with discovered peers
+    /// Perform P2P Group Owner negotiation with discovered peers
     async fn perform_go_negotiation(&mut self, peer_address: &str, peer_negotiation: &P2PGoNegotiation) -> Result<bool> {
         info!(" Starting P2P GO negotiation with peer: {}", peer_address);
         
@@ -606,7 +606,7 @@ impl WiFiDirectMeshProtocol {
         };
         
         if i_should_be_go {
-            info!("🏆 Won GO negotiation - becoming Group Owner (intent: {} vs {})", my_intent, peer_intent);
+            info!(" Won GO negotiation - becoming Group Owner (intent: {} vs {})", my_intent, peer_intent);
             self.go_negotiation.group_capability.p2p_group_owner = true;
         } else {
             info!("Lost GO negotiation - will be Group Client (intent: {} vs {})", my_intent, peer_intent);
@@ -909,7 +909,7 @@ impl WiFiDirectMeshProtocol {
     async fn scan_for_groups(&self) -> Result<Vec<String>> {
         info!("Scanning for WiFi Direct groups...");
         
-        // Real WiFi Direct group scanning using platform-specific commands
+        // WiFi Direct group scanning using platform-specific commands
         #[cfg(target_os = "linux")]
         {
             return self.linux_scan_wifi_direct_groups().await;
@@ -950,7 +950,7 @@ impl WiFiDirectMeshProtocol {
             self.linux_join_p2p_group(ssid).await?;
         }
         
-        // Real connection establishment process with timeout
+        // connection establishment process with timeout
         tokio::time::sleep(tokio::time::Duration::from_millis(2000)).await;
         
         let connection = WiFiDirectConnection {
@@ -1379,7 +1379,7 @@ impl WiFiDirectMeshProtocol {
             .output()?;
             
         if output.status.success() {
-            // Real WPS negotiation time for macOS system integration
+            // WPS negotiation time for macOS system integration
             tokio::time::sleep(tokio::time::Duration::from_secs(8)).await;
             return Ok(format!("macOS WPS PBC attempted with {}", peer_address));
         }
@@ -1539,8 +1539,8 @@ impl WiFiDirectMeshProtocol {
             info!("🤖 Auto-accepting invitation for known persistent group");
             let _response = self.accept_p2p_invitation(&invitation.invitee_address).await?;
         } else {
-            info!("👤 New group invitation requires manual acceptance");
-            // In a real implementation, this would trigger a user prompt
+            info!(" New group invitation requires manual acceptance");
+            // In a implementation, this would trigger a user prompt
         }
         
         Ok(())
@@ -1715,7 +1715,7 @@ impl WiFiDirectMeshProtocol {
     async fn windows_join_active_group(&self, invitation: &P2PInvitationRequest) -> Result<()> {
         info!("🪟 Windows joining active P2P group for channel {}", invitation.operating_channel);
         
-        // Real Windows implementation using PowerShell and netsh commands
+        // Windows implementation using PowerShell and netsh commands
         use std::process::Command;
         
         let ps_script = format!(
@@ -1736,7 +1736,7 @@ impl WiFiDirectMeshProtocol {
     async fn windows_reinvoke_persistent_group(&self, group: &PersistentGroup) -> Result<()> {
         info!("🪟 Windows reinvoking persistent group {}", group.group_id);
         
-        // Real Windows implementation for persistent group reinvocation
+        // Windows implementation for persistent group reinvocation
         use std::process::Command;
         
         let ps_script = format!(
@@ -1902,7 +1902,7 @@ impl WiFiDirectMeshProtocol {
     
     /// Browse for ZHTP services using mDNS
     async fn browse_zhtp_services(&self) -> Result<()> {
-        info!("🔎 Browsing for ZHTP services via mDNS");
+        info!(" Browsing for ZHTP services via mDNS");
         
         if let Some(daemon) = &self.mdns_daemon {
             // Browse for ZHTP services
@@ -1911,12 +1911,12 @@ impl WiFiDirectMeshProtocol {
             tokio::spawn({
                 let _discovered_peers = self.discovered_peers.clone();
                 async move {
-                    // This is a simplified example - real implementation would
+                    // This is a simplified example - implementation would
                     // need to handle mDNS events properly
                     loop {
                         tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
                         
-                        // In a real implementation, this would process mDNS responses
+                        // In a implementation, this would process mDNS responses
                         // and update discovered_peers with service information
                         info!(" Checking for new ZHTP services...");
                     }
@@ -1929,7 +1929,7 @@ impl WiFiDirectMeshProtocol {
     
     /// Process discovered ZHTP service from mDNS
     async fn process_discovered_service(&self, service_name: &str, service_info: &HashMap<String, String>) -> Result<()> {
-        info!("🎯 Processing discovered ZHTP service: {}", service_name);
+        info!(" Processing discovered ZHTP service: {}", service_name);
         
         // Extract service information from TXT records
         let node_id = service_info.get("node_id").cloned().unwrap_or_default();
@@ -1997,7 +1997,7 @@ impl WiFiDirectMeshProtocol {
             services.clear();
         }
         
-        // In a real implementation, would call daemon.unregister()
+        // In a implementation, would call daemon.unregister()
         // The mdns-sd library handles this automatically when daemon is dropped
         
         Ok(())
@@ -2151,7 +2151,7 @@ impl WiFiDirectMeshProtocol {
     
     /// Send mesh message via WiFi Direct
     pub async fn send_mesh_message(&self, target_address: &str, message: &[u8]) -> Result<()> {
-        info!("📤 Sending WiFi Direct mesh message to {}: {} bytes", target_address, message.len());
+        info!(" Sending WiFi Direct mesh message to {}: {} bytes", target_address, message.len());
         
         let devices = self.connected_devices.read().await;
         

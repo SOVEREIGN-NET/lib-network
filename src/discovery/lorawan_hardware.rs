@@ -89,7 +89,7 @@ pub async fn detect_lorawan_hardware() -> Result<Option<LoRaWANHardware>> {
 
 /// Test if LoRaWAN hardware is functional
 pub async fn test_lorawan_hardware(hardware: &LoRaWANHardware) -> Result<bool> {
-    info!("🧪 Testing LoRaWAN hardware: {}", hardware.device_name);
+    info!(" Testing LoRaWAN hardware: {}", hardware.device_name);
     
     match hardware.connection_type.as_str() {
         "SPI" => test_spi_lorawan_hardware(hardware).await,
@@ -281,7 +281,7 @@ async fn test_serial_lorawan_module(port: &str, chip_type: &str) -> Result<LoRaW
     use std::io::{Read, Write};
     use std::time::Duration;
     
-    debug!("🧪 Testing serial LoRaWAN module on {} ({})", port, chip_type);
+    debug!(" Testing serial LoRaWAN module on {} ({})", port, chip_type);
     
     // Try to open serial port
     let mut port = serialport::new(port, 9600)
@@ -330,7 +330,7 @@ async fn test_serial_lorawan_module(port: &str, chip_type: &str) -> Result<LoRaW
 
 #[cfg(target_os = "linux")]
 async fn detect_i2c_lorawan(address: &str) -> Result<LoRaWANHardware> {
-    debug!("🧪 Testing I2C LoRaWAN module at address {}", address);
+    debug!(" Testing I2C LoRaWAN module at address {}", address);
     
     // This would require actual I2C communication
     // For now, assume it's a LoRaWAN module if detected on common addresses
@@ -494,7 +494,7 @@ async fn test_windows_com_lorawan(port_name: &str) -> Result<LoRaWANHardware> {
     use std::io::{Read, Write};
     use std::time::Duration;
     
-    debug!("🧪 Testing Windows COM port for LoRaWAN: {}", port_name);
+    debug!(" Testing Windows COM port for LoRaWAN: {}", port_name);
     
     // Try to open COM port
     let mut port = serialport::new(port_name, 9600)
@@ -567,7 +567,7 @@ async fn test_macos_usb_lorawan(device_path: &str) -> Result<LoRaWANHardware> {
     use std::io::{Read, Write};
     use std::time::Duration;
     
-    debug!("🧪 Testing macOS USB device for LoRaWAN: {}", device_path);
+    debug!(" Testing macOS USB device for LoRaWAN: {}", device_path);
     
     // Try to open USB serial device
     let mut port = serialport::new(device_path, 9600)

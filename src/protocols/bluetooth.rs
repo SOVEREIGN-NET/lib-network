@@ -169,7 +169,7 @@ impl BluetoothMeshProtocol {
         let challenge = auth_manager.create_challenge().await?;
         
         // Send challenge to peer (TODO: implement actual Bluetooth message sending)
-        info!("📤 Sending ZHTP auth challenge to peer");
+        info!(" Sending ZHTP auth challenge to peer");
         
         // Receive response from peer (TODO: implement actual Bluetooth message receiving)
         // For now, return error indicating authentication needs Bluetooth message layer
@@ -182,7 +182,7 @@ impl BluetoothMeshProtocol {
         challenge: &ZhtpAuthChallenge,
         capabilities: NodeCapabilities,
     ) -> Result<ZhtpAuthResponse> {
-        info!("📝 Responding to ZHTP authentication challenge");
+        info!(" Responding to ZHTP authentication challenge");
         
         // Note: This is synchronous and doesn't need async because auth_manager is cloned
         Err(anyhow!("Must use async version: respond_to_auth_challenge_async"))
@@ -194,7 +194,7 @@ impl BluetoothMeshProtocol {
         challenge: &ZhtpAuthChallenge,
         capabilities: NodeCapabilities,
     ) -> Result<ZhtpAuthResponse> {
-        info!("📝 Responding to ZHTP authentication challenge");
+        info!(" Responding to ZHTP authentication challenge");
         
         let auth_manager = self.auth_manager.read().await;
         let auth_manager = auth_manager.as_ref()
@@ -428,7 +428,7 @@ impl BluetoothMeshProtocol {
         Ok(())
     }
     
-    /// Initialize real Bluetooth stack
+    /// Initialize Bluetooth stack
     async fn initialize_bluetooth_stack(&self) -> Result<()> {
         info!("Initializing Bluetooth stack for mesh networking...");
         
@@ -480,7 +480,7 @@ impl BluetoothMeshProtocol {
         Ok(())
     }
     
-    /// Start real mesh advertising for peer-to-peer networking
+    /// Start mesh advertising for peer-to-peer networking
     async fn start_real_mesh_advertising(&self) -> Result<()> {
         info!("Broadcasting ZHTP P2P mesh network...");
         
@@ -530,7 +530,7 @@ impl BluetoothMeshProtocol {
             loop {
                 scan_interval.tick().await;
                 
-                // Scan for real mesh peers
+                // Scan for mesh peers
                 if let Ok(peers) = Self::scan_for_mesh_peers().await {
                     let mut conns = connections.write().await;
                     
@@ -553,7 +553,7 @@ impl BluetoothMeshProtocol {
     
     /// Send mesh message via Bluetooth LE
     pub async fn send_mesh_message(&self, target_address: &str, message: &[u8]) -> Result<()> {
-        info!("📤 Sending Bluetooth LE mesh message to {}: {} bytes", target_address, message.len());
+        info!(" Sending Bluetooth LE mesh message to {}: {} bytes", target_address, message.len());
         
         // Check if peer is connected
         let connections = self.current_connections.read().await;
@@ -664,7 +664,7 @@ impl BluetoothMeshProtocol {
         Ok(())
     }
     
-    /// Scan for real ZHTP bypass peers
+    /// Scan for ZHTP bypass peers
     async fn scan_for_mesh_peers() -> Result<Vec<MeshPeer>> {
         let mut peers = Vec::new();
         
@@ -1044,7 +1044,7 @@ impl BluetoothMeshProtocol {
         Ok(())
     }
     
-    /// Start GATT characteristic handlers for real I/O operations
+    /// Start GATT characteristic handlers for I/O operations
     async fn start_gatt_characteristic_handlers(&self, characteristics: &[&str]) -> Result<()> {
         let connections = self.current_connections.clone();
         let characteristics: Vec<String> = characteristics.iter().map(|s| s.to_string()).collect();
@@ -1072,7 +1072,7 @@ impl BluetoothMeshProtocol {
                                     let parser = BlueZGattParser::new();
                                     if let Ok(auth_data) = parser.read_characteristic_value(device_address, char_uuid).await {
                                         if !auth_data.is_empty() {
-                                            info!("📊 ZK auth data received: {} bytes", auth_data.len());
+                                            info!(" ZK auth data received: {} bytes", auth_data.len());
                                             // Process authentication data
                                             if let Err(e) = self.process_zk_auth_data(&auth_data).await {
                                                 warn!("Failed to process ZK auth data: {}", e);
@@ -1089,18 +1089,18 @@ impl BluetoothMeshProtocol {
                             },
                             "6ba7b812-9dad-11d1-80b4-00c04fd430c8" => {
                                 // Quantum-resistant routing characteristic
-                                info!("🛡️ Monitoring quantum routing characteristic for device: {}", device_address);
-                                // Real implementation would read from specific device
+                                info!(" Monitoring quantum routing characteristic for device: {}", device_address);
+                                // implementation would read from specific device
                             },
                             "6ba7b813-9dad-11d1-80b4-00c04fd430c8" => {
                                 // Mesh data transfer characteristic
                                 info!("Monitoring mesh data characteristic for device: {}", device_address);
-                                // Real implementation would read from specific device
+                                // implementation would read from specific device
                             },
                             "6ba7b814-9dad-11d1-80b4-00c04fd430c8" => {
                                 // ISP bypass coordination characteristic
                                 info!("Monitoring ISP bypass characteristic for device: {}", device_address);
-                                // Real implementation would read from specific device
+                                // implementation would read from specific device
                             },
                             _ => {}
                         }
@@ -1291,7 +1291,7 @@ Value=00
                                             },
                                             "6ba7b812-9dad-11d1-80b4-00c04fd430c8" => {
                                                 // Quantum routing info
-                                                info!("🛡️ Sending quantum routing data");
+                                                info!(" Sending quantum routing data");
                                                 vec![0x05, 0x06, 0x07, 0x08]
                                             },
                                             "6ba7b813-9dad-11d1-80b4-00c04fd430c8" => {
@@ -1354,7 +1354,7 @@ Value=00
                                                             },
                                                             "6ba7b812-9dad-11d1-80b4-00c04fd430c8" => {
                                                                 // Quantum routing characteristic
-                                                                info!("🛡️ Received quantum routing data");
+                                                                info!(" Received quantum routing data");
                                                                 Some(GattMessage::RawData(char_uuid_owned2.clone(), data.clone()))
                                                             },
                                                             "6ba7b813-9dad-11d1-80b4-00c04fd430c8" => {
@@ -2133,7 +2133,7 @@ Value=00
     
     #[cfg(target_os = "macos")]
     async fn macos_read_gatt_characteristic(&self, device_address: &str, char_uuid: &str) -> Result<Vec<u8>> {
-        // Use Core Bluetooth via system_profiler and blueutil for real operations
+        // Use Core Bluetooth via system_profiler and blueutil for operations
         use std::process::Command;
         
         // Get characteristic handle
@@ -2428,7 +2428,7 @@ Value=00
 
     /// Disconnect from a peer
     pub async fn disconnect_peer(&self, peer_address: &str) -> Result<()> {
-        info!("🔌 Disconnecting from Bluetooth peer: {}", peer_address);
+        info!(" Disconnecting from Bluetooth peer: {}", peer_address);
         
         #[cfg(target_os = "linux")]
         {
@@ -2571,12 +2571,12 @@ Value=00
                             .map_err(|e| anyhow::anyhow!("Routing proof verification failed: {}", e))?
                     }
                     "ZHTP-Optimized-DataIntegrity" => {
-                        info!("📦 Verifying data integrity proof");
+                        info!(" Verifying data integrity proof");
                         zk_system.verify_data_integrity(&proof)
                             .map_err(|e| anyhow::anyhow!("Data integrity proof verification failed: {}", e))?
                     }
                     "ZHTP-Optimized-Transaction" => {
-                        info!("💰 Verifying transaction proof");
+                        info!(" Verifying transaction proof");
                         zk_system.verify_transaction(&proof)
                             .map_err(|e| anyhow::anyhow!("Transaction proof verification failed: {}", e))?
                     }
@@ -2635,7 +2635,7 @@ Value=00
         self.discovery_active
     }
 
-    /// Monitor ZHTP Bluetooth status (real checks only)
+    /// Monitor ZHTP Bluetooth status (checks only)
     pub async fn start_zhtp_transmission_monitoring(&self) -> Result<()> {
         if self.zhtp_monitor_active.load(std::sync::atomic::Ordering::Relaxed) {
             info!("Bluetooth monitoring already active");

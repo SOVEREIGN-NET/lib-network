@@ -201,7 +201,7 @@ async fn detect_linux_lorawan_hardware(hardware_details: &mut HashMap<String, Ha
         
         for (usb_id, description) in &lorawan_usb_ids {
             if usb_output.contains(usb_id) {
-                debug!("🔌 Found potential LoRaWAN USB device: {} ({})", usb_id, description);
+                debug!(" Found potential LoRaWAN USB device: {} ({})", usb_id, description);
                 
                 hardware_details.insert(
                     format!("lorawan_usb_{}", usb_id.replace(":", "_")),
@@ -296,7 +296,7 @@ async fn detect_spi_lorawan_module(spi_device: &str) -> Result<HardwareDevice> {
         .open(spi_device)?;
     
     // Send a test command to detect SX127x/SX130x modules
-    // This is a simplified test - real implementation would be more sophisticated
+    // This is a simplified test - implementation would be more sophisticated
     let test_command = [0x42, 0x00]; // Read version register
     let mut response = [0u8; 2];
     
@@ -410,7 +410,7 @@ async fn detect_windows_lorawan_hardware(hardware_details: &mut HashMap<String, 
         
         // Check if COM port exists
         if std::path::Path::new(&format!("\\\\.\\{}", port_name)).exists() {
-            debug!("🔌 Found COM port: {}", port_name);
+            debug!(" Found COM port: {}", port_name);
             
             // Try to identify if it's a LoRaWAN module
             if let Ok(device_info) = identify_windows_com_lorawan(&port_name).await {
@@ -565,7 +565,7 @@ async fn detect_macos_lorawan_hardware(hardware_details: &mut HashMap<String, Ha
         
         for device in usb_devices.lines() {
             if !device.is_empty() {
-                debug!("🔌 Found USB serial device: {}", device);
+                debug!(" Found USB serial device: {}", device);
                 
                 if let Ok(device_info) = identify_macos_usb_lorawan(device).await {
                     hardware_details.insert(

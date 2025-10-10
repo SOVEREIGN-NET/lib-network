@@ -236,20 +236,20 @@ impl GlobalCoverageAnalyzer {
         if self.coverage_map.global_coverage_percentage > 50.0 {
             info!(" REVOLUTIONARY: ZHTP provides MAJORITY global internet coverage!");
         } else if self.coverage_map.global_coverage_percentage > 25.0 {
-            info!("🌟 EXCELLENT: ZHTP provides substantial global coverage");
+            info!(" EXCELLENT: ZHTP provides substantial global coverage");
         } else if self.coverage_map.global_coverage_percentage > 10.0 {
             info!("GOOD: ZHTP provides significant regional coverage");
         } else {
-            info!("📈 GROWING: ZHTP network expanding coverage");
+            info!(" GROWING: ZHTP network expanding coverage");
         }
         
         // Population impact assessment
         if self.coverage_map.population_served > 1_000_000_000 {
             info!("GLOBAL IMPACT: Over 1 billion people have free internet access!");
         } else if self.coverage_map.population_served > 100_000_000 {
-            info!("🌟 MAJOR IMPACT: Over 100 million people served");
+            info!(" MAJOR IMPACT: Over 100 million people served");
         } else if self.coverage_map.population_served > 10_000_000 {
-            info!("📈 SIGNIFICANT IMPACT: Over 10 million people served");
+            info!(" SIGNIFICANT IMPACT: Over 10 million people served");
         }
         
         // Network reach assessment
@@ -349,7 +349,7 @@ pub enum CoverageQuality {
     Local,      // Limited to local area
     Regional,   // Regional coverage
     Global,     // Global coverage
-    Planetary,  // Revolutionary planetary coverage
+    Planetary,  // planetary coverage
 }
 
 #[cfg(test)]

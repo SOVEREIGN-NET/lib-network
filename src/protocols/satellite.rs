@@ -206,7 +206,7 @@ impl SatelliteMeshProtocol {
     
     /// Send mesh message via satellite
     pub async fn send_mesh_message(&self, target_address: &str, message: &[u8]) -> Result<()> {
-        info!("📤 Sending satellite mesh message to {}: {} bytes", target_address, message.len());
+        info!(" Sending satellite mesh message to {}: {} bytes", target_address, message.len());
         
         // In production, this would:
         // 1. Add global routing headers

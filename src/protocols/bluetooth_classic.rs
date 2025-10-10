@@ -680,7 +680,7 @@ impl BluetoothClassicProtocol {
             
             info!(" Windows: RFCOMM service provider created");
             info!(" Windows: Service UUID: 6ba7b810-9dad-11d1-80b4-00c04fd430c8");
-            info!("🔌 Windows: RFCOMM channel: {}", rfcomm_channels::MESH_DATA);
+            info!(" Windows: RFCOMM channel: {}", rfcomm_channels::MESH_DATA);
             
             // Start advertising (Windows API only takes listener parameter)
             provider.StartAdvertising(&listener)
@@ -783,7 +783,7 @@ impl BluetoothClassicProtocol {
         
         // Service will be registered when we create the listening socket
         info!(" macOS: RFCOMM service will be registered on socket bind");
-        info!("🔌 macOS: Service UUID: 6ba7b810-9dad-11d1-80b4-00c04fd430c8");
+        info!(" macOS: Service UUID: 6ba7b810-9dad-11d1-80b4-00c04fd430c8");
         info!("📞 macOS: RFCOMM channel: {}", rfcomm_channels::MESH_DATA);
         
         Ok(())
@@ -1072,7 +1072,7 @@ impl BluetoothClassicProtocol {
     
     /// Send mesh message via RFCOMM
     pub async fn send_mesh_message(&self, target_address: &str, message: &[u8]) -> Result<()> {
-        info!("📤 Sending RFCOMM message to {}: {} bytes", target_address, message.len());
+        info!(" Sending RFCOMM message to {}: {} bytes", target_address, message.len());
         
         // Check if peer is connected
         let connections = self.active_connections.read().await;
@@ -1155,7 +1155,7 @@ impl BluetoothClassicProtocol {
             
             // For Windows, we need to store the actual socket in the connection
             // This is a simplified version - in production, store socket references
-            info!("📤 Windows: Transmitted {} bytes to {} via RFCOMM", data.len(), address);
+            info!(" Windows: Transmitted {} bytes to {} via RFCOMM", data.len(), address);
             Ok(())
         }
         
@@ -1179,7 +1179,7 @@ impl BluetoothClassicProtocol {
         // In a full implementation, we would store the socket FD in the connection
         // and write directly to it here
         // For now, log the transmission
-        info!("📤 macOS: Transmitted {} bytes to {} via RFCOMM", data.len(), address);
+        info!(" macOS: Transmitted {} bytes to {} via RFCOMM", data.len(), address);
         
         Ok(())
     }
@@ -2074,7 +2074,7 @@ mod tests {
         let protocol = BluetoothClassicProtocol::new(node_id).unwrap();
         
         // These methods should exist on all platforms (they route internally)
-        // We can't test actual functionality without real hardware, but we can
+        // We can't test actual functionality without hardware, but we can
         // verify the API surface exists
         
         // discover_paired_devices should be callable

@@ -122,7 +122,7 @@ impl ZhtpAuthManager {
         // Store challenge for later verification
         self.active_challenges.write().await.insert(challenge_id.clone(), challenge.clone());
         
-        info!("🎯 Created ZHTP authentication challenge: {}", &challenge_id[..8]);
+        info!(" Created ZHTP authentication challenge: {}", &challenge_id[..8]);
         
         Ok(challenge)
     }
@@ -133,7 +133,7 @@ impl ZhtpAuthManager {
         challenge: &ZhtpAuthChallenge,
         capabilities: NodeCapabilities,
     ) -> Result<ZhtpAuthResponse> {
-        info!("📝 Responding to ZHTP authentication challenge: {}", &challenge.challenge_id[..8]);
+        info!(" Responding to ZHTP authentication challenge: {}", &challenge.challenge_id[..8]);
         
         // Create message to sign: nonce + timestamp + challenger_pubkey
         let message = [

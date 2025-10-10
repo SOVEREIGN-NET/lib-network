@@ -73,7 +73,7 @@ pub async fn handle_tcp_bootstrap_connection(
     };
     
     if n == 0 {
-        info!("🔌 TCP connection closed by {}", addr);
+        info!(" TCP connection closed by {}", addr);
         return Ok(());
     }
     

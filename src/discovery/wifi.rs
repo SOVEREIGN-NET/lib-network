@@ -30,7 +30,7 @@ fn estimate_bandwidth_from_signal(signal_dbm: i32) -> u32 {
     }
 }
 
-/// Real WiFi network discovery information
+/// WiFi network discovery information
 #[derive(Debug, Clone)]
 pub struct WiFiNetworkInfo {
     /// Network SSID
@@ -60,7 +60,7 @@ pub async fn discover_wifi_relays_with_capabilities(capabilities: &HardwareCapab
         return Ok(Vec::new());
     }
     
-    // REAL WiFi network scanning for relay-enabled networks
+    // WiFi network scanning for relay-enabled networks
     println!("Scanning for ZHTP mesh relay networks...");
     
     let mut discovered_networks = Vec::new();
@@ -79,7 +79,7 @@ pub async fn discover_wifi_relays_with_capabilities(capabilities: &HardwareCapab
         }
     }
     
-    // Only report real networks found - no fake data
+    // Only report networks found - no fake data
     if discovered_networks.is_empty() {
         println!("No ZHTP WiFi relay networks detected");
     } else {

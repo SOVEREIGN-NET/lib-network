@@ -479,7 +479,7 @@ impl MeshMessageRouter {
         
         // Route through each hop
         for (hop_index, hop) in route.iter().enumerate() {
-            info!("📤 Routing to hop {}: {:?} via {:?}", 
+            info!(" Routing to hop {}: {:?} via {:?}", 
                   hop_index + 1, hex::encode(&hop.peer_id.key_id[0..4]), hop.protocol);
             
             // Update current hop
@@ -578,7 +578,7 @@ impl MeshMessageRouter {
         
         let connections = self.mesh_connections.read().await;
         if let Some(connection) = connections.get(&hop.peer_id) {
-            debug!("📤 Forwarding via {} (quality: {:.2})", 
+            debug!(" Forwarding via {} (quality: {:.2})", 
                    format!("{:?}", connection.protocol), connection.stability_score);
         }
         

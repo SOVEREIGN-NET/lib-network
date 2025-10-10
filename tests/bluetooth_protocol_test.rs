@@ -117,7 +117,7 @@ async fn test_bluetooth_mesh_message_transmission() -> Result<()> {
     println!("  Quantum secure: {}", mock_peer.quantum_secure);
     
     println!("✓ Message transmission setup completed");
-    println!("  Note: Actual transmission requires real Bluetooth devices");
+    println!("  Note: Actual transmission requires Bluetooth devices");
     
     Ok(())
 }

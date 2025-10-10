@@ -124,7 +124,7 @@ impl ZkDHTIntegration {
 
     pub async fn clear_cache(&self) -> Result<()> {
         // For now, since we can't get mutable access, we'll just return Ok
-        // In a real implementation, this would clear the client's cache
+        // In a implementation, this would clear the client's cache
         warn!("clear_cache called but not implemented due to mutability constraints");
         Ok(())
     }
@@ -321,7 +321,7 @@ impl DHTClient {
             peers.clone()
         };
         
-        // Get real network statistics from storage system
+        // Get network statistics from storage system
         let _storage_stats = {
             let mut storage = self.storage_system.write().await;
             storage.get_statistics().await?
@@ -333,19 +333,19 @@ impl DHTClient {
             info!(" This node is running in isolation");
             info!(" Start more ZHTP nodes to create a mesh network");
         } else {
-            info!(" Discovered {} real DHT peers", connected_peers.len());
+            info!(" Discovered {} DHT peers", connected_peers.len());
             for (i, peer) in connected_peers.iter().enumerate() {
                 info!("  {}. {}", i + 1, peer);
             }
         }
         
-        // Update statistics with real data only
+        // Update statistics with data only
         {
             let mut stats = self.stats.lock().await;
             stats.queries_sent += 1; // We made a discovery query
         }
         
-        info!("Peer discovery complete: {} real peers found", connected_peers.len());
+        info!("Peer discovery complete: {} peers found", connected_peers.len());
         Ok(connected_peers)
     }
     
@@ -395,7 +395,7 @@ impl DHTClient {
     
     /// Send DHT query to a peer
     pub async fn send_dht_query(&self, peer_address: &str, query: DHTQuery) -> Result<DHTQueryResponse> {
-        info!("📤 Sending DHT query to peer: {}", peer_address);
+        info!(" Sending DHT query to peer: {}", peer_address);
         
         // Update statistics
         {
@@ -419,7 +419,7 @@ impl DHTClient {
     
     /// Store content in the DHT
     pub async fn store_content(&mut self, domain: &str, path: &str, content: Vec<u8>) -> Result<String> {
-        info!("💾 Storing content for {}{}", domain, path);
+        info!(" Storing content for {}{}", domain, path);
         
         // Calculate content hash
         let hash_bytes = lib_crypto::hash_blake3(&content);
@@ -493,7 +493,7 @@ impl DHTClient {
                 stats.cache_hits += 1;
             }
             
-            info!("📦 Content resolved from enhanced cache: {}", hash);
+            info!(" Content resolved from enhanced cache: {}", hash);
             return Ok(hash);
         }
         
@@ -542,7 +542,7 @@ impl DHTClient {
                 // Cache the fallback result with TTL
                 self.content_cache.insert(key, content_hash.clone()).await;
                 
-                info!("📝 Fallback content hash: {}", &content_hash[..16]);
+                info!(" Fallback content hash: {}", &content_hash[..16]);
                 Ok(content_hash)
             }
         }
@@ -796,7 +796,7 @@ impl DHTClient {
             stats.cache_clears += 1;
         }
         
-        info!("🧹 Enhanced content cache cleared");
+        info!(" Enhanced content cache cleared");
         Ok(())
     }
 
@@ -1057,7 +1057,7 @@ pub async fn call_native_dht_client(function_name: &str, params: &serde_json::Va
                 .and_then(|v| v.as_str())
                 .ok_or_else(|| anyhow!("Missing content parameter"))?;
             
-            info!("💾 Storing content: {}:{}", domain, path);
+            info!(" Storing content: {}:{}", domain, path);
             
             let temp_identity = create_temp_identity_for_operation()?;
             let mut dht_client = DHTClient::new(temp_identity).await?;
@@ -1214,7 +1214,7 @@ pub async fn serve_web4_page(dht_client: &mut DHTClient, zhtp_url: &str) -> Resu
                 Ok(content_bytes) => {
                     let content_string = String::from_utf8_lossy(&content_bytes);
                     
-                    // Create Web4 response with real content
+                    // Create Web4 response with content
                     let response = serde_json::json!({
                         "type": "zhtp-page",
                         "url": zhtp_url,

@@ -238,7 +238,7 @@ pub async fn discover_local_peers() -> Result<Vec<NodeAnnouncement>> {
     
     socket.send_to(discovery_request.to_string().as_bytes(), multicast_addr).await?;
     
-    // Listen for responses (simplified - in real implementation would be more sophisticated)
+    // Listen for responses (simplified - in implementation would be more sophisticated)
     tokio::time::sleep(Duration::from_secs(3)).await;
     
     // TODO: Collect actual responses

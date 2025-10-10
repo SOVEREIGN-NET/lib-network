@@ -54,13 +54,13 @@ async fn main() -> Result<()> {
         println!("   ZHTP Mesh Service: 6ba7b810-9dad-11d1-80b4-00c04fd430c8");
         println!("     ZK Authentication: 6ba7b811-9dad-11d1-80b4-00c04fd430c8");
         println!("     Quantum Routing:   6ba7b812-9dad-11d1-80b4-00c04fd430c8");
-        println!("    📦 Mesh Data:         6ba7b813-9dad-11d1-80b4-00c04fd430c8");
+        println!("     Mesh Data:         6ba7b813-9dad-11d1-80b4-00c04fd430c8");
         println!("    🤝 Coordination:      6ba7b814-9dad-11d1-80b4-00c04fd430c8");
         println!();
         
         // Display network stats
         let stats = mesh_server.get_network_stats().await;
-        println!("📊 Network Statistics:");
+        println!(" Network Statistics:");
         println!("  Active Connections: {}", stats.active_connections);
         println!("  Coverage Area: {:.2} km²", stats.coverage_area_km2);
         println!("  Bluetooth Status: DISCOVERABLE & CONNECTABLE");

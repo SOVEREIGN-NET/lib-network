@@ -1,4 +1,4 @@
-//! Test suite for real identity proof implementation
+//! Test suite for identity proof implementation
 
 #[cfg(test)]
 mod tests {
@@ -8,7 +8,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_generate_identity_proof() -> Result<()> {
-        println!("🧪 Testing real identity proof generation...");
+        println!(" Testing identity proof generation...");
         
         let proof_bytes = generate_identity_proof().await?;
         
@@ -28,7 +28,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_verify_identity_proof() -> Result<()> {
-        println!("🧪 Testing real identity proof verification...");
+        println!(" Testing identity proof verification...");
         
         // Generate a proof first
         let proof_bytes = generate_identity_proof().await?;
@@ -43,7 +43,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_identity_proof_with_custom_parameters() -> Result<()> {
-        println!("🧪 Testing identity proof with custom parameters...");
+        println!(" Testing identity proof with custom parameters...");
         
         let custom_params = IdentityProofParams {
             min_age: 21,
@@ -64,7 +64,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_identity_proof_parameter_mismatch() -> Result<()> {
-        println!("🧪 Testing identity proof parameter mismatch...");
+        println!(" Testing identity proof parameter mismatch...");
         
         let generation_params = IdentityProofParams {
             min_age: 18,
@@ -91,7 +91,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_identity_proof_invalid_data() -> Result<()> {
-        println!("🧪 Testing identity proof with invalid data...");
+        println!(" Testing identity proof with invalid data...");
         
         // Test with empty data
         let empty_result = verify_identity_proof(&[]).await;
@@ -113,7 +113,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_identity_proof_mesh_participation() -> Result<()> {
-        println!("🧪 Testing identity proof for mesh network participation...");
+        println!(" Testing identity proof for mesh network participation...");
         
         // Test with realistic mesh network requirements
         let mesh_params = IdentityProofParams {
@@ -139,7 +139,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_multiple_identity_proofs() -> Result<()> {
-        println!("🧪 Testing multiple identity proof generations...");
+        println!(" Testing multiple identity proof generations...");
         
         let mut proof_bytes_list = Vec::new();
         
@@ -168,7 +168,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_identity_proof_jurisdiction_requirements() -> Result<()> {
-        println!("🧪 Testing identity proof jurisdiction requirements...");
+        println!(" Testing identity proof jurisdiction requirements...");
         
         // Test with specific jurisdiction requirement
         let us_params = IdentityProofParams {
@@ -184,7 +184,7 @@ mod tests {
         let is_valid = verify_identity_proof_with_params(&proof_bytes, &us_params).await?;
         
         // Note: This test might pass or fail depending on the random jurisdiction generated
-        // In a real implementation, the jurisdiction would be controlled by the user
+        // In a implementation, the jurisdiction would be controlled by the user
         println!("Jurisdiction verification result: {}", is_valid);
         
         // Test with no jurisdiction requirement (should always work)

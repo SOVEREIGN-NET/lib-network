@@ -134,10 +134,10 @@ impl MeshMessageHandler {
         let relays = self.long_range_relays.read().await;
         if !relays.is_empty() {
             info!("Mesh relay capacity available for P2P routing");
-            info!("📤 Sending connectivity acceptance via legitimate mesh routing");
+            info!(" Sending connectivity acceptance via legitimate mesh routing");
         } else {
             warn!("No mesh relay nodes available for routing");
-            info!("📤 Sending connectivity rejection - no relay capacity");
+            info!(" Sending connectivity rejection - no relay capacity");
         }
         
         Ok(())
@@ -290,7 +290,7 @@ impl MeshMessageHandler {
         
         // This would route to the ZHTP API handler
         // For now, just log the request
-        info!("📤 ZHTP Request processed: {} {}", method, uri);
+        info!(" ZHTP Request processed: {} {}", method, uri);
         
         Ok(())
     }
@@ -316,7 +316,7 @@ impl MeshMessageHandler {
         request_id: u64,
         from_height: Option<u64>,
     ) -> Result<()> {
-        info!("📦 Blockchain request from peer (request_id: {}, from_height: {:?})", 
+        info!(" Blockchain request from peer (request_id: {}, from_height: {:?})", 
               request_id, from_height);
         
         // This will be implemented in the runtime layer to access blockchain
@@ -336,7 +336,7 @@ impl MeshMessageHandler {
         data: Vec<u8>,
         complete_data_hash: [u8; 32],
     ) -> Result<()> {
-        info!("📥 Blockchain data chunk {}/{} received ({} bytes, request_id: {})", 
+        info!(" Blockchain data chunk {}/{} received ({} bytes, request_id: {})", 
               chunk_index + 1, total_chunks, data.len(), request_id);
         
         // This will be implemented in the runtime layer to reassemble chunks

@@ -120,7 +120,7 @@ pub async fn start_network_monitor(mesh_port: u16) -> Result<()> {
                 // Check for new peers
                 for peer in &current_peers {
                     if !last_peers.contains(peer) {
-                        info!("🆕 New ZHTP peer discovered: {}", peer);
+                        info!(" New ZHTP peer discovered: {}", peer);
                         // TODO: Trigger connection attempt
                     }
                 }
@@ -147,7 +147,7 @@ pub async fn get_network_interfaces() -> Result<Vec<NetworkInterface>> {
     let mut interfaces = Vec::new();
     
     // This is a simplified implementation
-    // In a real implementation, you'd use system APIs to get interface details
+    // In a implementation, you'd use system APIs to get interface details
     if let Ok(local_ip) = get_local_ip().await {
         interfaces.push(NetworkInterface {
             name: "primary".to_string(),

@@ -142,7 +142,7 @@ async fn verify_ubi_economic_constraints(amount: u64, round: u64) -> Result<bool
         return Ok(false);
     }
     
-    // Check if round is reasonable (simplified - would use actual current round in real implementation)
+    // Check if round is reasonable (simplified - would use actual current round in implementation)
     let current_time = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap()
@@ -222,7 +222,7 @@ pub async fn generate_ubi_eligibility_proof(
     let _identity_manager = IdentityManager::new();
     
     // Simplified human identity verification
-    // In a real implementation, this would check biometric proofs, etc.
+    // In a implementation, this would check biometric proofs, etc.
     let is_human = true; // identity_manager.verify_human_identity(identity).await?;
     if !is_human {
         return Err(anyhow!("Identity is not verified as human"));

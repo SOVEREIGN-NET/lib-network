@@ -1,6 +1,6 @@
 //! Global Long-Range Routing Implementation
 //! 
-//! Intercontinental mesh routing for revolutionary global coverage
+//! Intercontinental mesh routing for global coverage
 
 use anyhow::{anyhow, Result};
 use std::collections::{HashMap, VecDeque};

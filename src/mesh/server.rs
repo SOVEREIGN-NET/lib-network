@@ -61,7 +61,7 @@ use crate::monitoring::health_monitoring::HealthMonitor;
 use crate::dht::{ZkDHTIntegration, DHTNetworkStatus};
 use crate::discovery::hardware::HardwareCapabilities;
 
-// Import real implementations from other packages
+// Import implementations from other packages
 use lib_economy::EconomicModel;
 use lib_storage::UnifiedStorageSystem;
 
@@ -76,7 +76,7 @@ pub struct NetworkConfig {
     pub bootstrap_peers: Vec<String>,
 }
 
-/// Revolutionary ZHTP Mesh Server - The New Internet
+/// ZHTP Mesh Server - The New Internet
 /// 
 /// This replaces traditional internet infrastructure with a pure mesh network
 /// that provides free internet access to everyone while paying users for participation
@@ -143,7 +143,7 @@ pub struct ZhtpMeshServer {
     pub security_audit_log: Arc<RwLock<Vec<SecurityAuditLog>>>,
 }
 
-/// Real MeshNode implementation for pure mesh networking
+/// MeshNode implementation for pure mesh networking
 #[derive(Debug)]
 pub struct MeshNode {
     /// Node ID for this mesh node
@@ -329,7 +329,7 @@ impl ZhtpMeshServer {
             owner_key.as_bytes().to_vec(),
         );
         
-        info!("💼 Created standalone wallets for node operation");
+        info!(" Created standalone wallets for node operation");
         Ok((owner_wallet, routing_wallet, ops_wallet))
     }
     
@@ -357,7 +357,7 @@ impl ZhtpMeshServer {
         {
             let routing_wallet = self.routing_rewards_wallet.read().await;
             // Add tokens to routing wallet balance
-            // In real implementation, this would update the wallet balance
+            // In implementation, this would update the wallet balance
             info!("Added {} tokens to routing wallet for {} bytes, {} hops", 
                   total_reward, data_size, hop_count);
         }
@@ -392,8 +392,8 @@ impl ZhtpMeshServer {
         }
         
         // Create transaction to transfer tokens
-        // In real implementation, this would create a proper transaction
-        info!("💸 Transferring {} tokens from routing wallet to recipient", amount);
+        // In implementation, this would create a proper transaction
+        info!(" Transferring {} tokens from routing wallet to recipient", amount);
         
         Ok(())
     }
@@ -832,7 +832,7 @@ impl ZhtpMeshServer {
                 // Mark protocol as active
                 self.active_protocols.write().await.insert(NetworkProtocol::LoRaWAN, true);
                 
-                info!("LoRaWAN mesh discovery active with real hardware and persistent management");
+                info!("LoRaWAN mesh discovery active with hardware and persistent management");
             } else {
                 warn!("LoRaWAN hardware test failed - skipping LoRaWAN initialization");
                 return Err(anyhow!("LoRaWAN hardware test failed"));
@@ -882,7 +882,7 @@ impl ZhtpMeshServer {
                 crate::types::mesh_capability::MeshCapability::DataStorage { capacity_gb: 100 },
                 crate::types::mesh_capability::MeshCapability::ZkProofGeneration,
             ],
-            location: None, // Could be filled with real GPS coordinates
+            location: None, // Could be filled with GPS coordinates
             shared_resources: crate::types::mesh_capability::SharedResources {
                 relay_bandwidth_kbps: 10000,
                 storage_gb: 100,
@@ -918,7 +918,7 @@ impl ZhtpMeshServer {
         Ok(())
     }
 
-    /// Create a new ZHTP Mesh Server - The Revolutionary Internet
+    /// Create a new ZHTP Mesh Server - The Internet
     pub async fn new(
         node_id: [u8; 32], 
         owner_key: PublicKey,  // Owner key for security
@@ -1016,11 +1016,11 @@ impl ZhtpMeshServer {
         Ok(server)
     }
     
-    /// Start the revolutionary mesh internet server
+    /// Start the mesh internet server
     pub async fn start(&mut self) -> Result<()> {
         println!(" STARTING ZHTP MESH SERVER - THE NEW INTERNET!");
         println!("===============================================");
-        println!("💼 Node Wallet-Based Operation (No DID Required)");
+        println!(" Node Wallet-Based Operation (No DID Required)");
         
         // Display wallet information
         {
@@ -1028,9 +1028,9 @@ impl ZhtpMeshServer {
             let routing_wallet = self.routing_rewards_wallet.read().await;
             let ops_wallet = self.operational_wallet.read().await;
             
-            println!("🔑 Owner Wallet: {} (Node Control)", owner_wallet.id);
+            println!(" Owner Wallet: {} (Node Control)", owner_wallet.id);
             println!("Routing Wallet: {} (Earns Tokens)", routing_wallet.id);
-            println!("⚙️  Operations Wallet: {} (Network Costs)", ops_wallet.id);
+            println!("  Operations Wallet: {} (Network Costs)", ops_wallet.id);
         }
         
         println!("Initializing ISP-free mesh networking...");
@@ -1138,7 +1138,7 @@ impl ZhtpMeshServer {
                 ubi_share_percentage: 20.0,
             });
             
-            println!("REAL LoRaWAN gateway discovered: {} - {} km range", 
+            println!("LoRaWAN gateway discovered: {} - {} km range", 
                     gateway_id, gateway_info.coverage_radius_km);
         }
         
@@ -1167,7 +1167,7 @@ impl ZhtpMeshServer {
                 ubi_share_percentage: 15.0,
             });
             
-            println!("🛰️ REAL Satellite uplink discovered: {} - GLOBAL coverage", uplink_id);
+            println!("🛰️ Satellite uplink discovered: {} - GLOBAL coverage", uplink_id);
         }
         
         Ok(())
@@ -1566,7 +1566,7 @@ impl ZhtpMeshServer {
     /// Set maximum connection limit for safety
     pub async fn set_max_connections(&self, max: usize) -> Result<()> {
         *self.max_connections.write().await = max;
-        info!("🛡️ Maximum connection limit set to: {}", max);
+        info!(" Maximum connection limit set to: {}", max);
         Ok(())
     }
     
@@ -1617,7 +1617,7 @@ impl ZhtpMeshServer {
             return Err(anyhow!("Invalid credentials"));
         }
         
-        info!("🔌 Disconnecting peer: {} (authorized by {:?})", address, permission_level);
+        info!(" Disconnecting peer: {} (authorized by {:?})", address, permission_level);
         
         // Try Bluetooth first
         if let Some(ref bt_protocol) = self.bluetooth_protocol {
@@ -1755,7 +1755,7 @@ impl ZhtpMeshServer {
         
         tokio::spawn(async move {
             loop {
-                // Continuously discover WiFi sharing nodes using real WiFi scanning
+                // Continuously discover WiFi sharing nodes using WiFi scanning
                 tokio::time::sleep(Duration::from_secs(30)).await;
                 
                 // Use hardware-optimized WiFi discovery (avoid duplicate hardware detection)

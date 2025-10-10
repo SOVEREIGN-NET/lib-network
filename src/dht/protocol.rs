@@ -438,7 +438,7 @@ impl DhtProtocolHandler {
         loop {
             match socket.recv_from(&mut buffer).await {
                 Ok((len, addr)) => {
-                    debug!("📥 DHT packet from {}: {} bytes", addr, len);
+                    debug!(" DHT packet from {}: {} bytes", addr, len);
                     
                     match Self::parse_dht_packet(&buffer[..len]) {
                         Ok(packet) => {
@@ -580,7 +580,7 @@ impl DhtProtocolHandler {
         _identity: &ZhtpIdentity
     ) -> Result<()> {
         if let DhtPacketPayload::Store(store) = packet.payload {
-            info!("💾 DHT store {}:{} ({} bytes) from {}", 
+            info!(" DHT store {}:{} ({} bytes) from {}", 
                 store.domain, store.path, store.content.len(), addr);
 
             // TODO: Implement actual content storage in storage system
@@ -616,7 +616,7 @@ impl DhtProtocolHandler {
         _identity: &ZhtpIdentity
     ) -> Result<()> {
         if let DhtPacketPayload::PeerDiscovery(discovery) = packet.payload {
-            info!("👥 DHT peer discovery (max: {}) from {}", discovery.max_peers, addr);
+            info!(" DHT peer discovery (max: {}) from {}", discovery.max_peers, addr);
 
             // TODO: Implement actual peer lookup
             let peers = vec![]; // Would query peer manager
@@ -742,7 +742,7 @@ impl DhtProtocolHandler {
             version: DHT_PROTOCOL_VERSION,
             operation: response_op,
             packet_id: original_header.packet_id, // Same ID for response matching
-            sender_id: node_id, // Real node ID
+            sender_id: node_id, // node ID
             target_id: original_header.sender_id, // Send back to requester
             payload_length: 0, // Will be calculated during serialization
             timestamp: SystemTime::now()
@@ -784,7 +784,7 @@ impl DhtProtocolHandler {
         }
 
         socket.send_to(&packet_data, addr).await?;
-        debug!("📤 Sent DHT {:?} packet to {} ({} bytes)", 
+        debug!(" Sent DHT {:?} packet to {} ({} bytes)", 
             packet.header.operation, addr, packet_data.len());
         
         Ok(())
@@ -819,7 +819,7 @@ impl DhtProtocolHandler {
         Self::send_packet(socket, &packet, peer_addr).await?;
 
         // TODO: Implement response waiting mechanism
-        info!("📤 DHT query sent for {}:{}", domain, path);
+        info!(" DHT query sent for {}:{}", domain, path);
         Ok(None) // Would return actual result after receiving response
     }
 
@@ -851,7 +851,7 @@ impl DhtProtocolHandler {
 
         Self::send_packet(socket, &packet, peer_addr).await?;
 
-        info!("📤 DHT store sent for {}:{}", domain, path);
+        info!(" DHT store sent for {}:{}", domain, path);
         Ok(true) // Would return actual result after receiving acknowledgment
     }
 
@@ -872,7 +872,7 @@ impl DhtProtocolHandler {
 
         Self::send_packet(socket, &packet, peer_addr).await?;
 
-        info!("📤 DHT peer discovery sent (max: {})", max_peers);
+        info!(" DHT peer discovery sent (max: {})", max_peers);
         Ok(vec![]) // Would return actual peers after receiving response
     }
 

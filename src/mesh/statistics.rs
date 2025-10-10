@@ -106,7 +106,7 @@ impl Default for MeshStatistics {
 
 /// Get comprehensive mesh statistics
 pub async fn get_mesh_statistics() -> Result<MeshStatistics> {
-    // In a real implementation, this would collect statistics from:
+    // In a implementation, this would collect statistics from:
     // - Active connections and peers
     // - Network interface statistics
     // - Protocol-specific metrics
@@ -115,7 +115,7 @@ pub async fn get_mesh_statistics() -> Result<MeshStatistics> {
     
     let mut stats = MeshStatistics::default();
     
-    // Get real network interface statistics if available
+    // Get network interface statistics if available
     if let Ok(interfaces) = get_network_interfaces().await {
         for interface in interfaces {
             stats.bytes_sent += interface.tx_bytes;
@@ -202,7 +202,7 @@ pub struct LatencyInfo {
 
 /// Get network interface statistics
 async fn get_network_interfaces() -> Result<Vec<NetworkInterface>> {
-    // This would use system APIs to get real network interface statistics
+    // This would use system APIs to get network interface statistics
     // For now, return a basic interface with some activity
     Ok(vec![
         NetworkInterface {

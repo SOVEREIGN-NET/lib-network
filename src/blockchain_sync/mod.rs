@@ -72,7 +72,7 @@ impl BlockchainSyncManager {
             from_height,
         };
 
-        info!("📤 Created blockchain request (ID: {})", request_id);
+        info!(" Created blockchain request (ID: {})", request_id);
         Ok((request_id, message))
     }
 
@@ -108,7 +108,7 @@ impl BlockchainSyncManager {
         let mut complete_data_hash = [0u8; 32];
         complete_data_hash.copy_from_slice(&hash_result);
 
-        info!("📦 Chunking blockchain data: {} bytes into {} chunks ({} bytes each)", 
+        info!(" Chunking blockchain data: {} bytes into {} chunks ({} bytes each)", 
             total_size, total_chunks, chunk_size);
 
         let mut messages = Vec::new();

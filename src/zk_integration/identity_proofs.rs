@@ -53,7 +53,7 @@ impl IdentityCircuit {
     
     fn generate_constraints(&self) -> Result<Vec<u8>> {
         // Generate constraints for identity verification
-        // This would be the actual circuit definition in a real implementation
+        // This would be the actual circuit definition in a implementation
         let circuit_description = format!(
             "identity_circuit:min_age:{},jurisdiction:{},verification_level:{}",
             self.age, self.jurisdiction, self.credential_hash
@@ -81,7 +81,7 @@ impl IdentityCircuit {
         // Use lib-proofs to generate the actual proof
         let zk_system = ZkProofSystem::new()?;
         
-        // Generate proof using the real ZK system
+        // Generate proof using the ZK system
         let proof = zk_system.prove_identity(
             self.identity_secret,
             self.age,
@@ -144,7 +144,7 @@ impl IdentityCircuit {
             }
         };
         
-        // Verify proof using the real ZK system
+        // Verify proof using the ZK system
         let is_valid = zk_system.verify_identity(&plonky2_proof)?;
         
         info!("Identity proof verification result: {}", is_valid);
@@ -186,16 +186,16 @@ impl IdentityPublicInputs {
     }
 }
 
-/// Generate identity proof for mesh participation using real ZK cryptography
+/// Generate identity proof for mesh participation using ZK cryptography
 pub async fn generate_identity_proof() -> Result<Vec<u8>> {
     generate_identity_proof_with_params(&IdentityProofParams::default()).await
 }
 
 /// Generate identity proof with custom parameters
 pub async fn generate_identity_proof_with_params(params: &IdentityProofParams) -> Result<Vec<u8>> {
-    info!("Generating real identity proof for mesh network participation...");
+    info!("Generating identity proof for mesh network participation...");
     
-    // Initialize the real ZK proof system
+    // Initialize the ZK proof system
     let zk_system = ZkProofSystem::new()?;
     
     // Generate realistic identity parameters for mesh network
@@ -222,7 +222,7 @@ pub async fn generate_identity_proof_with_params(params: &IdentityProofParams) -
         credential_hash,
     };
     
-    // Generate real zero-knowledge identity proof
+    // Generate zero-knowledge identity proof
     let proof = zk_system.prove_identity(
         identity_secret,
         age,
@@ -248,20 +248,20 @@ pub async fn generate_identity_proof_with_params(params: &IdentityProofParams) -
     // Serialize the proof for network transmission
     let proof_bytes = serialize_identity_proof(&zk_proof)?;
     
-    info!("Real identity proof generated: {} bytes", proof_bytes.len());
+    info!("identity proof generated: {} bytes", proof_bytes.len());
     Ok(proof_bytes)
 }
 
-/// Verify identity proof using real ZK cryptography
+/// Verify identity proof using ZK cryptography
 pub async fn verify_identity_proof(proof_bytes: &[u8]) -> Result<bool> {
     verify_identity_proof_with_params(proof_bytes, &IdentityProofParams::default()).await
 }
 
 /// Verify identity proof with custom parameters
 pub async fn verify_identity_proof_with_params(proof_bytes: &[u8], params: &IdentityProofParams) -> Result<bool> {
-    info!("Verifying real identity proof...");
+    info!("Verifying identity proof...");
     
-    // Initialize the real ZK proof system
+    // Initialize the ZK proof system
     let zk_system = ZkProofSystem::new()?;
     
     // Deserialize the proof
@@ -393,7 +393,7 @@ pub async fn verify_identity_proof_with_params(proof_bytes: &[u8], params: &Iden
         }
     }
     
-    // Perform real zero-knowledge verification
+    // Perform zero-knowledge verification
     let is_valid = zk_system.verify_identity(&plonky2_proof)
         .map_err(|e| anyhow!("Identity proof verification failed: {}", e))?;
     

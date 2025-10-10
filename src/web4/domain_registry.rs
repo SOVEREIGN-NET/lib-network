@@ -322,7 +322,7 @@ impl DomainRegistry {
         let full_content_hash = hex::encode(&hash_bytes[..32]);
         let short_hash = hex::encode(&hash_bytes[..8]); // For logging only
 
-        info!("📦 Storing content for domain {} at path {} (hash: {}..., size: {} bytes)", 
+        info!(" Storing content for domain {} at path {} (hash: {}..., size: {} bytes)", 
               domain, path, short_hash, content.len());
 
         // Store content in DHT using UnifiedStorageSystem
@@ -414,7 +414,7 @@ impl DomainRegistry {
             {
                 let mut cache = self.content_cache.write().await;
                 cache.insert(storage_hash_hex.clone(), content);
-                info!("📦 Cached content with storage hash: {}", storage_hash_hex);
+                info!(" Cached content with storage hash: {}", storage_hash_hex);
             }
             
             // Return the storage hash (compressed) for proper DHT retrieval
@@ -427,7 +427,7 @@ impl DomainRegistry {
         let record_data = serde_json::to_vec(record)?;
         let record_hash = hex::encode(&hash_blake3(&record_data)[..32]);
 
-        info!("📝 Storing domain record for {} (hash: {})", record.domain, &record_hash[..16]);
+        info!(" Storing domain record for {} (hash: {})", record.domain, &record_hash[..16]);
 
         // For now, domain records are kept in memory
         // In production, this would be persisted to DHT or database
@@ -515,7 +515,7 @@ impl DomainRegistry {
     /// Get content by hash from DHT ONLY (cache disabled for testing)
     pub async fn get_content(&self, content_hash: &str) -> Result<Vec<u8>> {
         // CACHE DISABLED - Force DHT retrieval for testing
-        info!("📥 TESTING MODE: Skipping cache, retrieving from DHT for content hash: {}", content_hash);
+        info!(" TESTING MODE: Skipping cache, retrieving from DHT for content hash: {}", content_hash);
         
         // Note: Cache check disabled to test DHT functionality
         // {

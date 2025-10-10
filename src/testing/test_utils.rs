@@ -4,7 +4,7 @@ use lib_crypto::hash_blake3;
 use crate::protocols::NetworkProtocol;
 use crate::mesh::server::{ZhtpMeshServer, NetworkConfig};
 
-/// Create a test mesh server for development with real implementations
+/// Create a test mesh server for development with implementations
 pub async fn create_test_mesh_server() -> Result<ZhtpMeshServer> {
     use lib_storage::{UnifiedStorageSystem, UnifiedStorageConfig};
     
@@ -169,13 +169,13 @@ mod tests {
     
     #[tokio::test]
     async fn test_storage_system() {
-        // Test with real storage system
+        // Test with storage system
         use lib_storage::{UnifiedStorageSystem, UnifiedStorageConfig};
         
         let config = UnifiedStorageConfig::default();
         let storage = UnifiedStorageSystem::new(config).await.unwrap();
         
-        // Basic functionality test with real storage
+        // Basic functionality test with storage
         let stats = storage.get_statistics().await.unwrap();
         assert!(stats.storage_stats.total_uploads == 0); // Fresh system
     }

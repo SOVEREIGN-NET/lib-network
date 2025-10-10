@@ -50,7 +50,7 @@ async fn demo_dht_operations(dht_client: &mut DHTClient) -> Result<()> {
     let path = "/homepage";
     let content = b"<h1>Welcome to ZHTP Web4</h1><p>This content is stored in the DHT through lib-storage!</p>";
     
-    info!("💾 Storing content for {}{}...", domain, path);
+    info!(" Storing content for {}{}...", domain, path);
     let content_hash = dht_client.store_content(domain, path, content.to_vec()).await?;
     info!("Content stored with hash: {}", content_hash);
     
@@ -97,13 +97,13 @@ async fn demo_web4_serving(dht_client: &mut DHTClient) -> Result<()> {
     <body>
         <h1 class="zhtp-header">ZHTP Web4 Application</h1>
         <div class="content">
-            <h2>Revolutionary Internet Replacement</h2>
+            <h2>Internet Replacement</h2>
             <p>This page is served through the ZHTP mesh network using:</p>
             <div class="feature">
                 <strong>lib-network:</strong> DHT client layer for mesh networking
             </div>
             <div class="feature">
-                <strong>💾 lib-storage:</strong> DHT implementation backend with economic incentives
+                <strong> lib-storage:</strong> DHT implementation backend with economic incentives
             </div>
             <div class="feature">
                 <strong>lib-crypto:</strong> Post-quantum cryptographic security
@@ -117,7 +117,7 @@ async fn demo_web4_serving(dht_client: &mut DHTClient) -> Result<()> {
     </html>
     "#;
     
-    info!("💾 Storing Web4 page at {}{}...", domain, path);
+    info!(" Storing Web4 page at {}{}...", domain, path);
     let page_hash = dht_client.store_content(domain, path, web4_content.as_bytes().to_vec()).await?;
     info!("Web4 page stored with hash: {}", page_hash);
     
@@ -136,7 +136,7 @@ async fn demo_web4_serving(dht_client: &mut DHTClient) -> Result<()> {
 
 /// Demonstrate storage backend integration
 async fn demo_storage_integration(dht_client: &mut DHTClient) -> Result<()> {
-    info!("💾 === Storage Backend Integration Demo ===");
+    info!(" === Storage Backend Integration Demo ===");
     
     // Access the underlying storage system
     let storage_system = dht_client.get_storage_system();
@@ -165,7 +165,7 @@ async fn demo_storage_integration(dht_client: &mut DHTClient) -> Result<()> {
         let mut storage = storage_system.write().await;
         storage.get_statistics().await?
     };
-    info!("📈 Storage System Statistics:");
+    info!(" Storage System Statistics:");
     info!("  DHT Nodes: {}", storage_stats.dht_stats.total_nodes);
     info!("  DHT Connections: {}", storage_stats.dht_stats.total_connections);
     info!("  Storage Used: {} bytes", storage_stats.storage_stats.total_storage_used);
@@ -189,7 +189,7 @@ async fn demo_statistics(dht_client: &mut DHTClient) -> Result<()> {
     
     // Get cache statistics
     let cache_stats = dht_client.get_cache_stats().await;
-    info!("📦 Cache Statistics:");
+    info!(" Cache Statistics:");
     for (key, value) in &cache_stats {
         info!("  {}: {}", key, value);
     }

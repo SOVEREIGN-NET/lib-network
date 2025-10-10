@@ -55,7 +55,7 @@ impl ZhtpRelayProtocol {
         path: &str,
         options: ZhtpQueryOptions,
     ) -> Result<ZhtpRelayQuery> {
-        info!("📤 Creating ZHTP relay query for {}:{} via peer {}", domain, path, peer_address);
+        info!(" Creating ZHTP relay query for {}:{} via peer {}", domain, path, peer_address);
         
         // Generate unique request ID
         let request_id = format!(
@@ -108,7 +108,7 @@ impl ZhtpRelayProtocol {
         peer_address: &str,
         query: &ZhtpRelayQuery,
     ) -> Result<ZhtpRelayQueryPayload> {
-        info!("📥 Processing ZHTP relay query from peer: {}", peer_address);
+        info!(" Processing ZHTP relay query from peer: {}", peer_address);
         
         // Verify signature
         let signature_message = [
@@ -151,7 +151,7 @@ impl ZhtpRelayProtocol {
         request_id: String,
         response_payload: ZhtpRelayResponsePayload,
     ) -> Result<ZhtpRelayResponse> {
-        info!("📤 Creating ZHTP relay response for request: {}", &request_id[..16]);
+        info!(" Creating ZHTP relay response for request: {}", &request_id[..16]);
         
         // Serialize and encrypt response payload
         let payload_bytes = serde_json::to_vec(&response_payload)?;
@@ -195,7 +195,7 @@ impl ZhtpRelayProtocol {
         peer_address: &str,
         response: &ZhtpRelayResponse,
     ) -> Result<ZhtpRelayResponsePayload> {
-        info!("📥 Processing ZHTP relay response from peer: {}", peer_address);
+        info!(" Processing ZHTP relay response from peer: {}", peer_address);
         
         // Verify signature
         let mut signature_message = Vec::new();
@@ -303,7 +303,7 @@ mod tests {
             ZhtpQueryOptions::default(),
         ).await;
         
-        // In real implementation, this would work after key exchange
+        // In implementation, this would work after key exchange
         // For now, test signature verification logic
         assert!(query.is_ok());
         

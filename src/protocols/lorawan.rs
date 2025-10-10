@@ -103,7 +103,7 @@ impl LoRaWANMeshProtocol {
             info!("SPI interface found: /dev/spidev0.0");
             
             // Initialize SX1276/SX1302 via SPI
-            // In real implementation, would use proper SPI library
+            // In implementation, would use proper SPI library
             let output = Command::new("lsmod")
                 .arg("spi_bcm2835")
                 .output();
@@ -141,8 +141,8 @@ impl LoRaWANMeshProtocol {
         for port_num in 1..=20 {
             let port_name = format!("COM{}", port_num);
             if std::path::Path::new(&format!("\\\\.\\{}", port_name)).exists() {
-                info!("🔌 Found COM port: {}", port_name);
-                // In real implementation, would test if it's a LoRaWAN module
+                info!(" Found COM port: {}", port_name);
+                // In implementation, would test if it's a LoRaWAN module
             }
         }
         
@@ -211,10 +211,10 @@ impl LoRaWANMeshProtocol {
     async fn join_network(&self) -> Result<()> {
         info!("Joining LoRaWAN network via OTAA...");
         
-        info!("🔑 Device EUI: {:02X?}", self.device_eui);
-        info!("🏢 App EUI: {:02X?}", self.app_eui);
+        info!(" Device EUI: {:02X?}", self.device_eui);
+        info!(" App EUI: {:02X?}", self.app_eui);
         
-        // Real OTAA process
+        // OTAA process
         for attempt in 1..=3 {
             info!(" Join attempt {} of 3...", attempt);
             
@@ -250,7 +250,7 @@ impl LoRaWANMeshProtocol {
         let dev_nonce = rand::random::<u16>();
         join_request.extend_from_slice(&dev_nonce.to_le_bytes());
         
-        // In real implementation, would:
+        // In implementation, would:
         // 1. Add MIC (Message Integrity Code)
         // 2. Transmit via LoRaWAN radio
         // 3. Use appropriate data rate and frequency
@@ -260,7 +260,7 @@ impl LoRaWANMeshProtocol {
     }
     
     async fn wait_for_join_accept(&self) -> Result<()> {
-        info!("⏳ Waiting for join accept...");
+        info!(" Waiting for join accept...");
         
         // Wait for join accept in RX1 and RX2 windows
         for window in 1..=2 {
@@ -287,7 +287,7 @@ impl LoRaWANMeshProtocol {
     async fn derive_session_keys(&self) -> Result<()> {
         info!(" Deriving session keys...");
         
-        // In real implementation, would derive:
+        // In implementation, would derive:
         // 1. Network Session Key (NwkSKey)
         // 2. Application Session Key (AppSKey)
         // Using AES-128 with AppKey and join parameters
@@ -378,7 +378,7 @@ impl LoRaWANMeshProtocol {
     
     /// Send mesh message via LoRaWAN
     pub async fn send_mesh_message(&self, target_address: &str, message: &[u8]) -> Result<()> {
-        info!("📤 Sending LoRaWAN mesh message to {}: {} bytes", target_address, message.len());
+        info!(" Sending LoRaWAN mesh message to {}: {} bytes", target_address, message.len());
         
         // Check payload size limits
         let max_payload = self.get_max_payload_size().await?;
@@ -411,7 +411,7 @@ impl LoRaWANMeshProtocol {
         let chunk_size = max_payload - header_size;
         
         let total_fragments = (message.len() + chunk_size - 1) / chunk_size;
-        info!("📦 Fragmenting message into {} parts", total_fragments);
+        info!(" Fragmenting message into {} parts", total_fragments);
         
         for (fragment_id, chunk) in message.chunks(chunk_size).enumerate() {
             let mut fragment = Vec::new();
@@ -477,7 +477,7 @@ impl LoRaWANMeshProtocol {
     }
     
     async fn encrypt_payload(&self, payload: &[u8], frame_counter: u16) -> Result<Vec<u8>> {
-        // In real implementation, would use AES-128 with AppSKey
+        // In implementation, would use AES-128 with AppSKey
         // For now, simple XOR cipher for demonstration
         let key = frame_counter as u8;
         let encrypted: Vec<u8> = payload.iter().map(|b| b ^ key).collect();
@@ -485,7 +485,7 @@ impl LoRaWANMeshProtocol {
     }
     
     async fn calculate_mic(&self, frame: &[u8]) -> Result<[u8; 4]> {
-        // In real implementation, would use AES-CMAC with NwkSKey
+        // In implementation, would use AES-CMAC with NwkSKey
         use sha2::{Sha256, Digest};
         
         let mut hasher = Sha256::new();
@@ -501,7 +501,7 @@ impl LoRaWANMeshProtocol {
     async fn transmit_frame(&self, frame: &[u8]) -> Result<()> {
         info!("Transmitting LoRaWAN frame: {} bytes", frame.len());
         
-        // In real implementation, would:
+        // In implementation, would:
         // 1. Select appropriate channel and data rate
         // 2. Check duty cycle compliance
         // 3. Transmit via radio module
@@ -549,7 +549,7 @@ impl LoRaWANMeshProtocol {
     
     async fn calculate_air_time(&self, payload_size: usize, data_rate: u8) -> Result<u64> {
         // Simplified air time calculation
-        // Real calculation depends on SF, BW, CR, preamble length, etc.
+        // calculation depends on SF, BW, CR, preamble length, etc.
         let base_time = match data_rate {
             0 => 1000, // SF12 - slowest
             1 => 500,  // SF11

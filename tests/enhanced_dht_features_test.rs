@@ -13,7 +13,7 @@ use std::time::Duration;
 
 #[tokio::test]
 async fn test_enhanced_cache_functionality() {
-    println!("🧪 Testing Enhanced DHT Cache Functionality");
+    println!(" Testing Enhanced DHT Cache Functionality");
     
     // Test basic cache operations with proper API
     let mut cache = OptimizedDHTCache::new(5, Duration::from_secs(10));
@@ -32,7 +32,7 @@ async fn test_enhanced_cache_functionality() {
     let stats = cache.stats();
     assert_eq!(stats.hits, 1);
     assert_eq!(stats.size, 3);
-    println!("   📊 Cache stats: {} hits, {} entries", stats.hits, stats.size);
+    println!("    Cache stats: {} hits, {} entries", stats.hits, stats.size);
 
     // Test LRU eviction
     println!("    Testing LRU eviction...");
@@ -53,7 +53,7 @@ async fn test_enhanced_cache_functionality() {
 
 #[tokio::test]  
 async fn test_thread_safe_cache() {
-    println!("🧪 Testing Thread-Safe DHT Cache");
+    println!(" Testing Thread-Safe DHT Cache");
     
     let cache = ThreadSafeDHTCache::new(10, Duration::from_secs(5));
     
@@ -69,16 +69,16 @@ async fn test_thread_safe_cache() {
     assert_eq!(stats.size, 2);
     
     println!("    Thread-safe cache operations successful");
-    println!("   📊 Async cache stats: {} hits, {} entries", stats.hits, stats.size);
+    println!("    Async cache stats: {} hits, {} entries", stats.hits, stats.size);
 }
 
 #[tokio::test]
 async fn test_enhanced_bootstrap_mdns() {
-    println!("🧪 Testing Enhanced Bootstrap with mDNS");
+    println!(" Testing Enhanced Bootstrap with mDNS");
     
     // Create bootstrap enhancements with default settings
     let bootstrap_config = DHTBootstrapEnhancements::default();
-    println!("   ⚙️  Bootstrap config: mDNS={}, peer_exchange={}", 
+    println!("     Bootstrap config: mDNS={}, peer_exchange={}", 
              bootstrap_config.enable_mdns, bootstrap_config.enable_peer_exchange);
     
     // Create bootstrap manager
@@ -98,7 +98,7 @@ async fn test_enhanced_bootstrap_mdns() {
             // Test discovered peers storage
             let stored_peers = bootstrap.get_discovered_peers();
             assert_eq!(stored_peers.len(), peers.len());
-            println!("   📂 Peer storage working correctly");
+            println!("    Peer storage working correctly");
         }
         Err(e) => {
             println!("     Bootstrap discovery error (expected in test): {}", e);
@@ -113,12 +113,12 @@ async fn test_enhanced_bootstrap_mdns() {
 
 #[tokio::test]
 async fn test_dht_performance_monitoring() {
-    println!("🧪 Testing DHT Performance Monitoring");
+    println!(" Testing DHT Performance Monitoring");
     
     // Create performance monitor with proper constructor
     let mut monitor = DHTPerformanceMonitor::new(100, Duration::from_secs(60));
     
-    println!("   📊 Recording DHT operations...");
+    println!("    Recording DHT operations...");
     
     // Record some sample operations with correct API
     monitor.record_operation(
@@ -160,14 +160,14 @@ async fn test_dht_performance_monitoring() {
     let store_stats = monitor.get_operation_stats(DHTOperation::Store);
     assert_eq!(store_stats.total_operations, 1);
     assert_eq!(store_stats.success_rate, 1.0);
-    println!("   📦 Store operation stats: {:.2}ms avg latency", store_stats.avg_latency_ms);
+    println!("    Store operation stats: {:.2}ms avg latency", store_stats.avg_latency_ms);
     
     println!("    DHT performance monitoring working correctly");
 }
 
 #[tokio::test]
 async fn test_cache_ttl_expiration() {
-    println!("🧪 Testing Cache TTL Expiration");
+    println!(" Testing Cache TTL Expiration");
     
     let mut cache = OptimizedDHTCache::new(10, Duration::from_millis(100));
     
@@ -195,5 +195,5 @@ async fn test_cache_ttl_expiration() {
     
     let expired_count = cache.cleanup_expired();
     assert!(expired_count >= 2);
-    println!("   🧹 Cleaned up {} expired entries", expired_count);
+    println!("    Cleaned up {} expired entries", expired_count);
 }

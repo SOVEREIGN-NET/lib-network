@@ -143,7 +143,7 @@ class ZhtpDhtApi {
             throw new Error('DHT API not initialized');
         }
 
-        console.log(`📤 DHT API: Sending query to peer ${peerAddress}`);
+        console.log(` DHT API: Sending query to peer ${peerAddress}`);
         
         try {
             const response = await fetch('/api/v1/dht/query', {
@@ -176,7 +176,7 @@ class ZhtpDhtApi {
             throw new Error('DHT API not initialized');
         }
 
-        console.log(`💾 DHT API: Storing content for ${domain}${path}`);
+        console.log(` DHT API: Storing content for ${domain}${path}`);
         
         try {
             const response = await fetch('/api/v1/dht/store', {

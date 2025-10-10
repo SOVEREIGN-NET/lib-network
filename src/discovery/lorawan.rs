@@ -4,7 +4,7 @@ use rand;
 use lib_crypto::PublicKey;
 use crate::discovery::hardware::HardwareCapabilities;
 
-/// LoRaWAN Gateway Information from real discovery
+/// LoRaWAN Gateway Information from discovery
 #[derive(Debug, Clone)]
 pub struct LoRaWANGatewayInfo {
     /// Gateway EUI (Extended Unique Identifier)
@@ -30,8 +30,8 @@ pub async fn discover_lorawan_gateways_with_capabilities(capabilities: &Hardware
         return Ok(Vec::new());
     }
     
-    // REAL LoRaWAN gateway discovery using actual radio scanning
-    println!("Scanning for REAL LoRaWAN gateways...");
+    // LoRaWAN gateway discovery using actual radio scanning
+    println!("Scanning for LoRaWAN gateways...");
     
     let mut discovered_gateways = Vec::new();
     
@@ -50,11 +50,11 @@ pub async fn discover_lorawan_gateways_with_capabilities(capabilities: &Hardware
         }
     }
     
-    // Only report real gateways found - no fake data
+    // Only report gateways found - no fake data
     if discovered_gateways.is_empty() {
         println!("No LoRaWAN gateways detected in area");
     } else {
-        println!("Discovered {} real LoRaWAN gateways", discovered_gateways.len());
+        println!("Discovered {} LoRaWAN gateways", discovered_gateways.len());
     }
     
     Ok(discovered_gateways)
@@ -65,7 +65,7 @@ pub async fn discover_lorawan_nodes() -> Result<Vec<LoRaWANGatewayInfo>> {
     discover_lorawan_gateways().await
 }
 
-/// Scan specific LoRaWAN frequency for real gateways
+/// Scan specific LoRaWAN frequency for gateways
 async fn scan_lorawan_frequency(frequency_hz: u32) -> Result<LoRaWANGatewayInfo> {
     println!("Scanning {} Hz for LoRaWAN gateway...", frequency_hz);
     
@@ -140,7 +140,7 @@ async fn check_lorawan_hardware() -> bool {
         if usb_devices.contains("1a86:7523") || // CH340 (common in LoRaWAN modules)
            usb_devices.contains("0403:6001") || // FTDI (used in some LoRaWAN modules)
            usb_devices.contains("10c4:ea60") {   // Silicon Labs (CP210x)
-            println!("🔌 USB LoRaWAN adapter detected");
+            println!(" USB LoRaWAN adapter detected");
             return true;
         }
     }
@@ -178,7 +178,7 @@ async fn perform_lorawan_scan(frequency_hz: u32) -> Result<LoRaWANGatewayInfo> {
     if output.is_ok() {
         println!("🌉 ChirpStack Gateway Bridge found");
         
-        // In real implementation, would use ChirpStack APIs to scan for gateways
+        // In implementation, would use ChirpStack APIs to scan for gateways
         return simulate_gateway_detection(frequency_hz).await;
     }
     
@@ -188,9 +188,9 @@ async fn perform_lorawan_scan(frequency_hz: u32) -> Result<LoRaWANGatewayInfo> {
         .output();
         
     if output.is_ok() {
-        println!("📦 LoRa Packet Forwarder found");
+        println!(" LoRa Packet Forwarder found");
         
-        // In real implementation, would monitor packet forwarder logs for gateway activity
+        // In implementation, would monitor packet forwarder logs for gateway activity
         return simulate_gateway_detection(frequency_hz).await;
     }
     

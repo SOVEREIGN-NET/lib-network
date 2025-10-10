@@ -204,7 +204,7 @@ async fn test_mesh_peer_authentication() -> Result<()> {
     // Generate test message
     let test_message = b"Test mesh message for signature verification";
     
-    // Sign message (would use node's private key in real implementation)
+    // Sign message (would use node's private key in implementation)
     let keypair = generate_keypair()?;
     let signature = lib_crypto::sign_message(&keypair, test_message)?;
     

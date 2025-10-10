@@ -125,10 +125,10 @@ impl DHTBootstrap {
                 }
             }
             
-            // No localhost fallback scanning - use only real peer discovery via mDNS
-            debug!(" Real peer discovery complete - no localhost simulation used");
+            // No localhost fallback scanning - use only peer discovery via mDNS
+            debug!(" peer discovery complete - no localhost simulation used");
             
-            // Real ZHTP protocol discovery complete
+            // ZHTP protocol discovery complete
             // Future enhancement: Add multicast DNS for:
             // - Service registration (_zhtp._udp.local)
             // - Network-wide peer announcements

@@ -90,7 +90,7 @@ impl ZhtpEncryptionSession {
     
     /// Initiate key exchange with peer
     pub fn create_key_exchange_init(&self, session_id: String) -> Result<ZhtpKeyExchangeInit> {
-        info!("📤 Creating Kyber key exchange initiation for session: {}", &session_id[..8]);
+        info!(" Creating Kyber key exchange initiation for session: {}", &session_id[..8]);
         
         Ok(ZhtpKeyExchangeInit {
             kyber_public_key: self.local_kyber_public.clone(),
@@ -107,7 +107,7 @@ impl ZhtpEncryptionSession {
         &mut self,
         init: &ZhtpKeyExchangeInit,
     ) -> Result<ZhtpKeyExchangeResponse> {
-        info!("📥 Responding to Kyber key exchange for session: {}", &init.session_id[..8]);
+        info!(" Responding to Kyber key exchange for session: {}", &init.session_id[..8]);
         
         // Encapsulate shared secret with peer's public key
         let (ciphertext, shared_secret) = kyber512_encapsulate(&init.kyber_public_key)?;

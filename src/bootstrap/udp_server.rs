@@ -141,7 +141,7 @@ async fn handle_lib_mesh_message(
             if let Ok(response_json) = serde_json::to_string(&response_message) {
                 match socket.send_to(response_json.as_bytes(), addr).await {
                     Ok(sent_bytes) => {
-                        info!("📤 Sent ZHTP mesh response: {} bytes to {}", sent_bytes, addr);
+                        info!(" Sent ZHTP mesh response: {} bytes to {}", sent_bytes, addr);
                     }
                     Err(e) => {
                         error!("Failed to send ZHTP response: {}", e);

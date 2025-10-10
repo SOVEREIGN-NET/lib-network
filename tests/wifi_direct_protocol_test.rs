@@ -74,7 +74,7 @@ async fn test_wifi_direct_group_operations() -> Result<()> {
     println!("  - Group owner election algorithm implemented");
     println!("  - P2P connection establishment supported");
     println!("  - Group credentials and security handled");
-    println!("  - Actual group operations require real WiFi hardware");
+    println!("  - Actual group operations require WiFi hardware");
     
     Ok(())
 }
@@ -110,7 +110,7 @@ async fn test_wifi_direct_data_transmission() -> Result<()> {
     println!("  Connection time: {}", mock_device.connection_time);
     
     println!("✓ WiFi Direct data transmission setup completed");
-    println!("  Note: Actual transmission requires real WiFi Direct devices");
+    println!("  Note: Actual transmission requires WiFi Direct devices");
     
     Ok(())
 }
@@ -182,7 +182,7 @@ async fn test_wifi_direct_tcp_transmission() -> Result<()> {
     println!("  - Message fragmentation for large payloads");  
     println!("  - Connection quality monitoring");
     println!("  - Automatic reconnection on failures");
-    println!("  - Real transmission requires connected WiFi Direct peers");
+    println!("  - transmission requires connected WiFi Direct peers");
     
     Ok(())
 }
