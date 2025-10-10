@@ -85,7 +85,7 @@ async fn test_node_id_addressing() -> Result<()> {
 /// Test mesh server creation and basic functionality
 #[tokio::test]
 async fn test_mesh_server_creation() -> Result<()> {
-    println!("🌐 Testing Mesh Server Creation...");
+    println!(" Testing Mesh Server Creation...");
     
     // Create mesh server
     let server = create_unique_test_mesh_server("server-test-node").await?;

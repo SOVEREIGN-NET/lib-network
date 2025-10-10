@@ -134,7 +134,7 @@ class ZkDHTClient {
     }
 
     async loadPage(zhtpUrl) {
-        console.log(`📄 Loading page from zkDHT: ${zhtpUrl}`);
+        console.log(` Loading page from zkDHT: ${zhtpUrl}`);
         
         try {
             // Parse ZHTP URL
@@ -504,7 +504,7 @@ class ZkDHTClient {
                                 id: 'post_2',
                                 author: 'dev.zhtp',
                                 avatar: '👨‍💻',
-                                content: 'New protocol update is live! Quantum-resistant signatures now 40% faster. Upgrade your nodes! ⚡',
+                                content: 'New protocol update is live! Quantum-resistant signatures now 40% faster. Upgrade your nodes! ',
                                 timestamp: '4 hours ago',
                                 likes: 156,
                                 shares: 34,
@@ -567,7 +567,7 @@ class ZkDHTClient {
                                 description: 'Premium business domain for Web4',
                                 price: '500 ZHTP',
                                 category: 'Business',
-                                image: '🌐'
+                                image: ''
                             }
                         ]
                     },

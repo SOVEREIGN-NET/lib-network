@@ -200,7 +200,7 @@ async fn perform_lorawan_scan(frequency_hz: u32) -> Result<LoRaWANGatewayInfo> {
         .output();
         
     if output.is_ok() {
-        println!("📻 RTL-SDR found - can be used for LoRaWAN scanning");
+        println!(" RTL-SDR found - can be used for LoRaWAN scanning");
         return perform_rtl_sdr_lorawan_scan(frequency_hz).await;
     }
     
@@ -211,7 +211,7 @@ async fn perform_lorawan_scan(frequency_hz: u32) -> Result<LoRaWANGatewayInfo> {
 async fn perform_rtl_sdr_lorawan_scan(frequency_hz: u32) -> Result<LoRaWANGatewayInfo> {
     use std::process::Command;
     
-    println!("📻 Using RTL-SDR for LoRaWAN gateway detection...");
+    println!(" Using RTL-SDR for LoRaWAN gateway detection...");
     
     // Use RTL-SDR to scan for LoRaWAN signals
     let output = Command::new("timeout")

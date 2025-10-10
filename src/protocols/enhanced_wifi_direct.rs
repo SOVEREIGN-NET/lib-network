@@ -109,7 +109,7 @@ impl MacOSWiFiDirectManager {
         if p2p_capable {
             info!(" macOS: Interface {} supports P2P operations", device);
         } else {
-            warn!("⚠️  macOS: Interface {} may not support P2P", device);
+            warn!("  macOS: Interface {} may not support P2P", device);
         }
         
         Ok(p2p_capable)
@@ -209,12 +209,12 @@ impl MacOSWiFiDirectManager {
                     // Verify connection
                     self.verify_p2p_connection(interface, target_ssid).await?;
                 } else {
-                    error!("❌ macOS: Failed to connect to P2P group: {}", output_str);
+                    error!(" macOS: Failed to connect to P2P group: {}", output_str);
                     return Err(anyhow::anyhow!("P2P connection failed: {}", output_str));
                 }
             }
             Err(e) => {
-                error!("❌ macOS: Network connection error: {:?}", e);
+                error!(" macOS: Network connection error: {:?}", e);
                 return Err(anyhow::anyhow!("Network connection error: {:?}", e));
             }
         }
@@ -288,12 +288,12 @@ impl MacOSWiFiDirectManager {
                     
                     info!(" macOS: P2P message transmitted successfully");
                 } else {
-                    warn!("⚠️  macOS: P2P device {} not reachable", target_device);
+                    warn!("  macOS: P2P device {} not reachable", target_device);
                     return Err(anyhow::anyhow!("P2P device not reachable"));
                 }
             }
             Err(e) => {
-                error!("❌ macOS: P2P connectivity check failed: {:?}", e);
+                error!(" macOS: P2P connectivity check failed: {:?}", e);
                 return Err(anyhow::anyhow!("P2P connectivity error: {:?}", e));
             }
         }
@@ -428,7 +428,7 @@ impl AdvancedWPSSecurity {
             }
         }
         
-        warn!("❌ Invalid WPS PIN for device {}", device_id);
+        warn!(" Invalid WPS PIN for device {}", device_id);
         Ok(false)
     }
     

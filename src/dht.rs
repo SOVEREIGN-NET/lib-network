@@ -239,7 +239,7 @@ impl DHTClient {
         }
         
         if !dht_initialized {
-            warn!("⚠️ Failed to initialize binary DHT protocol on any port, using fallback mode");
+            warn!(" Failed to initialize binary DHT protocol on any port, using fallback mode");
         }
         
         // Initialize with some bootstrap peers
@@ -296,7 +296,7 @@ impl DHTClient {
                     Ok(())
                 }
                 Ok(Err(e)) => {
-                    debug!("❌ Failed to ping DHT peer {}: {}", peer_address, e);
+                    debug!(" Failed to ping DHT peer {}: {}", peer_address, e);
                     Err(anyhow!("DHT ping failed: {}", e))
                 }
                 Err(_) => {
@@ -305,7 +305,7 @@ impl DHTClient {
                 }
             }
         } else {
-            debug!("⚠️ DHT protocol handler not initialized for peer ping");
+            debug!(" DHT protocol handler not initialized for peer ping");
             Err(anyhow!("Protocol handler not available"))
         }
     }
@@ -459,7 +459,7 @@ impl DHTClient {
             let mut storage = self.storage_system.write().await;
             let _stored_hash = storage.upload_content(upload_request, self.identity.clone()).await?;
             
-            info!("📡 Content uploaded with replication factor: {}", DEFAULT_REPLICATION_FACTOR);
+            info!(" Content uploaded with replication factor: {}", DEFAULT_REPLICATION_FACTOR);
             info!("   Storage system will distribute to {} nodes", DEFAULT_REPLICATION_FACTOR);
         }
         
@@ -474,14 +474,14 @@ impl DHTClient {
             stats.storage_operations += 1;
         }
         
-        info!("✅ Content stored with hash: {} (replicated to {} nodes)", 
+        info!(" Content stored with hash: {} (replicated to {} nodes)", 
               content_hash_str, DEFAULT_REPLICATION_FACTOR);
         Ok(content_hash_str)
     }
     
     /// Resolve content hash for domain/path
     pub async fn resolve_content(&self, domain: &str, path: &str) -> Result<String> {
-        info!("🔍 Resolving content for {}{}", domain, path);
+        info!(" Resolving content for {}{}", domain, path);
         
         let key = format!("{}:{}", domain, path);
         
@@ -520,7 +520,7 @@ impl DHTClient {
         match storage.search_content(search_query, self.identity.clone()).await {
             Ok(results) if !results.is_empty() => {
                 let content_hash = hex::encode(results[0].content_hash.as_bytes());
-                info!("✅ Content found in storage: {}", &content_hash[..16]);
+                info!(" Content found in storage: {}", &content_hash[..16]);
                 
                 // Cache the result
                 self.content_cache.insert(key, content_hash.clone()).await;
@@ -534,7 +534,7 @@ impl DHTClient {
             }
             _ => {
                 // Fallback: generate deterministic hash (for backwards compatibility)
-                warn!("⚠️ Content not found in storage, generating fallback hash");
+                warn!(" Content not found in storage, generating fallback hash");
                 let content_identifier = format!("{}{}", domain, path);
                 let hash_bytes = lib_crypto::hash_blake3(content_identifier.as_bytes());
                 let content_hash = hex::encode(&hash_bytes[..32]);
@@ -586,7 +586,7 @@ impl DHTClient {
                 Ok(data)
             }
             None => {
-                warn!("❌ Content not found with hash: {}", content_hash);
+                warn!(" Content not found with hash: {}", content_hash);
                 warn!(" Content may not exist in the DHT network");
                 warn!(" Upload content first or check if hash is correct");
                 
@@ -698,7 +698,7 @@ impl DHTClient {
                     connected_count += 1;
                 }
                 Err(e) => {
-                    debug!("❌ Bootstrap peer {} unavailable: {}", peer, e);
+                    debug!(" Bootstrap peer {} unavailable: {}", peer, e);
                     // This is normal - no other ZHTP nodes may be running
                 }
             }
@@ -897,7 +897,7 @@ pub async fn call_native_dht_client(function_name: &str, params: &serde_json::Va
                 .and_then(|v| v.as_str())
                 .ok_or_else(|| anyhow!("Missing 'url' parameter"))?;
             
-            info!("📄 Loading page via native protocol: {}", url);
+            info!(" Loading page via native protocol: {}", url);
             
             // Parse ZHTP URL
             let url_parts: Vec<&str> = url.split("://").collect();
@@ -947,7 +947,7 @@ pub async fn call_native_dht_client(function_name: &str, params: &serde_json::Va
                             }))
                         }
                         Ok(None) | Err(_) => {
-                            warn!("📄 Content not found via binary protocol for {}", url);
+                            warn!(" Content not found via binary protocol for {}", url);
                             Ok(serde_json::json!({
                                 "type": "zhtp-page",
                                 "url": url,
@@ -1238,13 +1238,13 @@ pub async fn serve_web4_page(dht_client: &mut DHTClient, zhtp_url: &str) -> Resu
                     Ok(response)
                 }
                 Err(e) => {
-                    warn!("❌ Content not found in DHT: {}", e);
+                    warn!(" Content not found in DHT: {}", e);
                     Err(anyhow!("Web4 content not available: {}", e))
                 }
             }
         }
         Err(e) => {
-            warn!("❌ Content resolution failed for {}: {}", zhtp_url, e);
+            warn!(" Content resolution failed for {}: {}", zhtp_url, e);
             warn!(" Content may not be published to DHT yet");
             Err(anyhow!("Web4 page not found: {}", e))
         }

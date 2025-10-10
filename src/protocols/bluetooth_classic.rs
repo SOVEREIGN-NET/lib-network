@@ -515,12 +515,12 @@ impl BluetoothClassicProtocol {
     
     /// Initialize ZHTP authentication for this node
     pub async fn initialize_zhtp_auth(&self, blockchain_pubkey: PublicKey) -> Result<()> {
-        info!("🔐 Initializing ZHTP authentication for Bluetooth Classic RFCOMM");
+        info!(" Initializing ZHTP authentication for Bluetooth Classic RFCOMM");
         
         let auth_manager = ZhtpAuthManager::new(blockchain_pubkey)?;
         *self.auth_manager.write().await = Some(auth_manager);
         
-        info!("✅ ZHTP authentication initialized for Bluetooth Classic");
+        info!(" ZHTP authentication initialized for Bluetooth Classic");
         Ok(())
     }
     
@@ -599,7 +599,7 @@ impl BluetoothClassicProtocol {
     
     /// Start RFCOMM service advertising
     pub async fn start_advertising(&self) -> Result<()> {
-        info!("🔵 Starting Bluetooth Classic RFCOMM service advertising");
+        info!(" Starting Bluetooth Classic RFCOMM service advertising");
         
         #[cfg(target_os = "windows")]
         {
@@ -616,7 +616,7 @@ impl BluetoothClassicProtocol {
             self.macos_register_rfcomm_service().await?;
         }
         
-        info!("✅ Bluetooth Classic RFCOMM service advertising (ZHTP Mesh)");
+        info!(" Bluetooth Classic RFCOMM service advertising (ZHTP Mesh)");
         Ok(())
     }
     
@@ -678,15 +678,15 @@ impl BluetoothClassicProtocol {
                 .get()
                 .map_err(|e| anyhow!("Failed to complete listener binding: {:?}", e))?;
             
-            info!("✅ Windows: RFCOMM service provider created");
-            info!("📡 Windows: Service UUID: 6ba7b810-9dad-11d1-80b4-00c04fd430c8");
+            info!(" Windows: RFCOMM service provider created");
+            info!(" Windows: Service UUID: 6ba7b810-9dad-11d1-80b4-00c04fd430c8");
             info!("🔌 Windows: RFCOMM channel: {}", rfcomm_channels::MESH_DATA);
             
             // Start advertising (Windows API only takes listener parameter)
             provider.StartAdvertising(&listener)
                 .map_err(|e| anyhow!("Failed to start RFCOMM advertising: {:?}", e))?;
             
-            info!("✅ Windows: RFCOMM service advertising started");
+            info!(" Windows: RFCOMM service advertising started");
             
             // Store provider to keep it alive
             *self.service_provider.write().await = Some(Box::new(provider));
@@ -699,7 +699,7 @@ impl BluetoothClassicProtocol {
             info!("🪟 Windows: RFCOMM service registration requires windows-gatt feature");
             info!("   To enable: cargo build --features windows-gatt");
             warn!("   Windows RFCOMM support disabled - discovery and connections will fail");
-            warn!("🚨 Build with --features windows-gatt to enable Bluetooth Classic on Windows");
+            warn!(" Build with --features windows-gatt to enable Bluetooth Classic on Windows");
             Ok(())
         }
     }
@@ -718,7 +718,7 @@ impl BluetoothClassicProtocol {
     /// Register RFCOMM service on Linux
     #[cfg(target_os = "linux")]
     async fn linux_register_rfcomm_service(&self) -> Result<()> {
-        info!("🐧 Linux: Registering RFCOMM service via BlueZ");
+        info!(" Linux: Registering RFCOMM service via BlueZ");
         
         // Use sdptool to register RFCOMM service
         let service_uuid = "6ba7b810-9dad-11d1-80b4-00c04fd430c8";
@@ -735,7 +735,7 @@ impl BluetoothClassicProtocol {
         
         match output {
             Ok(result) if result.status.success() => {
-                info!("✅ Linux: RFCOMM service registered via sdptool");
+                info!(" Linux: RFCOMM service registered via sdptool");
             }
             Ok(result) => {
                 let stderr = String::from_utf8_lossy(&result.stderr);
@@ -746,7 +746,7 @@ impl BluetoothClassicProtocol {
             }
         }
         
-        info!("📡 Linux: RFCOMM service advertising (manual pairing may be required)");
+        info!(" Linux: RFCOMM service advertising (manual pairing may be required)");
         Ok(())
     }
     
@@ -771,18 +771,18 @@ impl BluetoothClassicProtocol {
             Ok(result) if result.status.success() => {
                 let power_state = String::from_utf8_lossy(&result.stdout).trim().to_string();
                 if power_state == "1" {
-                    info!("✅ macOS: Bluetooth is enabled");
+                    info!(" macOS: Bluetooth is enabled");
                 } else {
-                    warn!("⚠️  macOS: Bluetooth may be disabled (power state: {})", power_state);
+                    warn!("  macOS: Bluetooth may be disabled (power state: {})", power_state);
                 }
             }
             _ => {
-                warn!("⚠️  macOS: Could not check Bluetooth state");
+                warn!("  macOS: Could not check Bluetooth state");
             }
         }
         
         // Service will be registered when we create the listening socket
-        info!("📡 macOS: RFCOMM service will be registered on socket bind");
+        info!(" macOS: RFCOMM service will be registered on socket bind");
         info!("🔌 macOS: Service UUID: 6ba7b810-9dad-11d1-80b4-00c04fd430c8");
         info!("📞 macOS: RFCOMM channel: {}", rfcomm_channels::MESH_DATA);
         
@@ -858,7 +858,7 @@ impl BluetoothClassicProtocol {
                 .map_err(|e| anyhow!("Failed to get peer address: {:?}", e))?
                 .to_string();
             
-            info!("✅ Windows: RFCOMM connection accepted from {}", peer_address);
+            info!(" Windows: RFCOMM connection accepted from {}", peer_address);
             
             Ok(RfcommStream::from_windows_socket(socket, reader, writer, peer_address))
         }
@@ -877,7 +877,7 @@ impl BluetoothClassicProtocol {
         use nix::sys::socket::{socket, bind, listen, SockaddrLike};
         use std::os::unix::io::RawFd;
         
-        info!("🐧 Linux: Waiting for RFCOMM connection...");
+        info!(" Linux: Waiting for RFCOMM connection...");
         
         // RFCOMM protocol constant (from bluetooth.h)
         const BTPROTO_RFCOMM: i32 = 3;
@@ -933,7 +933,7 @@ impl BluetoothClassicProtocol {
             return Err(anyhow!("Failed to listen on RFCOMM socket"));
         }
         
-        info!("📡 Linux: RFCOMM socket listening on channel {}", RFCOMM_CHANNEL);
+        info!(" Linux: RFCOMM socket listening on channel {}", RFCOMM_CHANNEL);
         
         // Accept connection (blocking - wrap in spawn_blocking)
         let client_fd = tokio::task::spawn_blocking(move || {
@@ -952,7 +952,7 @@ impl BluetoothClassicProtocol {
         let flags = unsafe { libc::fcntl(client_fd, libc::F_GETFL, 0) };
         unsafe { libc::fcntl(client_fd, libc::F_SETFL, flags | libc::O_NONBLOCK); }
         
-        info!("✅ Linux: RFCOMM connection accepted (fd: {})", client_fd);
+        info!(" Linux: RFCOMM connection accepted (fd: {})", client_fd);
         
         // Format peer address (we don't have it from accept, use unknown)
         let peer_address = format!("RFCOMM:fd:{}", client_fd);
@@ -1023,7 +1023,7 @@ impl BluetoothClassicProtocol {
             return Err(anyhow!("Failed to listen on RFCOMM socket"));
         }
         
-        info!("📡 macOS: RFCOMM socket listening on channel {}", RFCOMM_CHANNEL);
+        info!(" macOS: RFCOMM socket listening on channel {}", RFCOMM_CHANNEL);
         
         // Accept connection (blocking - wrap in spawn_blocking)
         let (client_fd, peer_addr) = tokio::task::spawn_blocking(move || {
@@ -1061,7 +1061,7 @@ impl BluetoothClassicProtocol {
             peer_addr.rc_bdaddr[3], peer_addr.rc_bdaddr[4], peer_addr.rc_bdaddr[5]
         );
         
-        info!("✅ macOS: RFCOMM connection accepted from {} (fd: {})", peer_address, client_fd);
+        info!(" macOS: RFCOMM connection accepted from {} (fd: {})", peer_address, client_fd);
         
         Ok(RfcommStream::from_macos_channel(
             peer_addr.rc_channel,
@@ -1334,7 +1334,7 @@ impl BluetoothClassicProtocol {
                 }
             }
             
-            info!("✅ Windows: Found {} paired devices", devices.len());
+            info!(" Windows: Found {} paired devices", devices.len());
             Ok(devices)
         }
         
@@ -1417,7 +1417,7 @@ impl BluetoothClassicProtocol {
                 }
             }
             
-            info!("✅ Windows: Found {} RFCOMM services on {}", rfcomm_services.len(), device_address);
+            info!(" Windows: Found {} RFCOMM services on {}", rfcomm_services.len(), device_address);
             Ok(rfcomm_services)
         }
         
@@ -1503,7 +1503,7 @@ impl BluetoothClassicProtocol {
             let writer = DataWriter::CreateDataWriter(&output_stream)
                 .map_err(|e| anyhow!("Failed to create writer: {:?}", e))?;
             
-            info!("✅ Windows: Connected to {} via RFCOMM", device_address);
+            info!(" Windows: Connected to {} via RFCOMM", device_address);
             
             // Track connection
             let connection = RfcommConnection {
@@ -1539,7 +1539,7 @@ impl BluetoothClassicProtocol {
     
     #[cfg(target_os = "linux")]
     async fn discover_paired_devices_linux(&self) -> Result<Vec<BluetoothDevice>> {
-        info!("🐧 Linux: Discovering paired Bluetooth devices via BlueZ...");
+        info!(" Linux: Discovering paired Bluetooth devices via BlueZ...");
         
         // Use bluetoothctl to list paired devices
         let output = std::process::Command::new("bluetoothctl")
@@ -1582,16 +1582,16 @@ impl BluetoothClassicProtocol {
                 }
             }
             Ok(result) => {
-                warn!("🐧 Linux: bluetoothctl failed: {}", String::from_utf8_lossy(&result.stderr));
+                warn!(" Linux: bluetoothctl failed: {}", String::from_utf8_lossy(&result.stderr));
             }
             Err(e) => {
-                warn!("🐧 Linux: bluetoothctl not available: {}", e);
+                warn!(" Linux: bluetoothctl not available: {}", e);
                 // Fallback: try to read from /var/lib/bluetooth
                 devices = Self::discover_devices_from_bluez_cache()?;
             }
         }
         
-        info!("✅ Linux: Found {} paired devices", devices.len());
+        info!(" Linux: Found {} paired devices", devices.len());
         Ok(devices)
     }
     
@@ -1657,7 +1657,7 @@ impl BluetoothClassicProtocol {
     
     #[cfg(target_os = "linux")]
     async fn query_services_linux(&self, device_address: &str) -> Result<Vec<RfcommServiceInfo>> {
-        info!("🐧 Linux: Querying RFCOMM services on {}", device_address);
+        info!(" Linux: Querying RFCOMM services on {}", device_address);
         
         // Use sdptool to browse services
         let output = std::process::Command::new("sdptool")
@@ -1721,10 +1721,10 @@ impl BluetoothClassicProtocol {
                 }
             }
             Ok(result) => {
-                warn!("🐧 Linux: sdptool failed: {}", String::from_utf8_lossy(&result.stderr));
+                warn!(" Linux: sdptool failed: {}", String::from_utf8_lossy(&result.stderr));
             }
             Err(e) => {
-                warn!("🐧 Linux: sdptool not available: {}", e);
+                warn!(" Linux: sdptool not available: {}", e);
             }
         }
         
@@ -1738,13 +1738,13 @@ impl BluetoothClassicProtocol {
             });
         }
         
-        info!("✅ Linux: Found {} RFCOMM services on {}", services.len(), device_address);
+        info!(" Linux: Found {} RFCOMM services on {}", services.len(), device_address);
         Ok(services)
     }
     
     #[cfg(target_os = "linux")]
     async fn connect_to_peer_linux(&self, device_address: &str, channel: u8) -> Result<RfcommStream> {
-        info!("🐧 Linux: Connecting to RFCOMM service on {} channel {}", device_address, channel);
+        info!(" Linux: Connecting to RFCOMM service on {} channel {}", device_address, channel);
         
         // Parse MAC address
         let mac_bytes = Self::parse_mac_address(device_address)?;
@@ -1794,7 +1794,7 @@ impl BluetoothClassicProtocol {
         let flags = unsafe { libc::fcntl(sock_fd, libc::F_GETFL, 0) };
         unsafe { libc::fcntl(sock_fd, libc::F_SETFL, flags | libc::O_NONBLOCK); }
         
-        info!("✅ Linux: Connected to {} channel {} (fd: {})", device_address, channel, sock_fd);
+        info!(" Linux: Connected to {} channel {} (fd: {})", device_address, channel, sock_fd);
         
         // Track connection
         let connection = RfcommConnection {
@@ -1891,7 +1891,7 @@ impl BluetoothClassicProtocol {
             }
         }
         
-        info!("✅ macOS: Found {} paired devices", devices.len());
+        info!(" macOS: Found {} paired devices", devices.len());
         Ok(devices)
     }
     
@@ -1910,7 +1910,7 @@ impl BluetoothClassicProtocol {
             }
         ];
         
-        info!("✅ macOS: Returning default ZHTP service for {}", device_address);
+        info!(" macOS: Returning default ZHTP service for {}", device_address);
         Ok(services)
     }
     
@@ -1969,7 +1969,7 @@ impl BluetoothClassicProtocol {
         let flags = unsafe { libc::fcntl(sock_fd, libc::F_GETFL, 0) };
         unsafe { libc::fcntl(sock_fd, libc::F_SETFL, flags | libc::O_NONBLOCK); }
         
-        info!("✅ macOS: Connected to {} channel {} (fd: {})", device_address, channel, sock_fd);
+        info!(" macOS: Connected to {} channel {} (fd: {})", device_address, channel, sock_fd);
         
         // Track connection
         let connection = RfcommConnection {

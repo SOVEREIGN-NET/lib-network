@@ -462,7 +462,7 @@ impl ZhtpMeshServer {
                     "Emergency stop activated".to_string(),
                 ).await;
                 
-                warn!("🚨 EMERGENCY STOP activated by wallet: {}", hex::encode(caller_wallet_key.as_bytes()));
+                warn!(" EMERGENCY STOP activated by wallet: {}", hex::encode(caller_wallet_key.as_bytes()));
                 Ok(())
             }
             _ => {
@@ -514,7 +514,7 @@ impl ZhtpMeshServer {
         
         // Safety check: Emergency stop
         if *self.emergency_stop.read().await {
-            return Err(anyhow!("🚨 Cannot start discovery - emergency stop is active"));
+            return Err(anyhow!(" Cannot start discovery - emergency stop is active"));
         }
         
         // Safety check: Connection limit
@@ -523,7 +523,7 @@ impl ZhtpMeshServer {
         let max_connections = *self.max_connections.read().await;
         let at_limit = (current_connections as usize) >= max_connections;
         if at_limit {
-            warn!("⚠️ Connection limit reached ({}/{}), skipping Bluetooth discovery", 
+            warn!(" Connection limit reached ({}/{}), skipping Bluetooth discovery", 
                 current_connections, max_connections);
             return Err(anyhow!("Connection limit reached"));
         }
@@ -556,7 +556,7 @@ impl ZhtpMeshServer {
         
         // Safety check: Emergency stop
         if *self.emergency_stop.read().await {
-            return Err(anyhow!("🚨 Cannot start discovery - emergency stop is active"));
+            return Err(anyhow!(" Cannot start discovery - emergency stop is active"));
         }
         
         // Safety check: Connection limit
@@ -565,7 +565,7 @@ impl ZhtpMeshServer {
         let max_connections = *self.max_connections.read().await;
         let at_limit = (current_connections as usize) >= max_connections;
         if at_limit {
-            warn!("⚠️ Connection limit reached ({}/{}), skipping WiFi Direct discovery", 
+            warn!(" Connection limit reached ({}/{}), skipping WiFi Direct discovery", 
                 current_connections, max_connections);
             return Err(anyhow!("Connection limit reached"));
         }
@@ -1348,14 +1348,14 @@ impl ZhtpMeshServer {
         
         // Log to console for immediate visibility
         if success {
-            info!("🔒 Security: {} by {} ({:?}) - {}", 
+            info!(" Security: {} by {} ({:?}) - {}", 
                 operation, 
                 hex::encode(&caller_key.key_id[..8]), 
                 permission_level, 
                 reason
             );
         } else {
-            warn!("🚨 Security DENIED: {} by {} ({:?}) - {}", 
+            warn!(" Security DENIED: {} by {} ({:?}) - {}", 
                 operation, 
                 hex::encode(&caller_key.key_id[..8]), 
                 permission_level, 
@@ -1380,7 +1380,7 @@ impl ZhtpMeshServer {
                 false,
                 "Insufficient permissions - only owner can add admins"
             ).await;
-            return Err(anyhow!("🚨 SECURITY: Only node owner can add admin keys"));
+            return Err(anyhow!(" SECURITY: Only node owner can add admin keys"));
         }
         
         if !self.verify_credentials(credentials, "add_admin_key").await? {
@@ -1422,7 +1422,7 @@ impl ZhtpMeshServer {
                 false,
                 "Insufficient permissions - admin+ required"
             ).await;
-            return Err(anyhow!("🚨 SECURITY: Insufficient permissions to view audit log"));
+            return Err(anyhow!(" SECURITY: Insufficient permissions to view audit log"));
         }
         
         Ok(self.security_audit_log.read().await.clone())
@@ -1457,7 +1457,7 @@ impl ZhtpMeshServer {
     }
     
     /// Emergency stop - immediate shutdown
-    /// 🚨 SECURE: Emergency stop - immediate shutdown (OWNER ONLY)
+    ///  SECURE: Emergency stop - immediate shutdown (OWNER ONLY)
     pub async fn emergency_stop(&mut self, credentials: &SecurityCredentials) -> Result<()> {
         let permission_level = self.get_permission_level(&credentials.caller_key).await;
         
@@ -1469,9 +1469,9 @@ impl ZhtpMeshServer {
                 None,
                 permission_level, 
                 false,
-                "🚨 CRITICAL: Unauthorized emergency stop attempt - only owner allowed"
+                " CRITICAL: Unauthorized emergency stop attempt - only owner allowed"
             ).await;
-            return Err(anyhow!("🚨 SECURITY ALERT: Emergency stop DENIED - Only node owner can perform emergency stop"));
+            return Err(anyhow!(" SECURITY ALERT: Emergency stop DENIED - Only node owner can perform emergency stop"));
         }
         
         if !self.verify_credentials(credentials, "emergency_stop").await? {
@@ -1486,7 +1486,7 @@ impl ZhtpMeshServer {
             return Err(anyhow!("Invalid credentials for emergency stop"));
         }
         
-        println!("🚨 EMERGENCY STOP - Immediate shutdown initiated by OWNER!");
+        println!(" EMERGENCY STOP - Immediate shutdown initiated by OWNER!");
         
         // Set emergency flag
         *self.emergency_stop.write().await = true;
@@ -1517,7 +1517,7 @@ impl ZhtpMeshServer {
             "Emergency stop completed successfully by owner"
         ).await;
         
-        warn!("🚨 Emergency stop complete - All connections terminated by owner");
+        warn!(" Emergency stop complete - All connections terminated by owner");
         Ok(())
     }
     
@@ -1527,7 +1527,7 @@ impl ZhtpMeshServer {
         
         // Check if emergency stop was triggered
         if *self.emergency_stop.read().await {
-            println!("⚠️  Server was emergency stopped - performing cleanup");
+            println!("  Server was emergency stopped - performing cleanup");
             return Ok(());
         }
         
@@ -1578,7 +1578,7 @@ impl ZhtpMeshServer {
         (current, max, at_limit)
     }
     
-    /// 🔒 SECURE: Disconnect specific peer by address (Admin+ only, or User for own connections)
+    ///  SECURE: Disconnect specific peer by address (Admin+ only, or User for own connections)
     pub async fn disconnect_peer_by_address(&self, credentials: &SecurityCredentials, address: &str) -> Result<()> {
         let permission_level = self.get_permission_level(&credentials.caller_key).await;
         
@@ -1602,7 +1602,7 @@ impl ZhtpMeshServer {
                 false,
                 "Insufficient permissions or attempting to disconnect other user's connection"
             ).await;
-            return Err(anyhow!("🚨 SECURITY: Insufficient permissions to disconnect peer"));
+            return Err(anyhow!(" SECURITY: Insufficient permissions to disconnect peer"));
         }
         
         if !self.verify_credentials(credentials, "disconnect_peer_by_address").await? {
@@ -1685,7 +1685,7 @@ impl ZhtpMeshServer {
         peers
     }
     
-    /// 🔒 SECURE: Force disconnect all connections (Admin+ only)
+    ///  SECURE: Force disconnect all connections (Admin+ only)
     pub async fn disconnect_all_peers(&self, credentials: &SecurityCredentials) -> Result<()> {
         let permission_level = self.get_permission_level(&credentials.caller_key).await;
         
@@ -1699,7 +1699,7 @@ impl ZhtpMeshServer {
                 false,
                 "Insufficient permissions - admin+ required to disconnect all peers"
             ).await;
-            return Err(anyhow!("🚨 SECURITY: Only admins and owners can disconnect all peers"));
+            return Err(anyhow!(" SECURITY: Only admins and owners can disconnect all peers"));
         }
         
         if !self.verify_credentials(credentials, "disconnect_all_peers").await? {
@@ -1714,7 +1714,7 @@ impl ZhtpMeshServer {
             return Err(anyhow!("Invalid credentials"));
         }
         
-        warn!("⚠️ Force disconnecting ALL peers (authorized by {:?})", permission_level);
+        warn!(" Force disconnecting ALL peers (authorized by {:?})", permission_level);
         
         // Disconnect all Bluetooth peers
         if let Some(ref bt_protocol) = self.bluetooth_protocol {

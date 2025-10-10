@@ -143,23 +143,23 @@ impl BluetoothMeshProtocol {
     /// Set the GATT message channel for forwarding to unified server
     pub async fn set_gatt_message_channel(&self, tx: tokio::sync::mpsc::UnboundedSender<GattMessage>) {
         *self.gatt_message_tx.write().await = Some(tx);
-        info!("✅ GATT message channel configured");
+        info!(" GATT message channel configured");
     }
     
     /// Initialize ZHTP authentication for this node
     pub async fn initialize_zhtp_auth(&self, blockchain_pubkey: PublicKey) -> Result<()> {
-        info!("🔐 Initializing ZHTP authentication for Bluetooth mesh");
+        info!(" Initializing ZHTP authentication for Bluetooth mesh");
         
         let auth_manager = ZhtpAuthManager::new(blockchain_pubkey)?;
         *self.auth_manager.write().await = Some(auth_manager);
         
-        info!("✅ ZHTP authentication initialized for Bluetooth");
+        info!(" ZHTP authentication initialized for Bluetooth");
         Ok(())
     }
     
     /// Request authentication from a peer
     pub async fn authenticate_peer(&self, peer_address: &str) -> Result<ZhtpAuthVerification> {
-        info!("🔐 Authenticating peer via ZHTP: {}", peer_address);
+        info!(" Authenticating peer via ZHTP: {}", peer_address);
         
         let auth_manager = self.auth_manager.read().await;
         let auth_manager = auth_manager.as_ref()
@@ -209,7 +209,7 @@ impl BluetoothMeshProtocol {
         peer_address: &str,
         response: &ZhtpAuthResponse,
     ) -> Result<ZhtpAuthVerification> {
-        info!("🔍 Verifying ZHTP authentication response from {}", peer_address);
+        info!(" Verifying ZHTP authentication response from {}", peer_address);
         
         let auth_manager = self.auth_manager.read().await;
         let auth_manager = auth_manager.as_ref()
@@ -223,9 +223,9 @@ impl BluetoothMeshProtocol {
                 peer_address.to_string(),
                 verification.clone(),
             );
-            info!("✅ Peer {} authenticated (trust score: {:.2})", peer_address, verification.trust_score);
+            info!(" Peer {} authenticated (trust score: {:.2})", peer_address, verification.trust_score);
         } else {
-            warn!("❌ Peer {} authentication failed", peer_address);
+            warn!(" Peer {} authentication failed", peer_address);
         }
         
         Ok(verification)
@@ -786,7 +786,7 @@ impl BluetoothMeshProtocol {
                                                     
                                                     let mut peers_guard = peers_clone.lock().unwrap();
                                                     if !peers_guard.iter().any(|p| p.address == peer.address) {
-                                                        info!("🔍 Discovered ZHTP peer: {} (RSSI: {} dBm)", peer.address, rssi);
+                                                        info!(" Discovered ZHTP peer: {} (RSSI: {} dBm)", peer.address, rssi);
                                                         peers_guard.push(peer);
                                                     }
                                                 }
@@ -821,7 +821,7 @@ impl BluetoothMeshProtocol {
                                         
                                         let mut peers_guard = peers_clone.lock().unwrap();
                                         if !peers_guard.iter().any(|p| p.address == peer.address) {
-                                            info!("🔍 Discovered ZHTP peer by name: {} - {}", peer.address, name);
+                                            info!(" Discovered ZHTP peer by name: {} - {}", peer.address, name);
                                             peers_guard.push(peer);
                                         }
                                     }
@@ -837,7 +837,7 @@ impl BluetoothMeshProtocol {
             watcher.Start()
                 .map_err(|e| anyhow::anyhow!("Failed to start BLE scanning: {:?}", e))?;
             
-            info!("🔍 Windows BLE scanning active for 10 seconds...");
+            info!(" Windows BLE scanning active for 10 seconds...");
             
             // Scan for 10 seconds
             tokio::time::sleep(Duration::from_secs(10)).await;
@@ -1237,7 +1237,7 @@ Value=00
             let service = service_provider.Service()
                 .map_err(|e| anyhow::anyhow!("Failed to get service: {:?}", e))?;
             
-            info!("✅ Windows: GATT Service Provider created successfully");
+            info!(" Windows: GATT Service Provider created successfully");
             
             // Create characteristics with read/write/notify properties
             for (index, char_uuid_str) in characteristics.iter().enumerate() {
@@ -1268,7 +1268,7 @@ Value=00
                 let characteristic = char_result.Characteristic()
                     .map_err(|e| anyhow::anyhow!("Failed to get characteristic: {:?}", e))?;
                 
-                info!("✅ Windows: Created GATT characteristic {}: {}", index + 1, char_uuid_str);
+                info!(" Windows: Created GATT characteristic {}: {}", index + 1, char_uuid_str);
                 
                 // Set up ReadRequested handler
                 let char_uuid_owned = char_uuid_str.to_string();
@@ -1286,7 +1286,7 @@ Value=00
                                         let response_data = match char_uuid_owned.as_str() {
                                             "6ba7b811-9dad-11d1-80b4-00c04fd430c8" => {
                                                 // ZK Authentication - send challenge
-                                                info!("🔐 Sending ZK auth challenge");
+                                                info!(" Sending ZK auth challenge");
                                                 vec![0x01, 0x02, 0x03, 0x04] // Placeholder challenge
                                             },
                                             "6ba7b812-9dad-11d1-80b4-00c04fd430c8" => {
@@ -1296,12 +1296,12 @@ Value=00
                                             },
                                             "6ba7b813-9dad-11d1-80b4-00c04fd430c8" => {
                                                 // Mesh data
-                                                info!("📡 Sending mesh network data");
+                                                info!(" Sending mesh network data");
                                                 vec![0x09, 0x0A, 0x0B, 0x0C]
                                             },
                                             "6ba7b814-9dad-11d1-80b4-00c04fd430c8" => {
                                                 // ISP bypass info
-                                                info!("🌐 Sending ISP bypass coordination");
+                                                info!(" Sending ISP bypass coordination");
                                                 vec![0x0D, 0x0E, 0x0F, 0x10]
                                             },
                                             _ => vec![0x00]
@@ -1312,7 +1312,7 @@ Value=00
                                             if writer.WriteBytes(&response_data).is_ok() {
                                                 if let Ok(buffer) = writer.DetachBuffer() {
                                                     let _ = request.RespondWithValue(&buffer);
-                                                    info!("✅ Responded to GATT read with {} bytes", response_data.len());
+                                                    info!(" Responded to GATT read with {} bytes", response_data.len());
                                                 }
                                             }
                                         }
@@ -1345,11 +1345,11 @@ Value=00
                                                     if reader.ReadBytes(&mut data).is_ok() {
                                                         info!("✍️ GATT Write received for {}: {} bytes", char_uuid_owned2, data.len());
                                                         
-                                                        // ✅ PROCESS AND FORWARD DATA
+                                                        //  PROCESS AND FORWARD DATA
                                                         let message = match char_uuid_owned2.as_str() {
                                                             "6ba7b811-9dad-11d1-80b4-00c04fd430c8" => {
                                                                 // ZK auth characteristic - try to parse auth response
-                                                                info!("🔐 Received ZK auth data");
+                                                                info!(" Received ZK auth data");
                                                                 Some(GattMessage::RawData(char_uuid_owned2.clone(), data.clone()))
                                                             },
                                                             "6ba7b812-9dad-11d1-80b4-00c04fd430c8" => {
@@ -1359,7 +1359,7 @@ Value=00
                                                             },
                                                             "6ba7b813-9dad-11d1-80b4-00c04fd430c8" => {
                                                                 // Mesh data transfer characteristic
-                                                                info!("📡 Processing mesh data transfer");
+                                                                info!(" Processing mesh data transfer");
                                                                 
                                                                 // Try to parse as MeshHandshake
                                                                 if data.len() >= 8 {  // Minimum size check
@@ -1380,7 +1380,7 @@ Value=00
                                                             },
                                                             "6ba7b814-9dad-11d1-80b4-00c04fd430c8" => {
                                                                 // Mesh coordination characteristic
-                                                                info!("🌐 Received mesh coordination data");
+                                                                info!(" Received mesh coordination data");
                                                                 Some(GattMessage::RawData(char_uuid_owned2.clone(), data.clone()))
                                                             },
                                                             _ => None
@@ -1397,7 +1397,7 @@ Value=00
                                                                         if let Err(e) = tx.send(msg) {
                                                                             warn!("Failed to forward GATT message: {}", e);
                                                                         } else {
-                                                                            debug!("✅ GATT message forwarded to unified server");
+                                                                            debug!(" GATT message forwarded to unified server");
                                                                         }
                                                                     }
                                                                 });
@@ -1408,7 +1408,7 @@ Value=00
                                             }
                                         }
                                         let _ = request.Respond();
-                                        info!("✅ Responded to GATT write");
+                                        info!(" Responded to GATT write");
                                     }
                                 }
                                 let _ = deferral.Complete();
@@ -1432,18 +1432,18 @@ Value=00
             service_provider.StartAdvertisingWithParameters(&adv_params)
                 .map_err(|e| anyhow::anyhow!("Failed to start GATT advertising: {:?}", e))?;
             
-            info!("✅ Windows: GATT Service advertising started");
-            info!("📡 Windows: GATT Server is now accepting connections from phones/devices");
+            info!(" Windows: GATT Service advertising started");
+            info!(" Windows: GATT Server is now accepting connections from phones/devices");
             
             // Store service_provider to keep it alive FIRST
             // This must be done before spawn_blocking to maintain the reference
             *self.gatt_service_provider.write().await = Some(Box::new(service_provider));
-            info!("🔒 Windows: GATT Service Provider stored - will remain active");
+            info!(" Windows: GATT Service Provider stored - will remain active");
             
             // Note: Windows BLE Advertisement Publisher has known limitations
             // The GATT Service Provider already makes the device discoverable
             // Attempting to run a separate BLE advertiser can cause conflicts
-            warn!("⚠️  Windows limitation: GATT Service created but NOT phone-discoverable");
+            warn!("  Windows limitation: GATT Service created but NOT phone-discoverable");
             warn!("   Phones CANNOT discover this device without manual pairing");
             info!("� Device is discoverable via GATT service UUID: 6ba7b810-9dad-11d1-80b4-00c04fd430c8");
             info!("� Solution: Pair PC with phone in Windows Settings > Bluetooth first");
@@ -1458,7 +1458,7 @@ Value=00
         #[cfg(not(feature = "windows-gatt"))]
         {
             info!("Windows: GATT service registration (WinRT implementation needed)");
-            info!("💡 Tip: Build with --features windows-gatt to enable full GATT server");
+            info!(" Tip: Build with --features windows-gatt to enable full GATT server");
             Ok(())
         }
     }
@@ -2383,10 +2383,10 @@ Value=00
         // Windows BLE advertising disabled due to WinRT API limitations
         // BLE scanning still works, but advertising is problematic on Windows
         
-        info!("💡 Windows: BLE advertising disabled (platform limitations)");
-        info!("✅ BLE scanning is active and working");
-        info!("📡 Recommendation: Use Bluetooth Classic or WiFi Direct for Windows mesh");
-        info!("🐧 For full BLE mesh support, deploy on Linux (BlueZ) or Raspberry Pi");
+        info!(" Windows: BLE advertising disabled (platform limitations)");
+        info!(" BLE scanning is active and working");
+        info!(" Recommendation: Use Bluetooth Classic or WiFi Direct for Windows mesh");
+        info!(" For full BLE mesh support, deploy on Linux (BlueZ) or Raspberry Pi");
         
         // Strategy for Windows nodes:
         // 1. Use BLE scanning to discover Linux/Pi nodes that ARE advertising
@@ -2520,7 +2520,7 @@ Value=00
                 if current_time.saturating_sub(timestamp) < 300 { // 5 minute freshness
                     info!(" ZK authentication timestamp is fresh");
                 } else {
-                    warn!("⚠️  ZK authentication timestamp is stale");
+                    warn!("  ZK authentication timestamp is stale");
                     return Ok(());
                 }
             }
@@ -2529,7 +2529,7 @@ Value=00
             info!(" Device authenticated via ZK proof");
             
         } else {
-            warn!("❌ ZK authentication proof verification failed");
+            warn!(" ZK authentication proof verification failed");
         }
         
         Ok(())
@@ -2566,7 +2566,7 @@ Value=00
                             .map_err(|e| anyhow::anyhow!("Storage access proof verification failed: {}", e))?
                     }
                     "ZHTP-Optimized-Routing" => {
-                        info!("🌐 Verifying routing proof");
+                        info!(" Verifying routing proof");
                         zk_system.verify_routing(&proof)
                             .map_err(|e| anyhow::anyhow!("Routing proof verification failed: {}", e))?
                     }
@@ -2590,13 +2590,13 @@ Value=00
                 if verification_result {
                     info!(" ZK proof cryptographically verified");
                 } else {
-                    warn!("❌ ZK proof verification failed");
+                    warn!(" ZK proof verification failed");
                 }
                 
                 Ok(verification_result)
             }
             Err(e) => {
-                warn!("⚠️ Failed to deserialize ZK proof, trying fallback validation: {}", e);
+                warn!(" Failed to deserialize ZK proof, trying fallback validation: {}", e);
                 
                 // Fallback: basic structural validation for backward compatibility
                 if proof_data.len() >= 32 {
@@ -2607,11 +2607,11 @@ Value=00
                         info!(" ZK proof fallback validation passed");
                         Ok(true)
                     } else {
-                        warn!("❌ Invalid ZK proof structure (fallback)");
+                        warn!(" Invalid ZK proof structure (fallback)");
                         Ok(false)
                     }
                 } else {
-                    warn!("❌ ZK proof too short (fallback)");
+                    warn!(" ZK proof too short (fallback)");
                     Ok(false)
                 }
             }
@@ -2620,7 +2620,7 @@ Value=00
 
     /// Start advertising for phone discovery
     pub async fn start_advertising(&mut self) -> Result<()> {
-        warn!("⚠️  Windows limitation: Phone discovery requires manual pairing");
+        warn!("  Windows limitation: Phone discovery requires manual pairing");
         
         // Start the GATT service and mesh discovery
         self.start_discovery().await?;

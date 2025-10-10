@@ -37,7 +37,7 @@ impl ZhtpRelayProtocol {
         dilithium_public_key: Vec<u8>,
         node_capabilities: NodeCapabilities,
     ) -> Self {
-        info!("🔐 Initializing ZHTP relay protocol with post-quantum security");
+        info!(" Initializing ZHTP relay protocol with post-quantum security");
         
         Self {
             encryption_manager: ZhtpEncryptionManager::new(),
@@ -89,7 +89,7 @@ impl ZhtpRelayProtocol {
         // Sign with Dilithium2
         let signature = dilithium2_sign(&signature_message, &self.dilithium_secret_key)?;
         
-        debug!("✅ Relay query created and signed (request_id: {})", &request_id[..16]);
+        debug!(" Relay query created and signed (request_id: {})", &request_id[..16]);
         
         Ok(ZhtpRelayQuery {
             request_id,
@@ -125,11 +125,11 @@ impl ZhtpRelayProtocol {
         )?;
         
         if !signature_valid {
-            warn!("❌ Invalid signature on relay query from {}", peer_address);
+            warn!(" Invalid signature on relay query from {}", peer_address);
             return Err(anyhow!("Invalid relay query signature"));
         }
         
-        debug!("✅ Relay query signature verified");
+        debug!(" Relay query signature verified");
         
         // Decrypt payload
         let payload_bytes = self.encryption_manager
@@ -138,7 +138,7 @@ impl ZhtpRelayProtocol {
         
         let query_payload: ZhtpRelayQueryPayload = serde_json::from_slice(&payload_bytes)?;
         
-        info!("✅ Relay query decrypted: {} {} (request: {})", 
+        info!(" Relay query decrypted: {} {} (request: {})", 
               query_payload.domain, query_payload.path, &query.request_id[..16]);
         
         Ok(query_payload)
@@ -174,7 +174,7 @@ impl ZhtpRelayProtocol {
         // Sign with Dilithium2
         let signature = dilithium2_sign(&signature_message, &self.dilithium_secret_key)?;
         
-        debug!("✅ Relay response created and signed");
+        debug!(" Relay response created and signed");
         
         Ok(ZhtpRelayResponse {
             request_id,
@@ -212,11 +212,11 @@ impl ZhtpRelayProtocol {
         )?;
         
         if !signature_valid {
-            warn!("❌ Invalid signature on relay response from {}", peer_address);
+            warn!(" Invalid signature on relay response from {}", peer_address);
             return Err(anyhow!("Invalid relay response signature"));
         }
         
-        debug!("✅ Relay response signature verified");
+        debug!(" Relay response signature verified");
         
         // Decrypt content
         let payload_bytes = self.encryption_manager
@@ -230,13 +230,13 @@ impl ZhtpRelayProtocol {
             if let Some(ref expected_hash) = response_payload.content_hash {
                 let actual_hash = Hash::from_bytes(&hash_blake3(content));
                 if actual_hash != *expected_hash {
-                    warn!("❌ Content hash mismatch!");
+                    warn!(" Content hash mismatch!");
                     return Err(anyhow!("Content integrity check failed"));
                 }
             }
         }
         
-        info!("✅ Relay response decrypted and verified (content: {} bytes)", 
+        info!(" Relay response decrypted and verified (content: {} bytes)", 
               response_payload.content.as_ref().map(|c| c.len()).unwrap_or(0));
         
         Ok(response_payload)

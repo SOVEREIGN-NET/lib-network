@@ -34,25 +34,25 @@ pub struct ScanResult {
 
 /// Start background network scanner
 pub async fn start_network_scanner(_mesh_port: u16, local_node_id: uuid::Uuid) -> Result<()> {
-    info!("🔍 Starting automatic network scanner for ZHTP nodes...");
-    info!("📍 Local node ID: {}", local_node_id);
+    info!(" Starting automatic network scanner for ZHTP nodes...");
+    info!(" Local node ID: {}", local_node_id);
     
     // Get local IP address to avoid self-connections
     let local_ip = local_ip_address::local_ip().ok();
     if let Some(ip) = local_ip {
-        info!("📍 Local IP: {} (will skip self-connections)", ip);
+        info!(" Local IP: {} (will skip self-connections)", ip);
     }
     
     // Get local network range
     let local_ranges = get_local_network_ranges().await?;
     
-    info!("📡 Scanning {} local network ranges for ZHTP nodes", local_ranges.len());
+    info!(" Scanning {} local network ranges for ZHTP nodes", local_ranges.len());
     
     // Spawn background scanner task
     tokio::spawn(async move {
         loop {
             for range in &local_ranges {
-                info!("🔍 Scanning network range: {}", range);
+                info!(" Scanning network range: {}", range);
                 
                 match scan_network_range(range, ZHTP_COMMON_PORTS).await {
                     Ok(results) => {
@@ -76,7 +76,7 @@ pub async fn start_network_scanner(_mesh_port: u16, local_node_id: uuid::Uuid) -
                             .collect();
                         
                         if !zhtp_nodes.is_empty() {
-                            info!("✅ Found {} ZHTP nodes in range {} (excluding self)", zhtp_nodes.len(), range);
+                            info!(" Found {} ZHTP nodes in range {} (excluding self)", zhtp_nodes.len(), range);
                             
                             // Attempt to connect to discovered nodes
                             for node in zhtp_nodes {
@@ -101,7 +101,7 @@ pub async fn start_network_scanner(_mesh_port: u16, local_node_id: uuid::Uuid) -
         }
     });
     
-    info!("✅ Network scanner started - will scan every 30 seconds");
+    info!(" Network scanner started - will scan every 30 seconds");
     Ok(())
 }
 
@@ -116,7 +116,7 @@ async fn get_local_network_ranges() -> Result<Vec<String>> {
                 // Create /24 subnet (e.g., 192.168.1.0/24)
                 let octets = ipv4.octets();
                 let subnet = format!("{}.{}.{}", octets[0], octets[1], octets[2]);
-                info!("📍 Local network detected: {}.0/24", &subnet);
+                info!(" Local network detected: {}.0/24", &subnet);
                 ranges.push(subnet);
             }
             IpAddr::V6(_) => {
@@ -191,7 +191,7 @@ async fn scan_port(ip: IpAddr, port: u16) -> Result<Option<ScanResult>> {
             // Connection successful - check if it's a ZHTP node
             match probe_zhtp_node(&mut stream).await {
                 Ok(Some(node_id)) => {
-                    debug!("✅ ZHTP node found at {}:{} - ID: {}", ip, port, node_id);
+                    debug!(" ZHTP node found at {}:{} - ID: {}", ip, port, node_id);
                     Ok(Some(ScanResult {
                         ip,
                         port,
@@ -202,7 +202,7 @@ async fn scan_port(ip: IpAddr, port: u16) -> Result<Option<ScanResult>> {
                 }
                 Ok(None) => {
                     // Port open but not ZHTP
-                    debug!("⚠️ Port {}:{} open but not ZHTP", ip, port);
+                    debug!(" Port {}:{} open but not ZHTP", ip, port);
                     Ok(Some(ScanResult {
                         ip,
                         port,
@@ -302,7 +302,7 @@ async fn attempt_auto_connect(node: &ScanResult, local_node_id: uuid::Uuid) -> R
     
     // Send MeshHandshake with our persistent node ID
     let handshake = MeshHandshake {
-        node_id: local_node_id,  // ✅ Using persistent node ID from server
+        node_id: local_node_id,  //  Using persistent node ID from server
         version: 1,
         mesh_port: 9333,
         protocols: vec!["zhtp".to_string(), "dht".to_string()],
@@ -313,7 +313,7 @@ async fn attempt_auto_connect(node: &ScanResult, local_node_id: uuid::Uuid) -> R
     let handshake_bytes = bincode::serialize(&handshake)?;
     stream.write_all(&handshake_bytes).await?;
     
-    info!("✅ Sent handshake to {} with node ID: {}", addr, local_node_id);
+    info!(" Sent handshake to {} with node ID: {}", addr, local_node_id);
     
     // Note: Full authentication will be handled by the server's
     // authenticate_and_register_peer() function
@@ -323,7 +323,7 @@ async fn attempt_auto_connect(node: &ScanResult, local_node_id: uuid::Uuid) -> R
 
 /// Quick scan for ZHTP nodes (used during startup)
 pub async fn quick_scan_local_network() -> Result<Vec<ScanResult>> {
-    info!("⚡ Running quick network scan for ZHTP nodes...");
+    info!(" Running quick network scan for ZHTP nodes...");
     
     let ranges = get_local_network_ranges().await?;
     let mut all_results = Vec::new();
@@ -336,7 +336,7 @@ pub async fn quick_scan_local_network() -> Result<Vec<ScanResult>> {
                     .collect();
                 
                 if !zhtp_nodes.is_empty() {
-                    info!("✅ Quick scan found {} ZHTP nodes in {}.0/24", 
+                    info!(" Quick scan found {} ZHTP nodes in {}.0/24", 
                         zhtp_nodes.len(), range);
                     all_results.extend(zhtp_nodes);
                 }
@@ -347,6 +347,6 @@ pub async fn quick_scan_local_network() -> Result<Vec<ScanResult>> {
         }
     }
     
-    info!("⚡ Quick scan complete - found {} ZHTP nodes total", all_results.len());
+    info!(" Quick scan complete - found {} ZHTP nodes total", all_results.len());
     Ok(all_results)
 }

@@ -494,12 +494,12 @@ impl DhtProtocolHandler {
                     debug!(" DHT packet signature verified from {}", addr);
                     true
                 } else {
-                    warn!("❌ DHT packet signature verification failed from {}", addr);
+                    warn!(" DHT packet signature verification failed from {}", addr);
                     false
                 }
             }
             Err(e) => {
-                warn!("❌ DHT packet signature verification error from {}: {}", addr, e);
+                warn!(" DHT packet signature verification error from {}: {}", addr, e);
                 false
             }
         };
@@ -524,12 +524,12 @@ impl DhtProtocolHandler {
             }
             // ZHTP relay operations (handled separately in unified_server.rs)
             DhtOperation::RelayQuery | DhtOperation::RelayResponse => {
-                debug!("🔐 ZHTP relay operation received (handled by MeshRouter)");
+                debug!(" ZHTP relay operation received (handled by MeshRouter)");
                 Ok(())
             }
             // ZHTP peer discovery operations
             DhtOperation::PeerRegister | DhtOperation::PeerQuery => {
-                debug!("🔍 ZHTP peer discovery operation received (requires peer registry integration)");
+                debug!(" ZHTP peer discovery operation received (requires peer registry integration)");
                 Ok(())
             }
             // Responses are handled by the request matching system

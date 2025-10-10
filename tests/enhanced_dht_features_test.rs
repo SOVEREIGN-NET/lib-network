@@ -101,7 +101,7 @@ async fn test_enhanced_bootstrap_mdns() {
             println!("   📂 Peer storage working correctly");
         }
         Err(e) => {
-            println!("   ⚠️  Bootstrap discovery error (expected in test): {}", e);
+            println!("     Bootstrap discovery error (expected in test): {}", e);
             // This is expected in test environment without actual peers
         }
     }
@@ -145,7 +145,7 @@ async fn test_dht_performance_monitoring() {
     // Get performance statistics
     let stats = monitor.get_stats();
     
-    println!("   ⚡ Performance stats:");
+    println!("    Performance stats:");
     println!("       Total operations: {}", stats.total_operations);
     println!("       Success rate: {:.2}%", stats.success_rate * 100.0);
     println!("      ⏱️  Average latency: {:.2}ms", stats.avg_latency_ms);

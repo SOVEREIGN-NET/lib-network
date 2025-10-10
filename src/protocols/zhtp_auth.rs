@@ -81,12 +81,12 @@ pub struct ZhtpAuthManager {
 impl ZhtpAuthManager {
     /// Create new ZHTP authentication manager
     pub fn new(node_blockchain_pubkey: PublicKey) -> Result<Self> {
-        info!("🔐 Initializing ZHTP authentication manager with post-quantum security");
+        info!(" Initializing ZHTP authentication manager with post-quantum security");
         
         // Generate Dilithium2 keypair for this node
         let dilithium_keypair = dilithium2_keypair();
         
-        info!("✅ Generated Dilithium2 keypair (post-quantum secure)");
+        info!(" Generated Dilithium2 keypair (post-quantum secure)");
         debug!("   Public key length: {} bytes", dilithium_keypair.0.len());
         
         Ok(Self {
@@ -145,7 +145,7 @@ impl ZhtpAuthManager {
         // Sign with Dilithium2
         let signature = dilithium2_sign(&message, &self.node_dilithium_keypair.1)?;
         
-        debug!("✅ Signed challenge with Dilithium2 (signature: {} bytes)", signature.len());
+        debug!(" Signed challenge with Dilithium2 (signature: {} bytes)", signature.len());
         
         let response = ZhtpAuthResponse {
             challenge_id: challenge.challenge_id.clone(),
@@ -166,7 +166,7 @@ impl ZhtpAuthManager {
         &self,
         response: &ZhtpAuthResponse,
     ) -> Result<ZhtpAuthVerification> {
-        info!("🔍 Verifying ZHTP authentication response: {}", &response.challenge_id[..8]);
+        info!(" Verifying ZHTP authentication response: {}", &response.challenge_id[..8]);
         
         // Retrieve original challenge
         let challenge = {
@@ -183,7 +183,7 @@ impl ZhtpAuthManager {
             .as_secs();
         
         if current_time.saturating_sub(challenge.timestamp) > 300 {
-            warn!("❌ Challenge expired (>5 minutes old)");
+            warn!(" Challenge expired (>5 minutes old)");
             return Ok(ZhtpAuthVerification {
                 authenticated: false,
                 peer_pubkey: response.responder_pubkey.clone(),
@@ -207,7 +207,7 @@ impl ZhtpAuthManager {
         )?;
         
         if signature_valid {
-            info!("✅ ZHTP authentication successful - post-quantum signature verified");
+            info!(" ZHTP authentication successful - post-quantum signature verified");
             
             // Calculate trust score based on capabilities
             let trust_score = self.calculate_trust_score(&response.capabilities);
@@ -222,7 +222,7 @@ impl ZhtpAuthManager {
                 trust_score,
             })
         } else {
-            warn!("❌ ZHTP authentication failed - invalid signature");
+            warn!(" ZHTP authentication failed - invalid signature");
             
             Ok(ZhtpAuthVerification {
                 authenticated: false,

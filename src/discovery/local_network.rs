@@ -164,7 +164,7 @@ async fn attempt_connect_to_discovered_peer(announcement: &NodeAnnouncement) {
     // Connect via TCP to the peer's mesh port
     match tokio::net::TcpStream::connect(&peer_addr).await {
         Ok(mut stream) => {
-            info!("✅ TCP connection established to peer {}", peer_addr);
+            info!(" TCP connection established to peer {}", peer_addr);
             
             // Create compact binary handshake (faster and smaller than JSON)
             let handshake = MeshHandshake {
@@ -181,7 +181,7 @@ async fn attempt_connect_to_discovered_peer(announcement: &NodeAnnouncement) {
                 Ok(handshake_bytes) => {
                     match stream.write_all(&handshake_bytes).await {
                         Ok(_) => {
-                            info!("✅ Binary mesh handshake sent to {} ({} bytes)", 
+                            info!(" Binary mesh handshake sent to {} ({} bytes)", 
                                 peer_addr, handshake_bytes.len());
                         },
                         Err(e) => {

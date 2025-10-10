@@ -154,7 +154,7 @@ impl BlockchainSyncManager {
 
         // Check if all chunks received
         if buffer.chunks.len() as u32 == total_chunks {
-            info!("✅ All chunks received for request {}, reassembling...", request_id);
+            info!(" All chunks received for request {}, reassembling...", request_id);
             
             // Reassemble in order
             let mut complete_data = Vec::new();
@@ -177,7 +177,7 @@ impl BlockchainSyncManager {
                 return Err(anyhow!("Blockchain data hash mismatch - data corrupted"));
             }
 
-            info!("✅ Blockchain data verified: {} bytes", complete_data.len());
+            info!(" Blockchain data verified: {} bytes", complete_data.len());
             
             // Remove from buffers
             buffers.remove(&request_id);

@@ -68,7 +68,7 @@ impl DHTBootstrap {
 
     /// Enhance existing bootstrap with DHT-specific features
     pub async fn enhance_bootstrap(&mut self, bootstrap_nodes: &[String]) -> Result<Vec<String>> {
-        info!("🚀 Enhancing bootstrap with DHT features...");
+        info!(" Enhancing bootstrap with DHT features...");
         
         let mut discovered = Vec::new();
         
@@ -252,12 +252,12 @@ impl DHTBootstrap {
                     debug!(" Valid ZHTP pong received from peer");
                     Ok(true)
                 } else {
-                    debug!("⚠️ Invalid ZHTP response: wrong operation or version");
+                    debug!(" Invalid ZHTP response: wrong operation or version");
                     Ok(false)
                 }
             },
             Err(_) => {
-                debug!("⚠️ Invalid ZHTP response: malformed packet");
+                debug!(" Invalid ZHTP response: malformed packet");
                 Ok(false)
             }
         }

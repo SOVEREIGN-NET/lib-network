@@ -67,7 +67,7 @@ pub struct ZhtpEncryptedMessage {
 impl ZhtpEncryptionSession {
     /// Create new encryption session with fresh Kyber keypair
     pub fn new() -> Result<Self> {
-        info!("🔐 Creating new ZHTP encryption session with Kyber512");
+        info!(" Creating new ZHTP encryption session with Kyber512");
         
         // Generate Kyber512 keypair
         let (kyber_public, kyber_secret) = kyber512_keypair();
@@ -117,7 +117,7 @@ impl ZhtpEncryptionSession {
         // Store shared secret
         self.shared_secret = Some(shared_secret);
         
-        info!("✅ Shared secret established (responder side)");
+        info!(" Shared secret established (responder side)");
         
         Ok(ZhtpKeyExchangeResponse {
             session_id: init.session_id.clone(),
@@ -147,7 +147,7 @@ impl ZhtpEncryptionSession {
         // Store shared secret
         self.shared_secret = Some(shared_secret);
         
-        info!("✅ Shared secret established (initiator side)");
+        info!(" Shared secret established (initiator side)");
         
         Ok(())
     }
@@ -166,7 +166,7 @@ impl ZhtpEncryptionSession {
         let shared_secret = self.shared_secret
             .ok_or_else(|| anyhow!("Encryption session not established"))?;
         
-        debug!("🔒 Encrypting message ({} bytes) with ChaCha20-Poly1305", plaintext.len());
+        debug!(" Encrypting message ({} bytes) with ChaCha20-Poly1305", plaintext.len());
         
         // Generate unique nonce for this message
         let nonce = lib_crypto::generate_nonce();
@@ -176,7 +176,7 @@ impl ZhtpEncryptionSession {
         
         self.messages_encrypted += 1;
         
-        debug!("✅ Message encrypted (ciphertext: {} bytes)", ciphertext.len());
+        debug!(" Message encrypted (ciphertext: {} bytes)", ciphertext.len());
         
         Ok(ZhtpEncryptedMessage {
             session_id,
@@ -213,7 +213,7 @@ impl ZhtpEncryptionSession {
         
         self.messages_decrypted += 1;
         
-        debug!("✅ Message decrypted ({} bytes)", plaintext.len());
+        debug!(" Message decrypted ({} bytes)", plaintext.len());
         
         Ok(plaintext)
     }
@@ -239,7 +239,7 @@ impl ZhtpEncryptionSession {
         self.local_kyber_secret = kyber_secret;
         self.shared_secret = None; // Invalidate old shared secret
         
-        info!("✅ Session rotated, new key exchange required");
+        info!(" Session rotated, new key exchange required");
         
         Ok(())
     }

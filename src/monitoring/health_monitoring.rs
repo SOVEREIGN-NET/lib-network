@@ -167,7 +167,7 @@ impl HealthMonitor {
                 for (peer_id, connection) in connections.iter() {
                     // Check connection stability
                     if connection.stability_score < 0.3 {
-                        warn!("⚠️ Unstable connection detected: peer {} (stability: {:.2})", 
+                        warn!(" Unstable connection detected: peer {} (stability: {:.2})", 
                               hex::encode(&peer_id.key_id[0..4]), connection.stability_score);
                         unhealthy_connections.push(peer_id.clone());
                     }
@@ -180,14 +180,14 @@ impl HealthMonitor {
                     
                     let connection_age = current_time - connection.connected_at;
                     if connection_age > 3600 && connection.data_transferred == 0 {
-                        warn!("⚠️ Stale connection detected: peer {} (age: {} minutes, no data)", 
+                        warn!(" Stale connection detected: peer {} (age: {} minutes, no data)", 
                               hex::encode(&peer_id.key_id[0..4]), connection_age / 60);
                         unhealthy_connections.push(peer_id.clone());
                     }
                     
                     // Check for high latency
                     if connection.latency_ms > 1000 {
-                        warn!("⚠️ High latency connection: peer {} (latency: {} ms)", 
+                        warn!(" High latency connection: peer {} (latency: {} ms)", 
                               hex::encode(&peer_id.key_id[0..4]), connection.latency_ms);
                     }
                 }
@@ -252,7 +252,7 @@ impl HealthMonitor {
                 
                 // Alert if too few relays are healthy
                 if healthy_relays < relays.len() / 2 {
-                    warn!("⚠️ WARNING: Less than 50% of relays are healthy!");
+                    warn!(" WARNING: Less than 50% of relays are healthy!");
                 }
             }
         });
@@ -302,7 +302,7 @@ impl HealthMonitor {
                 info!("Network Coverage Analysis:");
                 info!("   Total relay coverage: {:.0} km", total_relay_coverage);
                 info!("   🛰️ Satellite access: {}", if has_satellite { " GLOBAL" } else { "Regional only" });
-                info!("   🌐 Internet bridges: {}", if has_internet_bridge { " Available" } else { "None" });
+                info!("    Internet bridges: {}", if has_internet_bridge { " Available" } else { "None" });
                 info!("  Total mesh bandwidth: {} Mbps", total_mesh_bandwidth);
                 
                 // Coverage quality assessment

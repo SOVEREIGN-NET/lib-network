@@ -14,7 +14,7 @@ async fn main() -> Result<()> {
     // Initialize logging
     env_logger::init();
     
-    println!("🔵 Starting Bluetooth LE Mesh Node for Phone Connectivity");
+    println!(" Starting Bluetooth LE Mesh Node for Phone Connectivity");
     println!("=========================================================");
     println!();
     
@@ -53,7 +53,7 @@ async fn main() -> Result<()> {
         println!(" Available GATT Services & Characteristics:");
         println!("   ZHTP Mesh Service: 6ba7b810-9dad-11d1-80b4-00c04fd430c8");
         println!("     ZK Authentication: 6ba7b811-9dad-11d1-80b4-00c04fd430c8");
-        println!("    🔒 Quantum Routing:   6ba7b812-9dad-11d1-80b4-00c04fd430c8");
+        println!("     Quantum Routing:   6ba7b812-9dad-11d1-80b4-00c04fd430c8");
         println!("    📦 Mesh Data:         6ba7b813-9dad-11d1-80b4-00c04fd430c8");
         println!("    🤝 Coordination:      6ba7b814-9dad-11d1-80b4-00c04fd430c8");
         println!();
@@ -82,7 +82,7 @@ async fn main() -> Result<()> {
     
     #[cfg(not(feature = "lib-storage"))]
     {
-        println!("❌ This test requires lib-storage feature to be enabled");
+        println!(" This test requires lib-storage feature to be enabled");
         println!("   Run with: cargo run --features lib-storage");
     }
     

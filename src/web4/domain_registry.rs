@@ -397,12 +397,12 @@ impl DomainRegistry {
             // Store in DHT via UnifiedStorageSystem (NO CACHE FALLBACK - DHT ONLY)
             let actual_storage_hash = match storage.upload_content(upload_request, uploader).await {
                 Ok(storage_hash) => {
-                    info!("✅ Stored in DHT: short_hash={}, storage_hash={:?}", 
+                    info!(" Stored in DHT: short_hash={}, storage_hash={:?}", 
                           short_hash, storage_hash);
                     storage_hash
                 }
                 Err(e) => {
-                    error!("❌ DHT storage FAILED (no cache fallback): {}", e);
+                    error!(" DHT storage FAILED (no cache fallback): {}", e);
                     return Err(anyhow!("Failed to store content in DHT: {}", e));
                 }
             };
@@ -521,7 +521,7 @@ impl DomainRegistry {
         // {
         //     let cache = self.content_cache.read().await;
         //     if let Some(content) = cache.get(content_hash) {
-        //         info!("⚡ Cache hit for content hash: {}", content_hash);
+        //         info!(" Cache hit for content hash: {}", content_hash);
         //         return Ok(content.clone());
         //     }
         // }
@@ -561,7 +561,7 @@ impl DomainRegistry {
         let mut storage = self.storage_system.write().await;
         match storage.download_content(download_request).await {
             Ok(content) => {
-                info!("✅ Retrieved {} bytes from DHT", content.len());
+                info!(" Retrieved {} bytes from DHT", content.len());
                 
                 // Store in cache for next time
                 let mut cache = self.content_cache.write().await;
@@ -570,7 +570,7 @@ impl DomainRegistry {
                 Ok(content)
             }
             Err(e) => {
-                error!("❌ Failed to retrieve content from DHT: {}", e);
+                error!(" Failed to retrieve content from DHT: {}", e);
                 Err(anyhow!("Content not found for hash: {} (DHT error: {})", content_hash, e))
             }
         }

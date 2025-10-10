@@ -70,7 +70,7 @@ impl LoRaWANMeshProtocol {
     
     /// Initialize LoRaWAN radio module
     async fn initialize_radio(&self) -> Result<()> {
-        info!("📻 Initializing LoRaWAN radio module...");
+        info!(" Initializing LoRaWAN radio module...");
         
         #[cfg(target_os = "linux")]
         {
@@ -96,7 +96,7 @@ impl LoRaWANMeshProtocol {
         use std::process::Command;
         use std::path::Path;
         
-        info!("🐧 Initializing Linux LoRaWAN radio...");
+        info!(" Initializing Linux LoRaWAN radio...");
         
         // Check for SX127x/SX130x radio modules via SPI
         if Path::new("/dev/spidev0.0").exists() {
@@ -185,7 +185,7 @@ impl LoRaWANMeshProtocol {
         ];
         
         info!("Configured {} EU868 channels", frequencies.len());
-        info!("⚡ Max TX Power: 14 dBm");
+        info!(" Max TX Power: 14 dBm");
         info!("Spreading Factors: SF7-SF12");
         info!("🕐 Duty Cycle: 1% (36s per hour)");
         
@@ -201,7 +201,7 @@ impl LoRaWANMeshProtocol {
         
         info!("Configured {} upstream channels", upstream_channels.len());
         info!("Configured {} downstream channels", downstream_channels.len());
-        info!("⚡ Max TX Power: 30 dBm");
+        info!(" Max TX Power: 30 dBm");
         info!("Spreading Factors: SF7-SF10");
         
         Ok(())

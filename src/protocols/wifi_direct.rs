@@ -324,14 +324,14 @@ impl WiFiDirectMeshProtocol {
     async fn init_linux_wifi_direct(&self) -> Result<()> {
         use std::process::Command;
         
-        info!("🐧 Initializing Linux WiFi Direct (wpa_supplicant)...");
+        info!(" Initializing Linux WiFi Direct (wpa_supplicant)...");
         
         // Enable P2P support in wpa_supplicant
         let _ = Command::new("sudo")
             .args(&["wpa_cli", "-i", "wlan0", "p2p_find"])
             .output();
         
-        info!("🐧 Linux WiFi Direct P2P enabled");
+        info!(" Linux WiFi Direct P2P enabled");
         Ok(())
     }
     
@@ -786,7 +786,7 @@ impl WiFiDirectMeshProtocol {
             .args(&["-i", "wlan0", "p2p_group_add"])
             .output();
         
-        info!("🐧 Linux P2P group created");
+        info!(" Linux P2P group created");
         Ok(())
     }
     
@@ -885,7 +885,7 @@ impl WiFiDirectMeshProtocol {
         }
         
         // Default IP for hosted network
-        Ok("192.168.137.1".to_string())
+        Ok("192.168.0.0".to_string())
     }
     
     /// Join existing WiFi Direct groups
@@ -976,7 +976,7 @@ impl WiFiDirectMeshProtocol {
     async fn linux_join_p2p_group(&self, ssid: &str) -> Result<()> {
         use std::process::Command;
         
-        info!("🐧 Linux: Joining P2P group: {}", ssid);
+        info!(" Linux: Joining P2P group: {}", ssid);
         
         // First, find the peer by scanning
         let scan_output = Command::new("wpa_cli")
@@ -1187,7 +1187,7 @@ impl WiFiDirectMeshProtocol {
     async fn linux_wps_pbc(&self, peer_address: &str) -> Result<String> {
         use std::process::Command;
         
-        info!("🐧 Linux WPS PBC with {}", peer_address);
+        info!(" Linux WPS PBC with {}", peer_address);
         
         // Start PBC on local device
         let pbc_output = Command::new("wpa_cli")
@@ -1227,7 +1227,7 @@ impl WiFiDirectMeshProtocol {
     async fn linux_wps_pin_display(&self, peer_address: &str, pin: &str) -> Result<String> {
         use std::process::Command;
         
-        info!("🐧 Linux WPS PIN Display: {} to {}", pin, peer_address);
+        info!(" Linux WPS PIN Display: {} to {}", pin, peer_address);
         
         // Start WPS with PIN display
         let wps_output = Command::new("wpa_cli")
@@ -1257,7 +1257,7 @@ impl WiFiDirectMeshProtocol {
     async fn linux_wps_pin_keypad(&self, peer_address: &str, pin: &str) -> Result<String> {
         use std::process::Command;
         
-        info!("🐧 Linux WPS PIN Keypad: entering {} for {}", pin, peer_address);
+        info!(" Linux WPS PIN Keypad: entering {} for {}", pin, peer_address);
         
         // Connect to peer and enter their PIN
         let connect_output = Command::new("wpa_cli")
@@ -1503,7 +1503,7 @@ impl WiFiDirectMeshProtocol {
     
     /// Decline received P2P invitation
     async fn decline_p2p_invitation(&self, peer_address: &str, reason: InvitationStatus) -> Result<P2PInvitationResponse> {
-        info!("❌ Declining P2P invitation from {} (reason: {:?})", peer_address, reason);
+        info!(" Declining P2P invitation from {} (reason: {:?})", peer_address, reason);
         
         {
             let mut received = self.received_invitations.write().await;
@@ -1606,7 +1606,7 @@ impl WiFiDirectMeshProtocol {
     async fn linux_send_p2p_invitation(&self, invitation: &P2PInvitationRequest) -> Result<P2PInvitationResponse> {
         use std::process::Command;
         
-        info!("🐧 Linux sending P2P invitation to {}", invitation.invitee_address);
+        info!(" Linux sending P2P invitation to {}", invitation.invitee_address);
         
         let invite_cmd = match invitation.invitation_flags.invitation_type {
             InvitationType::JoinActiveGroup => "p2p_invite",
@@ -1656,7 +1656,7 @@ impl WiFiDirectMeshProtocol {
             
         let result_str = String::from_utf8(output.stdout)?;
         if result_str.contains("OK") {
-            info!("🐧 Successfully joined active P2P group");
+            info!(" Successfully joined active P2P group");
             Ok(())
         } else {
             Err(anyhow::anyhow!("Failed to join active P2P group"))
@@ -1678,7 +1678,7 @@ impl WiFiDirectMeshProtocol {
             
         let result_str = String::from_utf8(output.stdout)?;
         if result_str.contains("OK") {
-            info!("🐧 Successfully reinvoked persistent P2P group");
+            info!(" Successfully reinvoked persistent P2P group");
             Ok(())
         } else {
             Err(anyhow::anyhow!("Failed to reinvoke persistent P2P group"))
@@ -2045,7 +2045,7 @@ impl WiFiDirectMeshProtocol {
     
     /// Enhanced service discovery combining mDNS and P2P discovery
     async fn enhanced_service_discovery(&mut self) -> Result<()> {
-        info!("🚀 Starting enhanced ZHTP service discovery (mDNS + P2P)");
+        info!(" Starting enhanced ZHTP service discovery (mDNS + P2P)");
         
         // Start both discovery mechanisms
         tokio::try_join!(
