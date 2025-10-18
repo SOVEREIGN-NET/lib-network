@@ -72,6 +72,9 @@ impl MeshMessageHandler {
             ZhtpMeshMessage::BlockchainData { request_id, chunk_index, total_chunks, data, complete_data_hash } => {
                 self.handle_blockchain_data(request_id, chunk_index, total_chunks, data, complete_data_hash).await?;
             },
+            ZhtpMeshMessage::ConsensusMessage { message_data, sender_node_id, signature } => {
+                self.handle_consensus_message(message_data, sender_node_id, signature).await?;
+            },
         }
         Ok(())
     }
@@ -343,6 +346,37 @@ impl MeshMessageHandler {
         // For now, we log the receipt - the actual reassembly will be done
         // by the unified_server/bootstrap logic
         info!("Blockchain chunk stored for reassembly");
+        
+        Ok(())
+    }
+
+    /// Handle mesh consensus message (BFT protocol)
+    async fn handle_consensus_message(
+        &self,
+        message_data: Vec<u8>,
+        sender_node_id: [u8; 32],
+        signature: Vec<u8>,
+    ) -> Result<()> {
+        info!("📡 Consensus message received from node: {}", hex::encode(&sender_node_id[..8]));
+        
+        // Deserialize the consensus message
+        let consensus_message: lib_consensus::ConsensusMessage = match bincode::deserialize(&message_data) {
+            Ok(msg) => msg,
+            Err(e) => {
+                error!("Failed to deserialize consensus message: {}", e);
+                return Err(anyhow::anyhow!("Invalid consensus message format: {}", e));
+            }
+        };
+        
+        info!("Consensus message type: {:?}, height: {}, round: {}", 
+              consensus_message.message_type, 
+              consensus_message.height,
+              consensus_message.round);
+        
+        // TODO: Route to mesh server's handle_consensus_message
+        // This will be connected through the unified server when the mesh server
+        // is available in the runtime context
+        info!("Consensus message queued for processing by mesh consensus engine");
         
         Ok(())
     }

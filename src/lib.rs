@@ -76,11 +76,11 @@ pub async fn get_network_statistics() -> Result<NetworkStatistics> {
 }
 
 /// Get mesh status information
-pub async fn get_mesh_status() -> Result<MeshStatus> {
+pub async fn get_mesh_status() -> Result<crate::types::MeshStatus> {
     let mesh_stats = crate::mesh::statistics::get_mesh_statistics().await?;
     let discovery_stats = crate::discovery::get_discovery_statistics().await?;
     
-    Ok(MeshStatus {
+    Ok(crate::types::MeshStatus {
         internet_connected: mesh_stats.internet_connectivity,
         mesh_connected: mesh_stats.mesh_connectivity,
         connectivity_percentage: mesh_stats.connectivity_percentage,

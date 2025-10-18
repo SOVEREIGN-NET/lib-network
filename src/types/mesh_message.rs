@@ -86,4 +86,13 @@ pub enum ZhtpMeshMessage {
         /// Hash of the complete blockchain data (for verification)
         complete_data_hash: [u8; 32],
     },
+    /// Mesh consensus message (BFT protocol)
+    ConsensusMessage {
+        /// Serialized consensus message
+        message_data: Vec<u8>,
+        /// Sender's node ID
+        sender_node_id: [u8; 32],
+        /// Message signature for verification
+        signature: Vec<u8>,
+    },
 }

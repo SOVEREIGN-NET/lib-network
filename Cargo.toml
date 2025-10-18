@@ -59,6 +59,9 @@ lib-economy = { path = "../lib-economy" }
 lib-protocols = { path = "../lib-protocols" }
 lib-identity = { path = "../lib-identity" }
 lib-storage = { path = "../lib-storage" }
+lib-blockchain = { path = "../lib-blockchain" }
+lib-consensus = { path = "../lib-consensus" }
+blake3 = "1.5"  # For hash operations in mesh sync
 
 # Platform-specific GATT and Bluetooth APIs
 [target.'cfg(target_os = "linux")'.dependencies]
