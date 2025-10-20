@@ -63,6 +63,15 @@ lib-storage = { path = "../lib-storage" }
 # Platform-specific GATT and Bluetooth APIs
 [target.'cfg(target_os = "linux")'.dependencies]
 regex = "1.0"                                     # For parsing BlueZ responses
+dbus = { version = "0.9", optional = true }       # Direct D-Bus communication with BlueZ
+dbus-tokio = { version = "0.7", optional = true } # Async D-Bus support
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc = "0.2"                                      # Objective-C runtime for Core Bluetooth FFI
+objc-foundation = "0.1"                           # Foundation types (NSString, NSArray, etc.)
+objc_id = "0.1"                                   # Object ID handling
+block = "0.1"                                     # Block (closure) support for callbacks
+cocoa = "0.25"                                    # macOS Cocoa framework bindings
 
 [target.'cfg(target_os = "windows")'.dependencies]  
 windows = { version = "0.51", features = [        # Windows Runtime APIs
@@ -114,7 +123,8 @@ path = "src/lib.rs"
 default = []                      # All lib-* dependencies are required and enabled by default
 windows-gatt = ["windows"]        # Windows WinRT GATT support
 macos-corebluetooth = []          # macOS Core Bluetooth support
-enhanced-bluetooth = ["windows-gatt"] # Enhanced Bluetooth functionality with Windows GATT support
+linux-dbus = ["dbus", "dbus-tokio"] # Direct D-Bus BlueZ integration
+enhanced-bluetooth = ["windows-gatt", "linux-dbus"] # Enhanced Bluetooth functionality
 enhanced-security = ["aes", "cmac"] # Advanced cryptographic protocols
 enhanced-parsing = ["quick-xml"] # Enhanced XML parsing
 enhanced-wifi-direct = ["aes", "cmac", "quick-xml"] # Complete WiFi Direct enhancements

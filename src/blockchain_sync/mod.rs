@@ -11,7 +11,7 @@ use sha2::{Sha256, Digest};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tracing::{info, warn, debug};
+use tracing::{info, debug};
 
 /// Chunk sizes based on protocol capabilities
 pub const BLE_CHUNK_SIZE: usize = 200;       // Conservative for BLE GATT (247-byte MTU)
@@ -31,6 +31,7 @@ pub fn get_chunk_size_for_protocol(protocol: &NetworkProtocol) -> usize {
 }
 
 /// Blockchain sync request/response coordinator
+#[derive(Debug)]
 pub struct BlockchainSyncManager {
     /// Pending blockchain requests (request_id -> requester)
     pending_requests: Arc<RwLock<HashMap<u64, PublicKey>>>,
@@ -41,6 +42,7 @@ pub struct BlockchainSyncManager {
 }
 
 /// Buffer for reassembling blockchain chunks
+#[derive(Debug)]
 struct BlockchainChunkBuffer {
     chunks: HashMap<u32, Vec<u8>>,
     total_chunks: u32,

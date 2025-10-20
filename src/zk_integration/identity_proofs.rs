@@ -417,18 +417,6 @@ fn generate_identity_secret() -> Result<u64> {
     Ok(timestamp ^ 0x1234567890ABCDEF)
 }
 
-/// Generate realistic age credential (deterministic for testing)
-fn generate_age_credential() -> Result<u64> {
-    // Generate a deterministic age based on current time that's usually valid
-    // For most tests, we want an age that meets typical requirements (18+)
-    let base_age = 22; // Start with a reasonable age
-    let time_variance = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)?
-        .as_secs() % 20; // 0-19 years additional (22-41 range)
-    
-    Ok(base_age + time_variance)
-}
-
 /// Generate age credential that satisfies specific parameters
 fn generate_age_credential_for_params(params: &IdentityProofParams) -> Result<u64> {
     // For parameter-specific generation, use a deterministic age that satisfies requirements

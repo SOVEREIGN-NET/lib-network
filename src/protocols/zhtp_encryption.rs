@@ -246,6 +246,7 @@ impl ZhtpEncryptionSession {
 }
 
 /// ZHTP encryption manager for managing multiple sessions
+#[derive(Debug)]
 pub struct ZhtpEncryptionManager {
     /// Active encryption sessions (peer_address -> session)
     sessions: std::sync::Arc<tokio::sync::RwLock<std::collections::HashMap<String, ZhtpEncryptionSession>>>,

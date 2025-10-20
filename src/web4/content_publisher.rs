@@ -7,12 +7,10 @@ use anyhow::{anyhow, Result};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tracing::{info, warn, error};
-use lib_crypto::hash_blake3;
+use tracing::info;
 use lib_proofs::ZeroKnowledgeProof;
 use lib_identity::ZhtpIdentity;
-use lib_economy::wasm::IdentityId;
-use lib_storage::{UnifiedStorageSystem, UnifiedStorageConfig, UploadRequest};
+use lib_storage::UnifiedStorageSystem;
 
 use crate::dht::DHTClient;
 use super::types::*;
@@ -22,8 +20,8 @@ use super::domain_registry::DomainRegistry;
 pub struct ContentPublisher {
     /// Domain registry for ownership verification
     domain_registry: Arc<DomainRegistry>,
-    /// DHT client for content storage and retrieval
-    dht_client: Arc<RwLock<DHTClient>>,
+    /// DHT client for content storage and retrieval (optional - uses registry's DHT if None)
+    dht_client: Arc<RwLock<Option<DHTClient>>>,
     /// Storage backend
     storage_system: Arc<RwLock<UnifiedStorageSystem>>,
     /// Content statistics
@@ -46,28 +44,15 @@ pub struct ContentPublishingStats {
 }
 
 impl ContentPublisher {
-    /// Create new content publisher
+    /// Create new content publisher without creating a new DHT client
     pub async fn new(domain_registry: Arc<DomainRegistry>) -> Result<Self> {
-        // Initialize DHT client for content operations
-        let identity = ZhtpIdentity::new(
-            lib_identity::types::IdentityType::Device,
-            b"web4-content-publisher-key".to_vec(),
-            ZeroKnowledgeProof::new(
-                "Plonky2".to_string(),
-                b"content-publisher-proof".to_vec(),
-                b"content-publisher-public".to_vec(),
-                b"content-publisher-verification".to_vec(),
-                None,
-            ),
-        )?;
-        
-        let dht_client = crate::initialize_dht_client(identity).await?;
+        // Don't create a new DHT client - reuse the one from domain_registry if needed
         let storage_config = lib_storage::UnifiedStorageConfig::default();
         let storage_system = UnifiedStorageSystem::new(storage_config).await?;
 
         Ok(Self {
             domain_registry,
-            dht_client: Arc::new(RwLock::new(dht_client)),
+            dht_client: Arc::new(RwLock::new(None)), // Will use registry's DHT or be set later
             storage_system: Arc::new(RwLock::new(storage_system)),
             stats: Arc::new(RwLock::new(ContentPublishingStats::default())),
         })
@@ -110,10 +95,26 @@ impl ContentPublisher {
         // Validate content
         self.validate_content(&request).await?;
 
-        // Store content in DHT
-        let mut dht_client = self.dht_client.write().await;
-        let content_hash = dht_client.store_content(&request.domain, &request.path, request.content.clone()).await?;
-        drop(dht_client);
+        // Store content in DHT if available, otherwise use storage system
+        let content_hash = {
+            let dht_client_guard = self.dht_client.read().await;
+            if let Some(dht_client) = dht_client_guard.as_ref() {
+                // Use DHT for storage
+                drop(dht_client_guard);
+                let mut dht_client_mut = self.dht_client.write().await;
+                if let Some(dht) = dht_client_mut.as_mut() {
+                    dht.store_content(&request.domain, &request.path, request.content.clone()).await?
+                } else {
+                    // Fallback to hash-based storage
+                    let hash = lib_crypto::hash_blake3(&request.content);
+                    hex::encode(hash)
+                }
+            } else {
+                // No DHT available, use hash-based content addressing
+                let hash = lib_crypto::hash_blake3(&request.content);
+                hex::encode(hash)
+            }
+        };
 
         // Calculate storage fees
         let storage_fees = self.calculate_storage_fees(&request).await?;

@@ -7,7 +7,7 @@ use anyhow::{anyhow, Result};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tracing::{info, warn, error};
+use tracing::{info, error};
 use lib_crypto::hash_blake3;
 use lib_proofs::ZeroKnowledgeProof;
 use lib_identity::ZhtpIdentity;
@@ -34,12 +34,17 @@ pub struct DomainRegistry {
 impl DomainRegistry {
     /// Create new domain registry
     pub async fn new() -> Result<Self> {
+        Self::new_with_dht(None).await
+    }
+
+    /// Create new domain registry with optional existing DHT client
+    pub async fn new_with_dht(dht_client: Option<DHTClient>) -> Result<Self> {
         let storage_config = lib_storage::UnifiedStorageConfig::default();
         let storage_system = UnifiedStorageSystem::new(storage_config).await?;
         
         Ok(Self {
             domain_records: Arc::new(RwLock::new(HashMap::new())),
-            dht_client: Arc::new(RwLock::new(None)), // Will be initialized later if needed
+            dht_client: Arc::new(RwLock::new(dht_client)), // Use provided DHT client if available
             storage_system: Arc::new(RwLock::new(storage_system)),
             content_cache: Arc::new(RwLock::new(HashMap::new())),
             stats: Arc::new(RwLock::new(Web4Statistics {
@@ -603,7 +608,12 @@ pub struct Web4Manager {
 impl Web4Manager {
     /// Create new Web4 manager
     pub async fn new() -> Result<Self> {
-        let registry = DomainRegistry::new().await?;
+        Self::new_with_dht(None).await
+    }
+
+    /// Create new Web4 manager with optional existing DHT client
+    pub async fn new_with_dht(dht_client: Option<DHTClient>) -> Result<Self> {
+        let registry = DomainRegistry::new_with_dht(dht_client).await?;
         let registry_arc = Arc::new(registry);
         let content_publisher = super::content_publisher::ContentPublisher::new(registry_arc.clone()).await?;
         

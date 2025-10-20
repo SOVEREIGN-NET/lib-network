@@ -4,7 +4,6 @@
 //! Combines Dilithium2 signatures with Kyber-encrypted channels.
 
 use anyhow::{Result, anyhow};
-use serde::{Serialize, Deserialize};
 use lib_crypto::post_quantum::dilithium::{dilithium2_sign, dilithium2_verify};
 use lib_crypto::hashing::hash_blake3;
 use lib_crypto::Hash;
@@ -12,13 +11,14 @@ use tracing::{info, debug, warn};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::protocols::zhtp_auth::NodeCapabilities;
-use crate::protocols::zhtp_encryption::{ZhtpEncryptionManager, ZhtpEncryptedMessage};
+use crate::protocols::zhtp_encryption::ZhtpEncryptionManager;
 use super::protocol::{
     ZhtpRelayQuery, ZhtpRelayResponse, ZhtpRelayQueryPayload, ZhtpRelayResponsePayload,
     ZhtpQueryOptions, CachePreference,
 };
 
 /// ZHTP Relay Protocol Handler
+#[derive(Debug)]
 pub struct ZhtpRelayProtocol {
     /// Encryption manager for secure channels
     encryption_manager: ZhtpEncryptionManager,

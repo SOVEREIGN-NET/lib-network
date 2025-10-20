@@ -1,7 +1,9 @@
 use serde::{Deserialize, Serialize};
 
+// Bluetooth protocol suite (includes BLE mesh, Classic RFCOMM, platform-specific)
 pub mod bluetooth;
-pub mod bluetooth_classic;
+
+// Other protocols
 pub mod wifi_direct;
 pub mod lorawan;
 pub mod satellite;
@@ -9,8 +11,9 @@ pub mod zhtp_auth;
 pub mod zhtp_encryption;
 
 // Enhanced protocol implementations with platform-specific optimizations
-#[cfg(feature = "enhanced-bluetooth")]
-pub mod enhanced_bluetooth;
+// NOTE: enhanced_bluetooth functionality is in bluetooth/enhanced.rs, not a separate top-level module
+// #[cfg(feature = "enhanced-bluetooth")]
+// pub mod enhanced_bluetooth;
 
 #[cfg(feature = "enhanced-wifi-direct")]
 pub mod enhanced_wifi_direct;

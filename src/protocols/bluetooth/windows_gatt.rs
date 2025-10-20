@@ -25,8 +25,13 @@ use windows::{
     Devices::Bluetooth::Advertisement::*,
 };
 
+// Import common Bluetooth utilities
 #[cfg(target_os = "windows")]
-use crate::protocols::bluetooth::{TrackedDevice, CharacteristicInfo};
+use crate::protocols::bluetooth::device::{BleDevice, CharacteristicInfo, BluetoothDeviceInfo};
+#[cfg(all(target_os = "windows", feature = "windows-gatt"))]
+use crate::protocols::bluetooth::common::{parse_uuid_to_guid, format_mac_address, zhtp_uuids};
+#[cfg(target_os = "windows")]
+use crate::protocols::bluetooth::gatt::{GattMessage, GattOperation, supports_operation, parse_characteristic_properties};
 
 /// Windows Runtime BLE GATT Manager
 #[cfg(target_os = "windows")]

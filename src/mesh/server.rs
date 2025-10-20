@@ -7,8 +7,24 @@ use uuid::Uuid;
 use tracing::{info, warn, error};
 use serde_json;
 
-use lib_crypto::PublicKey;
+use lib_crypto::{PublicKey, Signature};
 use crate::mesh::{MeshConnection, MeshProtocolStats};
+
+/// Simple in-memory routing statistics (no blockchain state)
+#[derive(Debug, Clone, Default)]
+pub struct RoutingStats {
+    /// Total number of messages routed through this node
+    pub messages_routed: u64,
+    /// Total bytes routed through this node
+    pub bytes_routed: u64,
+    /// Theoretical tokens that would be earned (for display only, not actual balance)
+    pub theoretical_tokens_earned: u64,
+    /// Number of successful routing operations
+    pub successful_routes: u64,
+    /// Number of failed routing operations
+    pub failed_routes: u64,
+}
+
 // use crate::types::*; // Removed - unused imports
 use crate::types::mesh_message::ZhtpMeshMessage;
 use crate::types::api_response::ZhtpApiResponse;
@@ -56,7 +72,6 @@ pub struct SecurityAuditLog {
 use crate::protocols::NetworkProtocol;
 
 use crate::bootstrap::{start_tcp_bootstrap_server, start_udp_bootstrap_server};
-use crate::messaging::message_handler::MeshMessageHandler;
 use crate::monitoring::health_monitoring::HealthMonitor;
 use crate::dht::{ZkDHTIntegration, DHTNetworkStatus};
 use crate::discovery::hardware::HardwareCapabilities;
@@ -99,8 +114,6 @@ pub struct ZhtpMeshServer {
     pub revenue_pools: Arc<RwLock<HashMap<String, u64>>>,
     /// Mesh protocol statistics
     pub stats: Arc<RwLock<MeshProtocolStats>>,
-    /// Message handler for mesh protocol
-    pub message_handler: MeshMessageHandler,
     /// Health monitoring system
     pub health_monitor: HealthMonitor,
     /// Zero-Knowledge DHT integration
@@ -108,12 +121,8 @@ pub struct ZhtpMeshServer {
     /// Hardware capabilities detected on this system  
     pub hardware_capabilities: Option<HardwareCapabilities>,
     
-    /// Node owner wallet (for receiving rewards and controlling node)
-    pub owner_wallet: Arc<RwLock<lib_identity::wallets::QuantumWallet>>,
-    /// Routing rewards wallet (separate from owner wallet)
-    pub routing_rewards_wallet: Arc<RwLock<lib_identity::wallets::QuantumWallet>>,
-    /// Operational costs wallet (for network participation costs)
-    pub operational_wallet: Arc<RwLock<lib_identity::wallets::QuantumWallet>>,
+    /// Routing statistics and performance metrics (in-memory counters)
+    pub routing_stats: Arc<RwLock<RoutingStats>>,
     
     /// Active Bluetooth LE mesh protocol instance
     pub bluetooth_protocol: Option<Arc<RwLock<crate::protocols::bluetooth::BluetoothMeshProtocol>>>,
@@ -280,125 +289,51 @@ fn filter_protocols_by_hardware(
 }
 
 impl ZhtpMeshServer {
-    /// Create standalone wallets for node operation (no DID required)
-    async fn create_node_wallets(owner_key: &PublicKey) -> Result<(
-        lib_identity::wallets::QuantumWallet,
-        lib_identity::wallets::QuantumWallet, 
-        lib_identity::wallets::QuantumWallet
-    )> {
-        // Create owner wallet (controls the node)
-        let (owner_wallet_id, _owner_seed) = lib_identity::create_standalone_wallet(
-            "Node Owner Wallet".to_string(),
-            Some("owner".to_string()),
-        ).await?;
-        
-        // Create routing rewards wallet (receives routing payments)
-        let (routing_wallet_id, _routing_seed) = lib_identity::create_standalone_wallet(
-            "Routing Rewards Wallet".to_string(),
-            Some("routing_rewards".to_string()),
-        ).await?;
-        
-        // Create operational wallet (pays for network operations)
-        let (ops_wallet_id, _ops_seed) = lib_identity::create_standalone_wallet(
-            "Operational Costs Wallet".to_string(),
-            Some("operations".to_string()),
-        ).await?;
-        
-        // Get wallet instances using the existing constructor
-        let owner_wallet = lib_identity::wallets::QuantumWallet::new(
-            lib_identity::wallets::WalletType::Primary,
-            "Node Owner Wallet".to_string(),
-            Some("owner".to_string()),
-            None, // No owner_id for standalone
-            owner_key.as_bytes().to_vec(),
-        );
-        
-        let routing_wallet = lib_identity::wallets::QuantumWallet::new(
-            lib_identity::wallets::WalletType::Primary,
-            "Routing Rewards Wallet".to_string(),
-            Some("routing_rewards".to_string()),
-            None, // No owner_id for standalone
-            owner_key.as_bytes().to_vec(),
-        );
-        
-        let ops_wallet = lib_identity::wallets::QuantumWallet::new(
-            lib_identity::wallets::WalletType::Primary, // Use Primary type for ops wallet
-            "Operational Costs Wallet".to_string(),
-            Some("operations".to_string()),
-            None, // No owner_id for standalone
-            owner_key.as_bytes().to_vec(),
-        );
-        
-        info!(" Created standalone wallets for node operation");
-        Ok((owner_wallet, routing_wallet, ops_wallet))
-    }
-    
-    /// Record routing proof when we forward a message (simplified wallet-based)
-    pub async fn record_routing_proof(
+    /// Record routing activity when we forward a message
+    /// Note: This only tracks statistics. Actual token rewards should be handled
+    /// by the application layer (zhtp) via blockchain transactions.
+    pub async fn record_routing_activity(
         &self,
-        message_hash: [u8; 32],
-        source: PublicKey,
-        destination: PublicKey,
         data_size: usize,
         hop_count: u8,
     ) -> Result<()> {
-        // Create routing proof for this routing action
-        let timestamp = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)?
-            .as_secs();
-            
-        // Calculate immediate reward based on routing activity
+        // Calculate theoretical reward for display purposes
         let base_reward = 10; // 10 tokens per message routed
         let size_bonus = (data_size / 1024) as u64; // 1 token per KB
         let hop_bonus = hop_count as u64 * 5; // 5 tokens per hop
-        let total_reward = base_reward + size_bonus + hop_bonus;
+        let theoretical_reward = base_reward + size_bonus + hop_bonus;
         
-        // Distribute reward directly to routing wallet (no identity needed!)
+        // Update in-memory statistics only
         {
-            let routing_wallet = self.routing_rewards_wallet.read().await;
-            // Add tokens to routing wallet balance
-            // In implementation, this would update the wallet balance
-            info!("Added {} tokens to routing wallet for {} bytes, {} hops", 
-                  total_reward, data_size, hop_count);
+            let mut stats = self.routing_stats.write().await;
+            stats.messages_routed += 1;
+            stats.bytes_routed += data_size as u64;
+            stats.theoretical_tokens_earned += theoretical_reward;
+            stats.successful_routes += 1;
         }
         
-        // Update statistics
+        // Also update mesh protocol stats
         {
-            let mut stats = self.stats.write().await;
-            stats.total_data_routed += data_size as u64; // Convert usize to u64
-            // No change to active_connections for routing
+            let mut mesh_stats = self.stats.write().await;
+            mesh_stats.total_data_routed += data_size as u64;
         }
         
-        info!("Recorded routing: {} bytes, {} hops, {} tokens earned", 
-              data_size, hop_count, total_reward);
+        info!("Routed {} bytes ({} hops) - theoretical reward: {} tokens", 
+              data_size, hop_count, theoretical_reward);
         Ok(())
     }
     
-    /// Get node's routing rewards balance
-    pub async fn get_routing_rewards_balance(&self) -> Result<u64> {
-        let routing_wallet = self.routing_rewards_wallet.read().await;
-        // Return wallet balance (simplified)
-        Ok(routing_wallet.balance)
+    /// Get node's routing statistics
+    pub async fn get_routing_stats(&self) -> RoutingStats {
+        self.routing_stats.read().await.clone()
     }
     
-    /// Transfer routing rewards to another wallet
-    pub async fn transfer_routing_rewards(&self, recipient_wallet_key: PublicKey, amount: u64) -> Result<()> {
-        let mut routing_wallet = self.routing_rewards_wallet.write().await;
-        
-        // Verify sufficient balance
-        let current_balance = routing_wallet.balance;
-        if current_balance < amount {
-            return Err(anyhow!("Insufficient routing rewards balance: {} < {}", current_balance, amount));
-        }
-        
-        // Create transaction to transfer tokens
-        // In implementation, this would create a proper transaction
-        info!(" Transferring {} tokens from routing wallet to recipient", amount);
-        
-        Ok(())
+    /// Get theoretical tokens earned (for display only, not actual balance)
+    pub async fn get_theoretical_earnings(&self) -> u64 {
+        self.routing_stats.read().await.theoretical_tokens_earned
     }
     
-    /// Verify node ownership using wallet public key (simplified)
+    /// Verify node ownership using wallet public key
     pub async fn verify_node_ownership(&self, wallet_key: &PublicKey) -> bool {
         // Check if the wallet key matches the owner wallet key
         wallet_key.as_bytes() == self.owner_wallet_key.as_bytes()
@@ -867,56 +802,6 @@ impl ZhtpMeshServer {
         info!("🛰️ Satellite mesh discovery active with persistent management");
         Ok(())
     }
-    
-    /// Send discovery message on specific protocol
-    async fn send_discovery_message(&self, protocol: NetworkProtocol) -> Result<()> {
-        let node_id = self.mesh_node.read().await.node_id;
-        Self::send_discovery_message_static(node_id, protocol).await
-    }
-    
-    /// Static method for discovery message sending
-    async fn send_discovery_message_static(node_id: [u8; 32], protocol: NetworkProtocol) -> Result<()> {
-        let discovery_message = ZhtpMeshMessage::PeerDiscovery {
-            capabilities: vec![
-                crate::types::mesh_capability::MeshCapability::MeshRelay { capacity_mbps: 100 },
-                crate::types::mesh_capability::MeshCapability::DataStorage { capacity_gb: 100 },
-                crate::types::mesh_capability::MeshCapability::ZkProofGeneration,
-            ],
-            location: None, // Could be filled with GPS coordinates
-            shared_resources: crate::types::mesh_capability::SharedResources {
-                relay_bandwidth_kbps: 10000,
-                storage_gb: 100,
-                compute_power: 1000,
-                battery_percentage: Some(85),
-                reliability_score: 0.95,
-            },
-        };
-        
-        // Send via the appropriate protocol
-        match protocol {
-            NetworkProtocol::BluetoothLE => {
-                // Bluetooth mesh broadcast
-                info!(" Sending Bluetooth LE discovery message");
-            },
-            NetworkProtocol::WiFiDirect => {
-                // WiFi Direct discovery
-                info!("Sending WiFi Direct discovery message");
-            },
-            NetworkProtocol::LoRaWAN => {
-                // LoRaWAN broadcast
-                info!("Sending LoRaWAN discovery message");
-            },
-            NetworkProtocol::Satellite => {
-                // Satellite uplink
-                info!("🛰️ Sending satellite discovery message");
-            },
-            _ => {
-                info!("Discovery not implemented for {:?}", protocol);
-            }
-        }
-        
-        Ok(())
-    }
 
     /// Create a new ZHTP Mesh Server - The Internet
     pub async fn new(
@@ -957,13 +842,6 @@ impl ZhtpMeshServer {
         // Create participant tracking for UBI
         let ubi_participants = Arc::new(RwLock::new(HashMap::<String, String>::new()));
         
-        // Initialize message handler
-        let message_handler = MeshMessageHandler::new(
-            mesh_connections.clone(),
-            long_range_relays.clone(),
-            revenue_pools.clone(),
-        );
-        
         // Initialize health monitor
         let health_monitor = HealthMonitor::new(
             stats.clone(),
@@ -974,8 +852,8 @@ impl ZhtpMeshServer {
         // Initialize DHT integration
         let dht = Arc::new(RwLock::new(ZkDHTIntegration::new()));
         
-        // Create standalone wallets for node operation
-        let (owner_wallet, routing_wallet, ops_wallet) = Self::create_node_wallets(&owner_key).await?;
+        // Initialize routing statistics (in-memory counters only)
+        let routing_stats = Arc::new(RwLock::new(RoutingStats::default()));
         
         let server = ZhtpMeshServer {
             server_id,
@@ -986,15 +864,12 @@ impl ZhtpMeshServer {
             long_range_relays,
             revenue_pools,
             stats,
-            message_handler,
             health_monitor,
             dht,
             hardware_capabilities,
             
-            // Node wallets (no DID required)
-            owner_wallet: Arc::new(RwLock::new(owner_wallet)),
-            routing_rewards_wallet: Arc::new(RwLock::new(routing_wallet)),
-            operational_wallet: Arc::new(RwLock::new(ops_wallet)),
+            // Simple routing statistics tracking (no wallets needed)
+            routing_stats,
             
             // Initialize protocol instances as None - will be created when protocols start
             bluetooth_protocol: None,
@@ -1020,17 +895,17 @@ impl ZhtpMeshServer {
     pub async fn start(&mut self) -> Result<()> {
         println!(" STARTING ZHTP MESH SERVER - THE NEW INTERNET!");
         println!("===============================================");
-        println!(" Node Wallet-Based Operation (No DID Required)");
+        println!(" Network-Layer Stats Tracking (No Wallets)");
         
-        // Display wallet information
+        // Display routing statistics
         {
-            let owner_wallet = self.owner_wallet.read().await;
-            let routing_wallet = self.routing_rewards_wallet.read().await;
-            let ops_wallet = self.operational_wallet.read().await;
-            
-            println!(" Owner Wallet: {} (Node Control)", owner_wallet.id);
-            println!("Routing Wallet: {} (Earns Tokens)", routing_wallet.id);
-            println!("  Operations Wallet: {} (Network Costs)", ops_wallet.id);
+            let stats = self.routing_stats.read().await;
+            println!(" Messages Routed: {}", stats.messages_routed);
+            println!(" Bytes Routed: {}", stats.bytes_routed);
+            println!(" Successful Routes: {}", stats.successful_routes);
+            println!(" Failed Routes: {}", stats.failed_routes);
+            println!(" Theoretical Earnings: {} tokens (display only)", 
+                stats.theoretical_tokens_earned);
         }
         
         println!("Initializing ISP-free mesh networking...");
@@ -1233,9 +1108,11 @@ impl ZhtpMeshServer {
     }
     
     /// Handle incoming mesh message
-    pub async fn handle_mesh_message(&self, message: ZhtpMeshMessage, sender: PublicKey) -> Result<()> {
-        // Delegate to the message handler for proper processing
-        self.message_handler.handle_mesh_message(message, sender).await
+    pub async fn handle_mesh_message(&self, message: ZhtpMeshMessage, _sender: PublicKey) -> Result<()> {
+        // Message handling now done by unified_server in zhtp
+        // This is just a pass-through for the API
+        info!("Mesh message received: {:?}", message);
+        Ok(())
     }
     
     /// Get current network statistics
@@ -1303,10 +1180,23 @@ impl ZhtpMeshServer {
             .as_secs();
         
         if now > credentials.timestamp + 300 { // 5 minute expiry
+            warn!("🔒 Credential verification failed: timestamp expired (age: {} seconds)", now - credentials.timestamp);
             return Ok(false);
         }
         
-        // Create message to verify signature
+        // Verify nonce is present
+        if credentials.nonce.is_empty() {
+            warn!("🔒 Credential verification failed: empty nonce");
+            return Ok(false);
+        }
+        
+        // Verify signature is present
+        if credentials.signature.is_empty() {
+            warn!("🔒 Credential verification failed: empty signature");
+            return Ok(false);
+        }
+        
+        // Create message to verify signature (matches what client should sign)
         let message = format!("{}:{}:{}:{}", 
             operation, 
             credentials.timestamp, 
@@ -1314,9 +1204,29 @@ impl ZhtpMeshServer {
             hex::encode(&self.server_id)
         );
         
-        // TODO: Implement actual cryptographic signature verification
-        // For now, we'll just check the timestamp and nonce format
-        Ok(!credentials.nonce.is_empty() && credentials.signature.len() > 0)
+        // Create Signature struct from credentials
+        let signature = Signature {
+            signature: credentials.signature.clone(),
+            public_key: credentials.wallet_key.clone(),
+            algorithm: lib_crypto::SignatureAlgorithm::Dilithium2,
+            timestamp: credentials.timestamp,
+        };
+        
+        // Perform actual cryptographic signature verification using lib-crypto
+        match credentials.wallet_key.verify(message.as_bytes(), &signature) {
+            Ok(is_valid) => {
+                if is_valid {
+                    info!("✅ Credential verification successful for operation: {}", operation);
+                } else {
+                    warn!("🔒 Credential verification failed: invalid signature for operation: {}", operation);
+                }
+                Ok(is_valid)
+            }
+            Err(e) => {
+                error!("🔒 Credential verification error for operation {}: {}", operation, e);
+                Ok(false) // Return false on verification error rather than propagating error
+            }
+        }
     }
     
     // LEGACY METHOD - COMMENTED OUT TO AVOID CONFLICTS WITH NEW WALLET-BASED SYSTEM
@@ -1868,6 +1778,12 @@ fn create_default_mesh_identity() -> lib_identity::ZhtpIdentity {
             .unwrap()
             .as_secs(),
         recovery_keys: vec![],
+        owner_identity_id: None,  // Mesh server is autonomous/system service
+        reward_wallet_id: None,   // System service doesn't need reward wallet
+        encrypted_master_seed: None,  // System services don't use seed-based HD wallets
+        next_wallet_index: 0,
+        password_hash: None,
+        master_seed_phrase: None,
     }
     }
 }

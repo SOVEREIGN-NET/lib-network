@@ -86,4 +86,26 @@ pub enum ZhtpMeshMessage {
         /// Hash of the complete blockchain data (for verification)
         complete_data_hash: [u8; 32],
     },
+    /// New block announcement for real-time propagation
+    NewBlock {
+        /// Serialized block (bincode format)
+        block: Vec<u8>,
+        /// Peer who created/relayed this block
+        sender: PublicKey,
+        /// Block height for quick filtering
+        height: u64,
+        /// Timestamp when block was created/received
+        timestamp: u64,
+    },
+    /// New transaction announcement for mempool propagation
+    NewTransaction {
+        /// Serialized transaction (bincode format)
+        transaction: Vec<u8>,
+        /// Peer who created/relayed this transaction
+        sender: PublicKey,
+        /// Transaction hash for duplicate detection
+        tx_hash: [u8; 32],
+        /// Transaction fee for priority sorting
+        fee: u64,
+    },
 }

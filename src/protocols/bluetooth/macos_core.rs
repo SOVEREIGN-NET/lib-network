@@ -1,0 +1,1252 @@
+// Core Bluetooth implementation for macOS
+// Uses native CBCentralManager and CBPeripheralManager for production-grade Bluetooth LE
+
+#[cfg(target_os = "macos")]
+use anyhow::{Result, anyhow};
+#[cfg(target_os = "macos")]
+use tracing::{info, warn, error, debug};
+#[cfg(target_os = "macos")]
+use std::collections::HashMap;
+#[cfg(target_os = "macos")]
+use std::sync::Arc;
+#[cfg(target_os = "macos")]
+use tokio::sync::{RwLock, Mutex};
+#[cfg(target_os = "macos")]
+use serde::{Serialize, Deserialize};
+
+// Objective-C FFI imports
+#[cfg(target_os = "macos")]
+use objc::{msg_send, sel, sel_impl, runtime::{Class, Object, Sel}};
+#[cfg(target_os = "macos")]
+use objc_foundation::{NSString, NSArray, NSDictionary, NSData};
+#[cfg(target_os = "macos")]
+use objc_id::{Id, Owned, Shared};
+#[cfg(target_os = "macos")]
+use block::ConcreteBlock;
+#[cfg(target_os = "macos")]
+use std::os::raw::c_void;
+
+// Import common Bluetooth utilities
+#[cfg(target_os = "macos")]
+use crate::protocols::bluetooth::device::{BleDevice, CharacteristicInfo, BluetoothDeviceInfo};
+#[cfg(target_os = "macos")]
+use crate::protocols::bluetooth::common::{parse_mac_address, format_mac_address, zhtp_uuids};
+#[cfg(target_os = "macos")]
+use crate::protocols::bluetooth::gatt::{GattMessage, GattOperation, supports_operation};
+#[cfg(target_os = "macos")]
+use crate::protocols::bluetooth::macos_delegate;
+#[cfg(target_os = "macos")]
+use crate::protocols::bluetooth::macos_error::{NSErrorInfo, check_nserror};
+
+/// Events emitted by Core Bluetooth callbacks
+#[cfg(target_os = "macos")]
+#[derive(Debug, Clone)]
+pub enum CoreBluetoothEvent {
+    /// Bluetooth state changed
+    StateChanged(BluetoothState),
+    /// Peripheral discovered during scan
+    PeripheralDiscovered {
+        identifier: String,
+        name: Option<String>,
+        rssi: i32,
+        advertisement_data: HashMap<String, String>,
+        peripheral_ptr: usize,
+    },
+    /// Peripheral connected
+    PeripheralConnected(String),
+    /// Peripheral disconnected
+    PeripheralDisconnected(String),
+    /// Connection failed with error
+    ConnectionFailed {
+        peripheral_id: String,
+        error_message: String,
+        error_code: i64,
+        error_domain: String,
+    },
+    /// Services discovered for peripheral
+    ServicesDiscovered {
+        peripheral_id: String,
+        service_uuids: Vec<String>,
+    },
+    /// Service discovery failed
+    ServiceDiscoveryFailed {
+        peripheral_id: String,
+        error_message: String,
+        error_code: i64,
+    },
+    /// Characteristics discovered for service
+    CharacteristicsDiscovered {
+        peripheral_id: String,
+        service_uuid: String,
+        characteristic_uuids: Vec<String>,
+    },
+    /// Characteristic discovery failed
+    CharacteristicDiscoveryFailed {
+        peripheral_id: String,
+        service_uuid: String,
+        error_message: String,
+        error_code: i64,
+    },
+    /// Characteristic value updated (from read or notification)
+    CharacteristicValueUpdated {
+        peripheral_id: String,
+        characteristic_uuid: String,
+        value: Vec<u8>,
+    },
+    /// Characteristic read failed
+    CharacteristicReadFailed {
+        peripheral_id: String,
+        characteristic_uuid: String,
+        error_message: String,
+        error_code: i64,
+    },
+    /// Write completed
+    WriteCompleted {
+        peripheral_id: String,
+        characteristic_uuid: String,
+    },
+    /// Characteristic write failed
+    CharacteristicWriteFailed {
+        peripheral_id: String,
+        characteristic_uuid: String,
+        error_message: String,
+        error_code: i64,
+    },
+    /// Notification state changed
+    NotificationStateChanged {
+        peripheral_id: String,
+        characteristic_uuid: String,
+        enabled: bool,
+    },
+    /// Notification state update failed
+    NotificationStateFailed {
+        peripheral_id: String,
+        characteristic_uuid: String,
+        error_message: String,
+        error_code: i64,
+    },
+    /// Advertising started
+    AdvertisingStarted,
+    /// Service added to GATT server
+    ServiceAdded(String),
+    /// Read request received (GATT server)
+    ReadRequest {
+        central_id: String,
+        characteristic_uuid: String,
+    },
+    /// Write request received (GATT server)
+    WriteRequest {
+        central_id: String,
+        characteristic_uuid: String,
+        value: Vec<u8>,
+    },
+}
+
+/// Core Bluetooth power state
+#[cfg(target_os = "macos")]
+#[derive(Debug, Clone, PartialEq)]
+pub enum BluetoothState {
+    Unknown,
+    Resetting,
+    Unsupported,
+    Unauthorized,
+    PoweredOff,
+    PoweredOn,
+}
+
+/// Core Bluetooth manager for macOS using CBCentralManager and CBPeripheralManager
+#[cfg(target_os = "macos")]
+pub struct CoreBluetoothManager {
+    /// Central manager for scanning and connecting to peripherals
+    central_manager: Arc<Mutex<Option<CBCentralManagerHandle>>>,
+    /// Peripheral manager for advertising and GATT server
+    peripheral_manager: Arc<Mutex<Option<CBPeripheralManagerHandle>>>,
+    /// Discovered peripherals cache
+    discovered_peripherals: Arc<RwLock<HashMap<String, CBPeripheralHandle>>>,
+    /// GATT service cache
+    services_cache: Arc<RwLock<HashMap<String, Vec<CBServiceHandle>>>>,
+    /// Characteristic value cache for notifications
+    characteristic_values: Arc<RwLock<HashMap<String, Vec<u8>>>>,
+    /// Notification callbacks
+    notification_handlers: Arc<RwLock<HashMap<String, Box<dyn Fn(Vec<u8>) + Send + Sync>>>>,
+    /// Event channel for Core Bluetooth callbacks
+    event_sender: tokio::sync::mpsc::UnboundedSender<CoreBluetoothEvent>,
+    event_receiver: Arc<Mutex<Option<tokio::sync::mpsc::UnboundedReceiver<CoreBluetoothEvent>>>>,
+}
+
+/// Handle to Core Bluetooth Central Manager with real Objective-C object
+#[cfg(target_os = "macos")]
+pub struct CBCentralManagerHandle {
+    /// Raw pointer to CBCentralManager Objective-C object
+    manager_ptr: *mut Object,
+    /// Delegate for handling callbacks
+    delegate: CBCentralManagerDelegate,
+}
+
+// Safety: CBCentralManagerHandle can be sent between threads
+#[cfg(target_os = "macos")]
+unsafe impl Send for CBCentralManagerHandle {}
+unsafe impl Sync for CBCentralManagerHandle {}
+
+/// Handle to Core Bluetooth Peripheral Manager with real Objective-C object
+#[cfg(target_os = "macos")]
+pub struct CBPeripheralManagerHandle {
+    /// Raw pointer to CBPeripheralManager Objective-C object
+    manager_ptr: *mut Object,
+    /// Delegate for handling callbacks
+    delegate: CBPeripheralManagerDelegate,
+}
+
+// Safety: CBPeripheralManagerHandle can be sent between threads
+#[cfg(target_os = "macos")]
+unsafe impl Send for CBPeripheralManagerHandle {}
+unsafe impl Sync for CBPeripheralManagerHandle {}
+
+/// Handle to discovered Core Bluetooth peripherals
+#[cfg(target_os = "macos")]
+#[derive(Debug, Clone)]
+pub struct CBPeripheralHandle {
+    pub identifier: String,
+    pub name: Option<String>,
+    pub rssi: i32,
+    pub advertisement_data: HashMap<String, String>,
+    pub services: Vec<String>,
+    /// Raw pointer to CBPeripheral object (for internal use)
+    peripheral_ptr: Option<usize>, // Store as usize for Clone compatibility
+}
+
+/// Handle to GATT services
+#[cfg(target_os = "macos")]
+#[derive(Debug, Clone)]
+pub struct CBServiceHandle {
+    pub uuid: String,
+    pub is_primary: bool,
+    pub characteristics: Vec<CBCharacteristicHandle>,
+}
+
+/// Handle to GATT characteristics
+#[cfg(target_os = "macos")]
+#[derive(Debug, Clone)]
+pub struct CBCharacteristicHandle {
+    pub uuid: String,
+    pub properties: Vec<String>,
+    pub value: Option<Vec<u8>>,
+}
+
+/// Central manager delegate for handling Core Bluetooth events
+#[cfg(target_os = "macos")]
+pub struct CBCentralManagerDelegate {
+    /// Event channel sender for async communication
+    pub event_sender: tokio::sync::mpsc::UnboundedSender<CoreBluetoothEvent>,
+}
+
+/// Peripheral manager delegate for GATT server operations
+#[cfg(target_os = "macos")]
+pub struct CBPeripheralManagerDelegate {
+    /// Event channel sender for async communication
+    pub event_sender: tokio::sync::mpsc::UnboundedSender<CoreBluetoothEvent>,
+}
+
+/// Core Bluetooth power state
+#[cfg(target_os = "macos")]
+#[derive(Debug, Clone, PartialEq)]
+pub enum BluetoothState {
+    Unknown,
+    Resetting,
+    Unsupported,
+    Unauthorized,
+    PoweredOff,
+    PoweredOn,
+}
+
+#[cfg(target_os = "macos")]
+impl CoreBluetoothManager {
+    /// Create new Core Bluetooth manager
+    pub fn new() -> Result<Self> {
+        info!("🔄 Initializing Core Bluetooth for macOS");
+        
+        // Create event channel for Core Bluetooth callbacks
+        let (event_sender, event_receiver) = tokio::sync::mpsc::unbounded_channel();
+        
+        Ok(CoreBluetoothManager {
+            central_manager: Arc::new(Mutex::new(None)),
+            peripheral_manager: Arc::new(Mutex::new(None)),
+            discovered_peripherals: Arc::new(RwLock::new(HashMap::new())),
+            services_cache: Arc::new(RwLock::new(HashMap::new())),
+            characteristic_values: Arc::new(RwLock::new(HashMap::new())),
+            notification_handlers: Arc::new(RwLock::new(HashMap::new())),
+            event_sender,
+            event_receiver: Arc::new(Mutex::new(Some(event_receiver))),
+        })
+    }
+    
+    /// Start event processing loop (must be called after initialization)
+    pub async fn start_event_loop(&self) -> Result<()> {
+        let mut receiver = self.event_receiver.lock().await.take()
+            .ok_or_else(|| anyhow!("Event loop already started"))?;
+        
+        let peripherals = self.discovered_peripherals.clone();
+        let services_cache = self.services_cache.clone();
+        let char_values = self.characteristic_values.clone();
+        let notification_handlers = self.notification_handlers.clone();
+        
+        tokio::spawn(async move {
+            while let Some(event) = receiver.recv().await {
+                match event {
+                    CoreBluetoothEvent::StateChanged(state) => {
+                        info!("📡 Bluetooth state: {:?}", state);
+                    }
+                    CoreBluetoothEvent::PeripheralDiscovered { identifier, name, rssi, advertisement_data, peripheral_ptr } => {
+                        info!("🔍 Discovered: {} ({}), RSSI: {}", 
+                              name.as_deref().unwrap_or("Unknown"), identifier, rssi);
+                        
+                        let mut cache = peripherals.write().await;
+                        cache.insert(identifier.clone(), CBPeripheralHandle {
+                            identifier,
+                            name,
+                            rssi,
+                            advertisement_data,
+                            services: Vec::new(),
+                            peripheral_ptr: Some(peripheral_ptr),
+                        });
+                    }
+                    CoreBluetoothEvent::PeripheralConnected(id) => {
+                        info!("✅ Connected: {}", id);
+                    }
+                    CoreBluetoothEvent::PeripheralDisconnected(id) => {
+                        info!("❌ Disconnected: {}", id);
+                    }
+                    CoreBluetoothEvent::ServicesDiscovered { peripheral_id, services } => {
+                        info!("📋 Services discovered for {}: {} services", peripheral_id, services.len());
+                        let mut cache = services_cache.write().await;
+                        cache.insert(peripheral_id, services);
+                    }
+                    CoreBluetoothEvent::CharacteristicValueUpdated { peripheral_id, characteristic_uuid, value } => {
+                        debug!("📖 Characteristic updated: {} / {} ({} bytes)", 
+                               peripheral_id, characteristic_uuid, value.len());
+                        
+                        // Store value
+                        let key = format!("{}:{}", peripheral_id, characteristic_uuid);
+                        let mut values = char_values.write().await;
+                        values.insert(key.clone(), value.clone());
+                        
+                        // Call notification handler if registered
+                        let handlers = notification_handlers.read().await;
+                        if let Some(handler) = handlers.get(&key) {
+                            handler(value);
+                        }
+                    }
+                    CoreBluetoothEvent::WriteCompleted { peripheral_id, characteristic_uuid } => {
+                        debug!("✍️ Write completed: {} / {}", peripheral_id, characteristic_uuid);
+                    }
+                    CoreBluetoothEvent::NotificationStateChanged { peripheral_id, characteristic_uuid, enabled } => {
+                        info!("🔔 Notifications {} for {} / {}", 
+                              if enabled { "enabled" } else { "disabled" }, 
+                              peripheral_id, characteristic_uuid);
+                    }
+                    CoreBluetoothEvent::AdvertisingStarted => {
+                        info!("📢 Advertising started");
+                    }
+                    CoreBluetoothEvent::ServiceAdded(uuid) => {
+                        info!("➕ Service added: {}", uuid);
+                    }
+                    CoreBluetoothEvent::ReadRequest { central_id, characteristic_uuid } => {
+                        debug!("📖 Read request from {} for {}", central_id, characteristic_uuid);
+                    }
+                    CoreBluetoothEvent::WriteRequest { central_id, characteristic_uuid, value } => {
+                        debug!("✍️ Write request from {} for {} ({} bytes)", 
+                               central_id, characteristic_uuid, value.len());
+                    }
+                    _ => {}
+                }
+            }
+        });
+        
+        Ok(())
+    }
+    
+    /// Initialize Core Bluetooth central manager
+    pub async fn initialize_central_manager(&self) -> Result<()> {
+        let mut central = self.central_manager.lock().await;
+        
+        // Create delegate with event channel sender
+        let event_tx = self.event_sender.clone();
+        let delegate = CBCentralManagerDelegate {
+            event_sender: event_tx,
+        };
+        
+        // Initialize CBCentralManager via native API
+        let manager = self.create_central_manager(delegate).await?;
+        *central = Some(manager);
+        
+        info!("✅ Core Bluetooth central manager initialized");
+        Ok(())
+    }
+    
+    /// Initialize Core Bluetooth peripheral manager for GATT server
+    pub async fn initialize_peripheral_manager(&self) -> Result<()> {
+        let mut peripheral = self.peripheral_manager.lock().await;
+        
+        let event_tx = self.event_sender.clone();
+        let delegate = CBPeripheralManagerDelegate {
+            event_sender: event_tx,
+        };
+        
+        let manager = self.create_peripheral_manager(delegate).await?;
+        *peripheral = Some(manager);
+        
+        info!("✅ Core Bluetooth peripheral manager initialized");
+        Ok(())
+    }
+    
+    /// Start scanning for BLE peripherals
+    pub async fn start_scan(&self, service_uuids: Option<&[&str]>) -> Result<()> {
+        let central = self.central_manager.lock().await;
+        
+        if let Some(manager) = central.as_ref() {
+            info!("🔍 Starting BLE scan with Core Bluetooth");
+            
+            // Call native CBCentralManager scanForPeripheralsWithServices
+            self.native_start_scan(manager, service_uuids).await?;
+            
+            info!("📡 BLE scan started successfully");
+            Ok(())
+        } else {
+            Err(anyhow!("Central manager not initialized"))
+        }
+    }
+    
+    /// Stop BLE scanning
+    pub async fn stop_scan(&self) -> Result<()> {
+        let central = self.central_manager.lock().await;
+        
+        if let Some(manager) = central.as_ref() {
+            self.native_stop_scan(manager).await?;
+            info!("⏹️ BLE scan stopped");
+            Ok(())
+        } else {
+            Err(anyhow!("Central manager not initialized"))
+        }
+    }
+    
+    /// Connect to a discovered peripheral
+    pub async fn connect_to_peripheral(&self, identifier: &str) -> Result<()> {
+        let central = self.central_manager.lock().await;
+        let peripherals = self.discovered_peripherals.read().await;
+        
+        if let (Some(manager), Some(peripheral)) = (central.as_ref(), peripherals.get(identifier)) {
+            info!("🔗 Connecting to peripheral: {}", identifier);
+            
+            self.native_connect_peripheral(manager, peripheral).await?;
+            
+            info!("✅ Connection initiated to: {}", identifier);
+            Ok(())
+        } else {
+            Err(anyhow!("Central manager not initialized or peripheral not found"))
+        }
+    }
+    
+    /// Disconnect from peripheral
+    pub async fn disconnect_from_peripheral(&self, identifier: &str) -> Result<()> {
+        let central = self.central_manager.lock().await;
+        let peripherals = self.discovered_peripherals.read().await;
+        
+        if let (Some(manager), Some(peripheral)) = (central.as_ref(), peripherals.get(identifier)) {
+            self.native_disconnect_peripheral(manager, peripheral).await?;
+            info!("❌ Disconnected from: {}", identifier);
+            Ok(())
+        } else {
+            Err(anyhow!("Central manager not initialized or peripheral not found"))
+        }
+    }
+    
+    /// Discover services on connected peripheral
+    pub async fn discover_services(&self, identifier: &str) -> Result<Vec<String>> {
+        let peripherals = self.discovered_peripherals.read().await;
+        
+        if let Some(peripheral) = peripherals.get(identifier) {
+            info!("🔍 Discovering services for: {}", identifier);
+            
+            let services = self.native_discover_services(peripheral).await?;
+            
+            // Cache services
+            let mut cache = self.services_cache.write().await;
+            cache.insert(identifier.to_string(), services.clone());
+            
+            let service_uuids: Vec<String> = services.iter().map(|s| s.uuid.clone()).collect();
+            info!("✅ Discovered {} services for {}", service_uuids.len(), identifier);
+            
+            Ok(service_uuids)
+        } else {
+            Err(anyhow!("Peripheral not found: {}", identifier))
+        }
+    }
+    
+    /// Read from GATT characteristic
+    pub async fn read_characteristic(&self, identifier: &str, service_uuid: &str, char_uuid: &str) -> Result<Vec<u8>> {
+        let peripherals = self.discovered_peripherals.read().await;
+        let services_cache = self.services_cache.read().await;
+        
+        if let (Some(_peripheral), Some(services)) = (peripherals.get(identifier), services_cache.get(identifier)) {
+            // Find the characteristic
+            for service in services {
+                if service.uuid == service_uuid {
+                    for characteristic in &service.characteristics {
+                        if characteristic.uuid == char_uuid {
+                            let data = self.native_read_characteristic(identifier, service_uuid, char_uuid).await?;
+                            
+                            info!("📖 Read {} bytes from characteristic {}", data.len(), char_uuid);
+                            return Ok(data);
+                        }
+                    }
+                }
+            }
+            
+            Err(anyhow!("Characteristic not found: {}/{}", service_uuid, char_uuid))
+        } else {
+            Err(anyhow!("Peripheral or services not found: {}", identifier))
+        }
+    }
+    
+    /// Write to GATT characteristic
+    pub async fn write_characteristic(&self, identifier: &str, service_uuid: &str, char_uuid: &str, data: &[u8]) -> Result<()> {
+        let peripherals = self.discovered_peripherals.read().await;
+        
+        if let Some(_peripheral) = peripherals.get(identifier) {
+            self.native_write_characteristic(identifier, service_uuid, char_uuid, data).await?;
+            
+            info!("✍️ Wrote {} bytes to characteristic {}", data.len(), char_uuid);
+            Ok(())
+        } else {
+            Err(anyhow!("Peripheral not found: {}", identifier))
+        }
+    }
+    
+    /// Enable notifications for characteristic
+    pub async fn enable_notifications(&self, identifier: &str, char_uuid: &str) -> Result<()> {
+        let peripherals = self.discovered_peripherals.read().await;
+        
+        if let Some(_peripheral) = peripherals.get(identifier) {
+            self.native_enable_notifications(identifier, char_uuid).await?;
+            
+            info!("🔔 Enabled notifications for characteristic: {}", char_uuid);
+            Ok(())
+        } else {
+            Err(anyhow!("Peripheral not found: {}", identifier))
+        }
+    }
+    
+    /// Start advertising as GATT server
+    pub async fn start_advertising(&self, service_uuid: &str, characteristics: &[(&str, &[u8])]) -> Result<()> {
+        let peripheral = self.peripheral_manager.lock().await;
+        
+        if let Some(manager) = peripheral.as_ref() {
+            info!("📢 Starting GATT server advertising");
+            
+            self.native_start_advertising(manager, service_uuid, characteristics).await?;
+            
+            info!("✅ GATT advertising started with service: {}", service_uuid);
+            Ok(())
+        } else {
+            Err(anyhow!("Peripheral manager not initialized"))
+        }
+    }
+    
+    // Native Core Bluetooth integration functions
+    // Real FFI implementation using Objective-C runtime
+    
+    /// Create Objective-C delegate object for CBCentralManager
+    /// This creates a custom NSObject subclass that implements CBCentralManagerDelegate protocol
+    unsafe fn create_central_manager_delegate_object(event_sender: tokio::sync::mpsc::UnboundedSender<CoreBluetoothEvent>) -> *mut Object {
+        // For now, we'll use a simple approach without creating a custom class
+        // In production, you'd use objc::declare::ClassDecl to create a proper delegate class
+        // with protocol implementations
+        
+        // TODO: Implement proper delegate class with protocol methods:
+        // - centralManagerDidUpdateState:
+        // - centralManager:didDiscoverPeripheral:advertisementData:RSSI:
+        // - centralManager:didConnectPeripheral:
+        // - centralManager:didDisconnectPeripheral:error:
+        
+        // For now, return nil and handle events synchronously
+        std::ptr::null_mut()
+    }
+    
+    /// Create Objective-C delegate object for CBPeripheralManager
+    unsafe fn create_peripheral_manager_delegate_object(event_sender: tokio::sync::mpsc::UnboundedSender<CoreBluetoothEvent>) -> *mut Object {
+        // TODO: Implement proper delegate class with protocol methods:
+        // - peripheralManagerDidUpdateState:
+        // - peripheralManager:didAddService:error:
+        // - peripheralManagerDidStartAdvertising:error:
+        // - peripheralManager:didReceiveReadRequest:
+        // - peripheralManager:didReceiveWriteRequests:
+        
+        std::ptr::null_mut()
+    }
+    
+    async fn create_central_manager(&self, delegate: CBCentralManagerDelegate) -> Result<CBCentralManagerHandle> {
+        info!("🔄 Creating CBCentralManager via FFI");
+        
+        unsafe {
+            // Register delegate classes if not already done
+            macos_delegate::register_delegate_classes();
+            
+            // Create delegate instance with event sender
+            let delegate_obj = macos_delegate::create_central_manager_delegate_instance(
+                delegate.event_sender.clone()
+            );
+            
+            // Get CBCentralManager class
+            let cls = Class::get("CBCentralManager").ok_or_else(|| {
+                anyhow!("CBCentralManager class not found - Core Bluetooth framework missing")
+            })?;
+            
+            // Allocate and initialize CBCentralManager with delegate
+            // [CBCentralManager alloc]
+            let manager: *mut Object = msg_send![cls, alloc];
+            
+            // [manager initWithDelegate:delegate queue:nil]
+            let manager: *mut Object = msg_send![manager, initWithDelegate:delegate_obj queue:nil];
+            
+            if manager.is_null() {
+                return Err(anyhow!("Failed to create CBCentralManager"));
+            }
+            
+            info!("✅ CBCentralManager created successfully with delegate");
+            
+            Ok(CBCentralManagerHandle {
+                manager_ptr: manager,
+                delegate,
+            })
+        }
+    }
+    
+    async fn create_peripheral_manager(&self, delegate: CBPeripheralManagerDelegate) -> Result<CBPeripheralManagerHandle> {
+        info!("🔄 Creating CBPeripheralManager via FFI");
+        
+        unsafe {
+            // Register delegate classes if not already done
+            macos_delegate::register_delegate_classes();
+            
+            // Create delegate instance with event sender
+            let delegate_obj = macos_delegate::create_peripheral_manager_delegate_instance(
+                delegate.event_sender.clone()
+            );
+            
+            // Get CBPeripheralManager class
+            let cls = Class::get("CBPeripheralManager").ok_or_else(|| {
+                anyhow!("CBPeripheralManager class not found - Core Bluetooth framework missing")
+            })?;
+            
+            // Allocate and initialize with delegate
+            let manager: *mut Object = msg_send![cls, alloc];
+            let manager: *mut Object = msg_send![manager, initWithDelegate:delegate_obj queue:nil];
+            
+            if manager.is_null() {
+                return Err(anyhow!("Failed to create CBPeripheralManager"));
+            }
+            
+            info!("✅ CBPeripheralManager created successfully with delegate");
+            
+            Ok(CBPeripheralManagerHandle {
+                manager_ptr: manager,
+                delegate,
+            })
+        }
+    }
+    
+    async fn native_start_scan(&self, manager: &CBCentralManagerHandle, service_uuids: Option<&[&str]>) -> Result<()> {
+        info!("📡 FFI: Starting peripheral scan");
+        
+        unsafe {
+            // Check manager state first
+            let state: i64 = msg_send![manager.manager_ptr, state];
+            
+            // CBManagerState enum: Unknown=0, Resetting=1, Unsupported=2, Unauthorized=3, PoweredOff=4, PoweredOn=5
+            if state != 5 {
+                return Err(anyhow!("Bluetooth not powered on (state: {})", state));
+            }
+            
+            // Build service UUID array if provided
+            let ns_array = if let Some(uuids) = service_uuids {
+                info!("🎯 Scanning for services: {:?}", uuids);
+                
+                // Get CBUUID class
+                let cbuuid_cls = Class::get("CBUUID").ok_or_else(|| {
+                    anyhow!("CBUUID class not found")
+                })?;
+                
+                // Convert service UUIDs to CBUUID objects
+                let mut uuid_objects: Vec<*mut Object> = Vec::new();
+                for uuid_str in uuids {
+                    let ns_string = NSString::from_str(uuid_str);
+                    let cbuuid: *mut Object = msg_send![cbuuid_cls, UUIDWithString: ns_string];
+                    uuid_objects.push(cbuuid);
+                }
+                
+                // Create NSArray with UUIDs
+                let array_cls = Class::get("NSArray").ok_or_else(|| {
+                    anyhow!("NSArray class not found")
+                })?;
+                let array: *mut Object = msg_send![array_cls, arrayWithObjects:uuid_objects.as_ptr() count:uuid_objects.len()];
+                Some(array)
+            } else {
+                info!("🌐 Scanning for all peripherals");
+                None
+            };
+            
+            // Start scanning: [centralManager scanForPeripheralsWithServices:serviceUUIDs options:nil]
+            let _: () = match ns_array {
+                Some(arr) => msg_send![manager.manager_ptr, scanForPeripheralsWithServices:arr options:nil],
+                None => msg_send![manager.manager_ptr, scanForPeripheralsWithServices:nil options:nil],
+            };
+            
+            info!("✅ Scan started successfully");
+        }
+        
+        Ok(())
+    }
+    
+    async fn native_stop_scan(&self, manager: &CBCentralManagerHandle) -> Result<()> {
+        info!("⏹️ FFI: Stopping peripheral scan");
+        
+        unsafe {
+            // [centralManager stopScan]
+            let _: () = msg_send![manager.manager_ptr, stopScan];
+        }
+        
+        Ok(())
+    }
+    
+    async fn native_connect_peripheral(&self, manager: &CBCentralManagerHandle, peripheral: &CBPeripheralHandle) -> Result<()> {
+        info!("🔗 FFI: Connecting to peripheral {}", peripheral.identifier);
+        
+        unsafe {
+            // Get the peripheral object pointer
+            if let Some(peripheral_ptr) = peripheral.peripheral_ptr {
+                let peripheral_obj = peripheral_ptr as *mut Object;
+                
+                // [centralManager connectPeripheral:peripheral options:nil]
+                let _: () = msg_send![manager.manager_ptr, connectPeripheral:peripheral_obj options:nil];
+                
+                info!("✅ Connection initiated");
+            } else {
+                return Err(anyhow!("Peripheral object pointer not available"));
+            }
+        }
+        
+        Ok(())
+    }
+    
+    async fn native_disconnect_peripheral(&self, manager: &CBCentralManagerHandle, peripheral: &CBPeripheralHandle) -> Result<()> {
+        info!("❌ FFI: Disconnecting from peripheral {}", peripheral.identifier);
+        
+        unsafe {
+            if let Some(peripheral_ptr) = peripheral.peripheral_ptr {
+                let peripheral_obj = peripheral_ptr as *mut Object;
+                
+                // [centralManager cancelPeripheralConnection:peripheral]
+                let _: () = msg_send![manager.manager_ptr, cancelPeripheralConnection:peripheral_obj];
+                
+                info!("✅ Disconnection initiated");
+            } else {
+                return Err(anyhow!("Peripheral object pointer not available"));
+            }
+        }
+        
+        Ok(())
+    }
+    
+    async fn native_discover_services(&self, peripheral: &CBPeripheralHandle) -> Result<Vec<CBServiceHandle>> {
+        info!("🔍 FFI: Discovering services for {}", peripheral.identifier);
+        
+        unsafe {
+            if let Some(peripheral_ptr) = peripheral.peripheral_ptr {
+                let peripheral_obj = peripheral_ptr as *mut Object;
+                
+                // [peripheral discoverServices:nil] - discovers all services
+                let _: () = msg_send![peripheral_obj, discoverServices:nil];
+                
+                // In real implementation, we'd wait for delegate callback
+                // For now, retrieve services synchronously
+                let services: *mut Object = msg_send![peripheral_obj, services];
+                
+                if services.is_null() {
+                    info!("⚠️ No services discovered yet");
+                    return Ok(Vec::new());
+                }
+                
+                // Get NSArray count
+                let count: usize = msg_send![services, count];
+                info!("📋 Found {} services", count);
+                
+                let mut service_handles = Vec::new();
+                
+                // Iterate through services
+                for i in 0..count {
+                    let service: *mut Object = msg_send![services, objectAtIndex:i];
+                    
+                    // Get service UUID
+                    let uuid_obj: *mut Object = msg_send![service, UUID];
+                    let uuid_str: *mut Object = msg_send![uuid_obj, UUIDString];
+                    let uuid_cstr: *const i8 = msg_send![uuid_str, UTF8String];
+                    let uuid = std::ffi::CStr::from_ptr(uuid_cstr)
+                        .to_string_lossy()
+                        .to_string();
+                    
+                    // Check if primary service
+                    let is_primary: bool = msg_send![service, isPrimary];
+                    
+                    service_handles.push(CBServiceHandle {
+                        uuid,
+                        is_primary,
+                        characteristics: Vec::new(), // Will be populated when discovering characteristics
+                    });
+                }
+                
+                Ok(service_handles)
+            } else {
+                Err(anyhow!("Peripheral object pointer not available"))
+            }
+        }
+    }
+    
+    async fn native_read_characteristic(&self, identifier: &str, service_uuid: &str, char_uuid: &str) -> Result<Vec<u8>> {
+        info!("📖 FFI: Reading characteristic {} from service {}", char_uuid, service_uuid);
+        
+        unsafe {
+            // Get peripheral from cache
+            let peripherals = self.discovered_peripherals.read().await;
+            let peripheral = peripherals.get(identifier)
+                .ok_or_else(|| anyhow!("Peripheral not found"))?;
+            
+            if let Some(peripheral_ptr) = peripheral.peripheral_ptr {
+                let peripheral_obj = peripheral_ptr as *mut Object;
+                
+                // Get services
+                let services: *mut Object = msg_send![peripheral_obj, services];
+                if services.is_null() {
+                    return Err(anyhow!("No services available"));
+                }
+                
+                // Find matching service
+                let service_count: usize = msg_send![services, count];
+                let mut target_service: Option<*mut Object> = None;
+                
+                for i in 0..service_count {
+                    let service: *mut Object = msg_send![services, objectAtIndex:i];
+                    let uuid_obj: *mut Object = msg_send![service, UUID];
+                    let uuid_str: *mut Object = msg_send![uuid_obj, UUIDString];
+                    let uuid_cstr: *const i8 = msg_send![uuid_str, UTF8String];
+                    let uuid = std::ffi::CStr::from_ptr(uuid_cstr).to_string_lossy();
+                    
+                    if uuid.eq_ignore_ascii_case(service_uuid) {
+                        target_service = Some(service);
+                        break;
+                    }
+                }
+                
+                let service = target_service.ok_or_else(|| anyhow!("Service not found"))?;
+                
+                // Get characteristics
+                let characteristics: *mut Object = msg_send![service, characteristics];
+                if characteristics.is_null() {
+                    return Err(anyhow!("No characteristics available"));
+                }
+                
+                // Find matching characteristic
+                let char_count: usize = msg_send![characteristics, count];
+                let mut target_char: Option<*mut Object> = None;
+                
+                for i in 0..char_count {
+                    let characteristic: *mut Object = msg_send![characteristics, objectAtIndex:i];
+                    let uuid_obj: *mut Object = msg_send![characteristic, UUID];
+                    let uuid_str: *mut Object = msg_send![uuid_obj, UUIDString];
+                    let uuid_cstr: *const i8 = msg_send![uuid_str, UTF8String];
+                    let uuid = std::ffi::CStr::from_ptr(uuid_cstr).to_string_lossy();
+                    
+                    if uuid.eq_ignore_ascii_case(char_uuid) {
+                        target_char = Some(characteristic);
+                        break;
+                    }
+                }
+                
+                let characteristic = target_char.ok_or_else(|| anyhow!("Characteristic not found"))?;
+                
+                // Read value: [peripheral readValueForCharacteristic:characteristic]
+                let _: () = msg_send![peripheral_obj, readValueForCharacteristic:characteristic];
+                
+                // In real implementation, we'd wait for delegate callback
+                // For now, retrieve value synchronously
+                let value_data: *mut Object = msg_send![characteristic, value];
+                
+                if value_data.is_null() {
+                    return Ok(Vec::new());
+                }
+                
+                // Convert NSData to Vec<u8>
+                let length: usize = msg_send![value_data, length];
+                let bytes: *const u8 = msg_send![value_data, bytes];
+                
+                let mut data = vec![0u8; length];
+                std::ptr::copy_nonoverlapping(bytes, data.as_mut_ptr(), length);
+                
+                info!("✅ Read {} bytes", data.len());
+                Ok(data)
+            } else {
+                Err(anyhow!("Peripheral object pointer not available"))
+            }
+        }
+    }
+    
+    async fn native_write_characteristic(&self, identifier: &str, service_uuid: &str, char_uuid: &str, data: &[u8]) -> Result<()> {
+        info!("✍️ FFI: Writing {} bytes to characteristic {} in service {}", data.len(), char_uuid, service_uuid);
+        
+        unsafe {
+            // Get peripheral from cache
+            let peripherals = self.discovered_peripherals.read().await;
+            let peripheral = peripherals.get(identifier)
+                .ok_or_else(|| anyhow!("Peripheral not found"))?;
+            
+            if let Some(peripheral_ptr) = peripheral.peripheral_ptr {
+                let peripheral_obj = peripheral_ptr as *mut Object;
+                
+                // Find service and characteristic (similar to read_characteristic)
+                let services: *mut Object = msg_send![peripheral_obj, services];
+                if services.is_null() {
+                    return Err(anyhow!("No services available"));
+                }
+                
+                // Find service
+                let service_count: usize = msg_send![services, count];
+                let mut target_service: Option<*mut Object> = None;
+                
+                for i in 0..service_count {
+                    let service: *mut Object = msg_send![services, objectAtIndex:i];
+                    let uuid_obj: *mut Object = msg_send![service, UUID];
+                    let uuid_str: *mut Object = msg_send![uuid_obj, UUIDString];
+                    let uuid_cstr: *const i8 = msg_send![uuid_str, UTF8String];
+                    let uuid = std::ffi::CStr::from_ptr(uuid_cstr).to_string_lossy();
+                    
+                    if uuid.eq_ignore_ascii_case(service_uuid) {
+                        target_service = Some(service);
+                        break;
+                    }
+                }
+                
+                let service = target_service.ok_or_else(|| anyhow!("Service not found"))?;
+                
+                // Find characteristic
+                let characteristics: *mut Object = msg_send![service, characteristics];
+                if characteristics.is_null() {
+                    return Err(anyhow!("No characteristics available"));
+                }
+                
+                let char_count: usize = msg_send![characteristics, count];
+                let mut target_char: Option<*mut Object> = None;
+                
+                for i in 0..char_count {
+                    let characteristic: *mut Object = msg_send![characteristics, objectAtIndex:i];
+                    let uuid_obj: *mut Object = msg_send![characteristic, UUID];
+                    let uuid_str: *mut Object = msg_send![uuid_obj, UUIDString];
+                    let uuid_cstr: *const i8 = msg_send![uuid_str, UTF8String];
+                    let uuid = std::ffi::CStr::from_ptr(uuid_cstr).to_string_lossy();
+                    
+                    if uuid.eq_ignore_ascii_case(char_uuid) {
+                        target_char = Some(characteristic);
+                        break;
+                    }
+                }
+                
+                let characteristic = target_char.ok_or_else(|| anyhow!("Characteristic not found"))?;
+                
+                // Create NSData from bytes
+                let ns_data_cls = Class::get("NSData").ok_or_else(|| anyhow!("NSData class not found"))?;
+                let ns_data: *mut Object = msg_send![ns_data_cls, dataWithBytes:data.as_ptr() length:data.len()];
+                
+                // Write value: [peripheral writeValue:data forCharacteristic:characteristic type:CBCharacteristicWriteWithResponse]
+                // type: 0 = CBCharacteristicWriteWithResponse, 1 = CBCharacteristicWriteWithoutResponse
+                let write_type: i32 = 0; // With response
+                let _: () = msg_send![peripheral_obj, writeValue:ns_data forCharacteristic:characteristic type:write_type];
+                
+                info!("✅ Write initiated");
+                Ok(())
+            } else {
+                Err(anyhow!("Peripheral object pointer not available"))
+            }
+        }
+    }
+    
+    async fn native_enable_notifications(&self, identifier: &str, char_uuid: &str) -> Result<()> {
+        info!("🔔 FFI: Enabling notifications for characteristic {}", char_uuid);
+        
+        unsafe {
+            // Get peripheral from cache
+            let peripherals = self.discovered_peripherals.read().await;
+            let peripheral = peripherals.get(identifier)
+                .ok_or_else(|| anyhow!("Peripheral not found"))?;
+            
+            if let Some(peripheral_ptr) = peripheral.peripheral_ptr {
+                let peripheral_obj = peripheral_ptr as *mut Object;
+                
+                // Get all services
+                let services: *mut Object = msg_send![peripheral_obj, services];
+                if services.is_null() {
+                    return Err(anyhow!("No services available"));
+                }
+                
+                // Search all services for the characteristic
+                let service_count: usize = msg_send![services, count];
+                
+                for i in 0..service_count {
+                    let service: *mut Object = msg_send![services, objectAtIndex:i];
+                    let characteristics: *mut Object = msg_send![service, characteristics];
+                    
+                    if characteristics.is_null() {
+                        continue;
+                    }
+                    
+                    let char_count: usize = msg_send![characteristics, count];
+                    
+                    for j in 0..char_count {
+                        let characteristic: *mut Object = msg_send![characteristics, objectAtIndex:j];
+                        let uuid_obj: *mut Object = msg_send![characteristic, UUID];
+                        let uuid_str: *mut Object = msg_send![uuid_obj, UUIDString];
+                        let uuid_cstr: *const i8 = msg_send![uuid_str, UTF8String];
+                        let uuid = std::ffi::CStr::from_ptr(uuid_cstr).to_string_lossy();
+                        
+                        if uuid.eq_ignore_ascii_case(char_uuid) {
+                            // Found the characteristic, enable notifications
+                            // [peripheral setNotifyValue:YES forCharacteristic:characteristic]
+                            let yes: bool = true;
+                            let _: () = msg_send![peripheral_obj, setNotifyValue:yes forCharacteristic:characteristic];
+                            
+                            info!("✅ Notifications enabled");
+                            return Ok(());
+                        }
+                    }
+                }
+                
+                Err(anyhow!("Characteristic not found: {}", char_uuid))
+            } else {
+                Err(anyhow!("Peripheral object pointer not available"))
+            }
+        }
+    }
+    
+    async fn native_start_advertising(&self, manager: &CBPeripheralManagerHandle, service_uuid: &str, characteristics: &[(&str, &[u8])]) -> Result<()> {
+        info!("📢 FFI: Starting GATT advertising for service {}", service_uuid);
+        
+        unsafe {
+            // Get CBUUID class
+            let cbuuid_cls = Class::get("CBUUID").ok_or_else(|| anyhow!("CBUUID class not found"))?;
+            
+            // Create service UUID
+            let service_uuid_ns = NSString::from_str(service_uuid);
+            let service_cbuuid: *mut Object = msg_send![cbuuid_cls, UUIDWithString:service_uuid_ns];
+            
+            // Get CBMutableService class
+            let mutable_service_cls = Class::get("CBMutableService").ok_or_else(|| {
+                anyhow!("CBMutableService class not found")
+            })?;
+            
+            // Create mutable service: [[CBMutableService alloc] initWithType:UUID primary:YES]
+            let service: *mut Object = msg_send![mutable_service_cls, alloc];
+            let is_primary: bool = true;
+            let service: *mut Object = msg_send![service, initWithType:service_cbuuid primary:is_primary];
+            
+            // Create characteristics
+            if !characteristics.is_empty() {
+                let mutable_char_cls = Class::get("CBMutableCharacteristic").ok_or_else(|| {
+                    anyhow!("CBMutableCharacteristic class not found")
+                })?;
+                
+                let mut char_objects: Vec<*mut Object> = Vec::new();
+                
+                for (char_uuid, initial_value) in characteristics {
+                    // Create characteristic UUID
+                    let char_uuid_ns = NSString::from_str(char_uuid);
+                    let char_cbuuid: *mut Object = msg_send![cbuuid_cls, UUIDWithString:char_uuid_ns];
+                    
+                    // Create NSData for initial value
+                    let ns_data_cls = Class::get("NSData").ok_or_else(|| anyhow!("NSData class not found"))?;
+                    let value_data: *mut Object = msg_send![ns_data_cls, dataWithBytes:initial_value.as_ptr() length:initial_value.len()];
+                    
+                    // CBCharacteristicProperties: Read=0x02, Write=0x08, Notify=0x10
+                    let properties: u32 = 0x02 | 0x08 | 0x10; // Read | Write | Notify
+                    
+                    // CBAttributePermissions: Readable=0x01, Writeable=0x02
+                    let permissions: u32 = 0x01 | 0x02; // Readable | Writeable
+                    
+                    // Create characteristic: [[CBMutableCharacteristic alloc] initWithType:UUID properties:props value:data permissions:perms]
+                    let characteristic: *mut Object = msg_send![mutable_char_cls, alloc];
+                    let characteristic: *mut Object = msg_send![
+                        characteristic,
+                        initWithType:char_cbuuid
+                        properties:properties
+                        value:value_data
+                        permissions:permissions
+                    ];
+                    
+                    char_objects.push(characteristic);
+                }
+                
+                // Set characteristics on service
+                let array_cls = Class::get("NSArray").ok_or_else(|| anyhow!("NSArray class not found"))?;
+                let char_array: *mut Object = msg_send![array_cls, arrayWithObjects:char_objects.as_ptr() count:char_objects.len()];
+                let _: () = msg_send![service, setCharacteristics:char_array];
+            }
+            
+            // Add service to peripheral manager: [peripheralManager addService:service]
+            let _: () = msg_send![manager.manager_ptr, addService:service];
+            
+            // Start advertising
+            // Create advertisement dictionary
+            let dict_cls = Class::get("NSDictionary").ok_or_else(|| anyhow!("NSDictionary class not found"))?;
+            let service_uuid_key = NSString::from_str("kCBAdvDataServiceUUIDs");
+            let array_cls = Class::get("NSArray").ok_or_else(|| anyhow!("NSArray class not found"))?;
+            let service_array: *mut Object = msg_send![array_cls, arrayWithObjects:&service_cbuuid count:1];
+            
+            let ad_data: *mut Object = msg_send![dict_cls, 
+                dictionaryWithObjects:&service_array 
+                forKeys:&service_uuid_key 
+                count:1
+            ];
+            
+            // [peripheralManager startAdvertising:advertisementData]
+            let _: () = msg_send![manager.manager_ptr, startAdvertising:ad_data];
+            
+            info!("✅ GATT advertising started");
+            Ok(())
+        }
+    }
+    
+    /// Start ZHTP mesh advertising with the provided advertisement data
+    pub async fn start_mesh_advertising(&self, adv_data: &[u8]) -> Result<()> {
+        info!("📢 macOS: Starting ZHTP mesh advertising via Core Bluetooth");
+        
+        // Check if we have a peripheral manager
+        let manager_guard = self.peripheral_manager.lock().await;
+        if let Some(ref manager) = *manager_guard {
+            unsafe {
+                // Create advertisement data dictionary
+                let dict_cls = Class::get("NSMutableDictionary").ok_or_else(|| {
+                    anyhow!("NSMutableDictionary class not found")
+                })?;
+                let ad_dict: *mut Object = msg_send![dict_cls, dictionary];
+                
+                // Add local name: "ZHTP-MESH"
+                let local_name_key = NSString::from_str("kCBAdvDataLocalName");
+                let local_name_value = NSString::from_str("ZHTP-MESH");
+                let _: () = msg_send![ad_dict, setObject:local_name_value forKey:local_name_key];
+                
+                // Add service UUID: 6ba7b810-9dad-11d1-80b4-00c04fd430c8
+                let cbuuid_cls = Class::get("CBUUID").ok_or_else(|| anyhow!("CBUUID class not found"))?;
+                let service_uuid_str = "6BA7B810-9DAD-11D1-80B4-00C04FD430C8";
+                let service_uuid_ns = NSString::from_str(service_uuid_str);
+                let service_uuid: *mut Object = msg_send![cbuuid_cls, UUIDWithString:service_uuid_ns];
+                
+                let array_cls = Class::get("NSArray").ok_or_else(|| anyhow!("NSArray class not found"))?;
+                let uuid_array: *mut Object = msg_send![array_cls, arrayWithObject:service_uuid];
+                
+                let services_key = NSString::from_str("kCBAdvDataServiceUUIDs");
+                let _: () = msg_send![ad_dict, setObject:uuid_array forKey:services_key];
+                
+                // Add manufacturer data (contains the ZHTP mesh info)
+                if adv_data.len() > 10 {  // Ensure we have enough data
+                    let ns_data_cls = Class::get("NSData").ok_or_else(|| anyhow!("NSData class not found"))?;
+                    let manufacturer_data: *mut Object = msg_send![ns_data_cls, dataWithBytes:adv_data.as_ptr() length:adv_data.len()];
+                    
+                    let manufacturer_key = NSString::from_str("kCBAdvDataManufacturerData");
+                    let _: () = msg_send![ad_dict, setObject:manufacturer_data forKey:manufacturer_key];
+                }
+                
+                // Start advertising: [peripheralManager startAdvertising:adDict]
+                let _: () = msg_send![manager.manager_ptr, startAdvertising:ad_dict];
+                
+                info!("✅ macOS: ZHTP mesh advertising started with {} bytes", adv_data.len());
+                info!("   Service UUID: {}", service_uuid_str);
+                info!("   Local Name: ZHTP-MESH");
+                return Ok(());
+            }
+        } else {
+            warn!("❌ macOS: Peripheral manager not initialized, cannot start advertising");
+            return Err(anyhow!("Peripheral manager not available"));
+        }
+    }
+}
+
+/// Integration with existing Bluetooth mesh protocol
+#[cfg(target_os = "macos")]
+impl CoreBluetoothManager {
+    /// Convert to tracked device format used by mesh protocol
+    pub async fn get_tracked_devices(&self) -> Result<Vec<TrackedDevice>> {
+        let peripherals = self.discovered_peripherals.read().await;
+        let mut devices = Vec::new();
+        
+        for (id, peripheral) in peripherals.iter() {
+            let device = TrackedDevice {
+                // Use ephemeral address instead of MAC
+                ephemeral_address: format!("eph_{}", &id[0..8]),
+                secure_node_id: [0u8; 32], // Would be derived from actual node ID
+                encrypted_mac_hash: [0u8; 32], // Would be encrypted MAC hash
+                name: peripheral.name.clone(),
+                last_seen: chrono::Utc::now().timestamp() as u64,
+                services: peripheral.services.clone(),
+                characteristics: HashMap::new(), // Would be populated from service discovery
+                signal_strength: peripheral.rssi,
+                connection_state: "discovered".to_string(),
+            };
+            
+            devices.push(device);
+        }
+        
+        Ok(devices)
+    }
+}
+
+/// Memory management: Release CBCentralManager when dropped
+#[cfg(target_os = "macos")]
+impl Drop for CBCentralManagerHandle {
+    fn drop(&mut self) {
+        unsafe {
+            if !self.manager_ptr.is_null() {
+                // Stop any ongoing scan
+                let _: () = msg_send![self.manager_ptr, stopScan];
+                
+                // Release the Objective-C object
+                let _: () = msg_send![self.manager_ptr, release];
+                
+                debug!("🗑️ CBCentralManager released");
+            }
+        }
+    }
+}
+
+/// Memory management: Release CBPeripheralManager when dropped
+#[cfg(target_os = "macos")]
+impl Drop for CBPeripheralManagerHandle {
+    fn drop(&mut self) {
+        unsafe {
+            if !self.manager_ptr.is_null() {
+                // Stop advertising
+                let _: () = msg_send![self.manager_ptr, stopAdvertising];
+                
+                // Release the Objective-C object
+                let _: () = msg_send![self.manager_ptr, release];
+                
+                debug!("🗑️ CBPeripheralManager released");
+            }
+        }
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+pub struct CoreBluetoothManager;
+
+#[cfg(not(target_os = "macos"))]
+impl CoreBluetoothManager {
+    pub fn new() -> anyhow::Result<Self> {
+        Err(anyhow::anyhow!("Core Bluetooth only available on macOS"))
+    }
+}

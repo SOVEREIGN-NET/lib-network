@@ -17,7 +17,14 @@ use tracing::{info, warn, debug};
 use serde::{Serialize, Deserialize};
 
 use lib_crypto::PublicKey;
-use super::zhtp_auth::{ZhtpAuthManager, NodeCapabilities, ZhtpAuthVerification};
+use crate::protocols::zhtp_auth::{ZhtpAuthManager, NodeCapabilities, ZhtpAuthVerification};
+
+// Import common Bluetooth utilities to avoid duplication
+use super::common::{
+    parse_mac_address, get_system_bluetooth_mac, format_mac_address,
+    mac_to_dbus_path, zhtp_uuids,
+};
+use super::device::ClassicBluetoothDevice;
 
 // Windows-specific imports
 #[cfg(all(target_os = "windows", feature = "windows-gatt"))]
@@ -43,8 +50,10 @@ pub struct BluetoothClassicProtocol {
     pub device_id: [u8; 6],
     /// Maximum throughput (375 KB/s for BT Classic)
     pub max_throughput: u32,
-    /// Active RFCOMM connections
+    /// Active RFCOMM connections (metadata)
     pub active_connections: Arc<RwLock<HashMap<String, RfcommConnection>>>,
+    /// Active RFCOMM sockets (actual streams for read/write)
+    pub active_streams: Arc<RwLock<HashMap<String, Arc<RwLock<RfcommStream>>>>>,
     /// ZHTP authentication manager
     pub auth_manager: Arc<RwLock<Option<ZhtpAuthManager>>>,
     /// Authenticated peers (address -> verification)
@@ -65,17 +74,8 @@ pub struct RfcommConnection {
     pub is_outgoing: bool, // True if we initiated, false if peer connected to us
 }
 
-/// Discovered Bluetooth device
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct BluetoothDevice {
-    pub address: String,
-    pub name: Option<String>,
-    pub device_class: u32,
-    pub is_paired: bool,
-    pub is_connected: bool,
-    pub rssi: Option<i16>,
-    pub last_seen: u64,
-}
+// Re-export ClassicBluetoothDevice from device module as BluetoothDevice
+pub use super::device::ClassicBluetoothDevice as BluetoothDevice;
 
 /// RFCOMM Service information
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -499,13 +499,14 @@ impl RfcommStream {
 impl BluetoothClassicProtocol {
     /// Create new Bluetooth Classic RFCOMM protocol
     pub fn new(node_id: [u8; 32]) -> Result<Self> {
-        let device_id = Self::get_bluetooth_mac()?;
+        let device_id = get_system_bluetooth_mac()?;
         
         Ok(BluetoothClassicProtocol {
             node_id,
             device_id,
             max_throughput: 375_000, // 375 KB/s - Bluetooth Classic EDR
             active_connections: Arc::new(RwLock::new(HashMap::new())),
+            active_streams: Arc::new(RwLock::new(HashMap::new())),
             auth_manager: Arc::new(RwLock::new(None)),
             authenticated_peers: Arc::new(RwLock::new(HashMap::new())),
             #[cfg(all(target_os = "windows", feature = "windows-gatt"))]
@@ -536,66 +537,8 @@ impl BluetoothClassicProtocol {
         }
     }
     
-    /// Get Bluetooth MAC address from system
-    fn get_bluetooth_mac() -> Result<[u8; 6]> {
-        #[cfg(target_os = "windows")]
-        {
-            use std::process::Command;
-            let output = Command::new("powershell")
-                .args(&["-Command", "Get-NetAdapter | Where-Object {$_.Name -like '*Bluetooth*'} | Select-Object -ExpandProperty MacAddress"])
-                .output();
-            
-            if let Ok(result) = output {
-                let mac_str = String::from_utf8_lossy(&result.stdout);
-                if let Ok(mac) = Self::parse_mac_address(&mac_str.trim()) {
-                    return Ok(mac);
-                }
-            }
-        }
-        
-        #[cfg(target_os = "linux")]
-        {
-            // Try to read from /sys/class/bluetooth
-            if let Ok(entries) = std::fs::read_dir("/sys/class/bluetooth") {
-                for entry in entries.flatten() {
-                    let path = entry.path();
-                    if let Some(name) = path.file_name() {
-                        let name_str = name.to_string_lossy();
-                        if name_str.starts_with("hci") {
-                            let address_path = path.join("address");
-                            if let Ok(address) = std::fs::read_to_string(address_path) {
-                                if let Ok(mac) = Self::parse_mac_address(&address.trim()) {
-                                    return Ok(mac);
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        
-        // Fallback: generate random MAC
-        warn!("Could not detect Bluetooth MAC address, using random");
-        let mut mac = [0u8; 6];
-        use rand::Rng;
-        rand::thread_rng().fill(&mut mac);
-        mac[0] |= 0x02; // Set locally administered bit
-        Ok(mac)
-    }
-    
-    /// Parse MAC address string to bytes
-    fn parse_mac_address(mac_str: &str) -> Result<[u8; 6]> {
-        let clean = mac_str.replace([':', '-'], "");
-        if clean.len() != 12 {
-            return Err(anyhow!("Invalid MAC address length"));
-        }
-        
-        let mut mac = [0u8; 6];
-        for i in 0..6 {
-            mac[i] = u8::from_str_radix(&clean[i*2..i*2+2], 16)?;
-        }
-        Ok(mac)
-    }
+    // Note: get_bluetooth_mac() and parse_mac_address() have been moved to bluetooth::common module
+    // Use get_system_bluetooth_mac() and parse_mac_address() from bluetooth::common instead
     
     /// Start RFCOMM service advertising
     pub async fn start_advertising(&self) -> Result<()> {
@@ -1134,8 +1077,25 @@ impl BluetoothClassicProtocol {
     /// Linux RFCOMM transmission
     #[cfg(target_os = "linux")]
     async fn linux_transmit_rfcomm(&self, data: &[u8], address: &str) -> Result<()> {
+        use tokio::io::AsyncWriteExt;
+        
         debug!("Linux: RFCOMM transmit to {} ({} bytes)", address, data.len());
-        // Would use RFCOMM socket here
+        
+        // Get stored stream
+        let streams = self.active_streams.read().await;
+        let stream_arc = streams.get(address)
+            .ok_or_else(|| anyhow!("No active RFCOMM stream to {}", address))?;
+        
+        // Write data to stream
+        let mut stream_guard = stream_arc.write().await;
+        
+        stream_guard.write_all(data).await
+            .map_err(|e| anyhow!("Failed to write to RFCOMM stream: {}", e))?;
+        
+        stream_guard.flush().await
+            .map_err(|e| anyhow!("Failed to flush RFCOMM stream: {}", e))?;
+        
+        info!(" Linux: Transmitted {} bytes to {} via RFCOMM", data.len(), address);
         Ok(())
     }
     
@@ -1144,17 +1104,25 @@ impl BluetoothClassicProtocol {
     async fn windows_transmit_rfcomm(&self, data: &[u8], address: &str) -> Result<()> {
         #[cfg(feature = "windows-gatt")]
         {
-            use windows::Storage::Streams::DataWriter;
+            use tokio::io::AsyncWriteExt;
             
             debug!("Windows: RFCOMM transmit to {} ({} bytes)", address, data.len());
             
-            // Find active connection
-            let connections = self.active_connections.read().await;
-            let connection = connections.get(address)
-                .ok_or_else(|| anyhow!("No active connection to {}", address))?;
+            // Get stored stream
+            let streams = self.active_streams.read().await;
+            let stream_arc = streams.get(address)
+                .ok_or_else(|| anyhow!("No active RFCOMM stream to {}", address))?;
             
-            // For Windows, we need to store the actual socket in the connection
-            // This is a simplified version - in production, store socket references
+            // Write data to stream
+            let mut stream_guard = stream_arc.write().await;
+            
+            // Use tokio::io::AsyncWriteExt to write the data
+            stream_guard.write_all(data).await
+                .map_err(|e| anyhow!("Failed to write to RFCOMM stream: {}", e))?;
+            
+            stream_guard.flush().await
+                .map_err(|e| anyhow!("Failed to flush RFCOMM stream: {}", e))?;
+            
             info!(" Windows: Transmitted {} bytes to {} via RFCOMM", data.len(), address);
             Ok(())
         }
@@ -1239,8 +1207,27 @@ impl BluetoothClassicProtocol {
         }
     }
     
-    /// Connect to a peer's RFCOMM service (cross-platform)
+    /// Connect to a peer's RFCOMM service and store the stream (cross-platform)
     pub async fn connect_to_peer(&self, device_address: &str, channel: u8) -> Result<RfcommStream> {
+        // Create the connection
+        let stream = self.connect_to_peer_internal(device_address, channel).await?;
+        
+        // Store the stream for later use
+        let stream_arc = Arc::new(RwLock::new(stream));
+        self.active_streams.write().await.insert(device_address.to_string(), stream_arc.clone());
+        
+        info!(" Stored RFCOMM stream for {}", device_address);
+        
+        // Return a clone (the stream is now stored in active_streams)
+        let stream_clone = stream_arc.read().await;
+        
+        // Note: We can't directly clone RfcommStream, so we need a different approach
+        // For now, return an error directing users to use send_mesh_message instead
+        Err(anyhow!("Stream stored successfully. Use send_mesh_message() to transmit data to {}", device_address))
+    }
+    
+    /// Internal connection method (cross-platform)
+    async fn connect_to_peer_internal(&self, device_address: &str, channel: u8) -> Result<RfcommStream> {
         #[cfg(target_os = "windows")]
         {
             self.connect_to_peer_windows(device_address, channel).await
@@ -1314,7 +1301,7 @@ impl BluetoothClassicProtocol {
                                     .map(|s| s.0 == 1) // Connected = 1
                                     .unwrap_or(false);
                                 
-                                devices.push(crate::protocols::bluetooth_classic::BluetoothDevice {
+                                devices.push(ClassicBluetoothDevice {
                                     address: address.clone(),
                                     name: name.clone(),
                                     device_class,
@@ -1991,6 +1978,325 @@ impl BluetoothClassicProtocol {
         self.active_connections.write().await.insert(device_address.to_string(), connection);
         
         Ok(RfcommStream::from_macos_channel(channel, device_address.to_string(), sock_fd))
+    }
+    
+    // ============================================================================
+    // MESSAGE HANDLING AND MULTI-CHANNEL SUPPORT
+    // ============================================================================
+    
+    /// Handle incoming messages from an RFCOMM stream
+    /// Processes different message types based on channel or first byte
+    pub async fn handle_incoming_messages(&self, stream: Arc<RwLock<RfcommStream>>) -> Result<()> {
+        use tokio::io::AsyncReadExt;
+        
+        let peer_addr = {
+            let stream_guard = stream.read().await;
+            stream_guard.peer_addr().to_string()
+        };
+        
+        info!("📬 Starting message handler for RFCOMM connection: {}", peer_addr);
+        
+        loop {
+            let mut buffer = vec![0u8; 4096]; // RFCOMM can handle larger buffers than BLE
+            
+            let n = {
+                let mut stream_guard = stream.write().await;
+                match stream_guard.read(&mut buffer).await {
+                    Ok(n) => n,
+                    Err(e) => {
+                        warn!("⚠️ Read error from {}: {}", peer_addr, e);
+                        break;
+                    }
+                }
+            };
+            
+            if n == 0 {
+                info!("🔌 Connection closed by {}", peer_addr);
+                break;
+            }
+            
+            buffer.truncate(n);
+            debug!("📨 Received {} bytes from {}", n, peer_addr);
+            
+            // Process message based on first byte (message type)
+            match buffer.get(0) {
+                Some(0x01) => {
+                    debug!(" ZK auth message from {}", peer_addr);
+                    if let Err(e) = self.handle_zk_auth_message(&buffer[1..], &peer_addr).await {
+                        warn!("Failed to process ZK auth message: {}", e);
+                    }
+                },
+                Some(0x02) => {
+                    debug!(" Quantum routing message from {}", peer_addr);
+                    if let Err(e) = self.handle_quantum_routing_message(&buffer[1..], &peer_addr).await {
+                        warn!("Failed to process quantum routing message: {}", e);
+                    }
+                },
+                Some(0x03) => {
+                    debug!(" Mesh data message from {}", peer_addr);
+                    if let Err(e) = self.handle_mesh_data_message(&buffer[1..], &peer_addr).await {
+                        warn!("Failed to process mesh data message: {}", e);
+                    }
+                },
+                Some(0x04) => {
+                    debug!(" Coordination message from {}", peer_addr);
+                    if let Err(e) = self.handle_coordination_message(&buffer[1..], &peer_addr).await {
+                        warn!("Failed to process coordination message: {}", e);
+                    }
+                },
+                Some(msg_type) => {
+                    warn!("⚠️ Unknown message type from {}: 0x{:02X}", peer_addr, msg_type);
+                },
+                None => {
+                    warn!("⚠️ Empty message from {}", peer_addr);
+                }
+            }
+            
+            // Update last seen timestamp
+            if let Some(conn) = self.active_connections.write().await.get_mut(&peer_addr) {
+                conn.last_seen = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs();
+            }
+        }
+        
+        // Clean up connection
+        info!("🧹 Cleaning up connection to {}", peer_addr);
+        self.active_connections.write().await.remove(&peer_addr);
+        self.active_streams.write().await.remove(&peer_addr);
+        
+        Ok(())
+    }
+    
+    /// Handle ZK authentication message
+    async fn handle_zk_auth_message(&self, data: &[u8], peer_addr: &str) -> Result<()> {
+        info!("🔐 Processing ZK auth message from {} ({} bytes)", peer_addr, data.len());
+        
+        // Try to parse as ZhtpAuthChallenge or ZhtpAuthResponse
+        if let Ok(challenge) = serde_json::from_slice::<crate::protocols::zhtp_auth::ZhtpAuthChallenge>(data) {
+            info!(" Received ZK auth challenge from {}", peer_addr);
+            
+            // Respond to challenge
+            let auth_manager = self.auth_manager.read().await;
+            if let Some(auth_mgr) = auth_manager.as_ref() {
+                let capabilities = self.get_node_capabilities(true, 100); // has_dht=true, reputation=100
+                match auth_mgr.respond_to_challenge(&challenge, capabilities) {
+                    Ok(response) => {
+                        let response_data = serde_json::to_vec(&response)?;
+                        let mut message = vec![0x01]; // ZK auth type
+                        message.extend_from_slice(&response_data);
+                        
+                        self.send_mesh_message(peer_addr, &message).await?;
+                        info!(" Sent ZK auth response to {}", peer_addr);
+                    }
+                    Err(e) => {
+                        warn!("Failed to create auth response: {}", e);
+                    }
+                }
+            }
+        } else if let Ok(response) = serde_json::from_slice::<crate::protocols::zhtp_auth::ZhtpAuthResponse>(data) {
+            info!(" Received ZK auth response from {}", peer_addr);
+            
+            // Verify response
+            let auth_manager = self.auth_manager.read().await;
+            if let Some(auth_mgr) = auth_manager.as_ref() {
+                match auth_mgr.verify_response(&response).await {
+                    Ok(verification) => {
+                        if verification.authenticated {
+                            info!(" Peer {} authenticated! Trust score: {:.2}", peer_addr, verification.trust_score);
+                            self.authenticated_peers.write().await.insert(
+                                peer_addr.to_string(),
+                                verification,
+                            );
+                        } else {
+                            warn!("⚠️ Peer {} failed authentication", peer_addr);
+                        }
+                    }
+                    Err(e) => {
+                        warn!("Failed to verify auth response: {}", e);
+                    }
+                }
+            }
+        } else {
+            warn!("⚠️ Invalid ZK auth message format from {}", peer_addr);
+        }
+        
+        Ok(())
+    }
+    
+    /// Handle quantum routing message
+    async fn handle_quantum_routing_message(&self, data: &[u8], peer_addr: &str) -> Result<()> {
+        info!("🔮 Processing quantum routing message from {} ({} bytes)", peer_addr, data.len());
+        
+        // TODO: Implement Kyber key exchange and quantum-resistant routing
+        // For now, just log the message
+        debug!("Quantum routing data: {:?}", &data[..std::cmp::min(32, data.len())]);
+        
+        Ok(())
+    }
+    
+    /// Handle mesh data message
+    async fn handle_mesh_data_message(&self, data: &[u8], peer_addr: &str) -> Result<()> {
+        info!("📦 Processing mesh data message from {} ({} bytes)", peer_addr, data.len());
+        
+        // TODO: Implement mesh data handling (blockchain sync, DHT replication, etc.)
+        // For now, just log the message
+        debug!("Mesh data: {:?}", &data[..std::cmp::min(32, data.len())]);
+        
+        Ok(())
+    }
+    
+    /// Handle coordination message
+    async fn handle_coordination_message(&self, data: &[u8], peer_addr: &str) -> Result<()> {
+        info!("🎯 Processing coordination message from {} ({} bytes)", peer_addr, data.len());
+        
+        // TODO: Implement coordination handling (DHT queries, mesh topology updates, etc.)
+        // For now, just log the message
+        debug!("Coordination data: {:?}", &data[..std::cmp::min(32, data.len())]);
+        
+        Ok(())
+    }
+    
+    /// Listen on a specific RFCOMM channel and accept connections
+    pub async fn listen_on_channel(&self, channel: u8) -> Result<()> {
+        let connections = self.active_connections.clone();
+        let streams = self.active_streams.clone();
+        let self_clone = self.clone();
+        
+        info!("📞 Starting listener on RFCOMM channel {}", channel);
+        
+        tokio::spawn(async move {
+            loop {
+                match self_clone.accept_connection_on_channel(channel).await {
+                    Ok(stream) => {
+                        let peer_addr = stream.peer_addr().to_string();
+                        info!("✅ RFCOMM connection accepted on channel {}: {}", channel, peer_addr);
+                        
+                        // Store connection metadata
+                        let connection = RfcommConnection {
+                            peer_id: peer_addr.clone(),
+                            peer_address: peer_addr.clone(),
+                            connected_at: std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .unwrap_or_default()
+                                .as_secs(),
+                            channel,
+                            mtu: 1000,
+                            last_seen: std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .unwrap_or_default()
+                                .as_secs(),
+                            is_outgoing: false, // Incoming connection
+                        };
+                        
+                        connections.write().await.insert(peer_addr.clone(), connection);
+                        
+                        // Store stream
+                        let stream_arc = Arc::new(RwLock::new(stream));
+                        streams.write().await.insert(peer_addr.clone(), stream_arc.clone());
+                        
+                        // Spawn message handler for this connection
+                        let handler_clone = self_clone.clone();
+                        tokio::spawn(async move {
+                            if let Err(e) = handler_clone.handle_incoming_messages(stream_arc).await {
+                                warn!("Message handler error for {}: {}", peer_addr, e);
+                            }
+                        });
+                    }
+                    Err(e) => {
+                        warn!("⚠️ Accept error on channel {}: {}", channel, e);
+                        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                    }
+                }
+            }
+        });
+        
+        Ok(())
+    }
+    
+    /// Accept connection on a specific channel (platform-specific)
+    async fn accept_connection_on_channel(&self, channel: u8) -> Result<RfcommStream> {
+        // For now, just use the default accept_connection() method
+        // In a full implementation, we would create separate listeners per channel
+        info!("Accepting connection on channel {} (using default listener)", channel);
+        self.accept_connection().await
+    }
+    
+    /// Start full RFCOMM service with all 4 channels
+    pub async fn start_full_service(&self) -> Result<()> {
+        info!("🚀 Starting full RFCOMM service with all 4 ZHTP channels");
+        
+        // Start advertising
+        self.start_advertising().await?;
+        
+        // Start listeners on all 4 channels
+        self.listen_on_channel(rfcomm_channels::ZK_AUTH).await?;
+        info!(" Channel {} (ZK_AUTH) listening", rfcomm_channels::ZK_AUTH);
+        
+        self.listen_on_channel(rfcomm_channels::QUANTUM_ROUTING).await?;
+        info!(" Channel {} (QUANTUM_ROUTING) listening", rfcomm_channels::QUANTUM_ROUTING);
+        
+        self.listen_on_channel(rfcomm_channels::MESH_DATA).await?;
+        info!(" Channel {} (MESH_DATA) listening", rfcomm_channels::MESH_DATA);
+        
+        self.listen_on_channel(rfcomm_channels::COORDINATION).await?;
+        info!(" Channel {} (COORDINATION) listening", rfcomm_channels::COORDINATION);
+        
+        info!("✅ Full RFCOMM service started - accepting connections on 4 channels");
+        Ok(())
+    }
+    
+    /// Disconnect from a peer and cleanup resources
+    pub async fn disconnect_peer(&self, peer_address: &str) -> Result<()> {
+        info!("🔌 Disconnecting from peer: {}", peer_address);
+        
+        // Remove from active connections
+        if let Some(removed_conn) = self.active_connections.write().await.remove(peer_address) {
+            info!(" Removed connection metadata for {}", peer_address);
+            debug!("   Channel: {}, MTU: {}, Outgoing: {}", 
+                   removed_conn.channel, removed_conn.mtu, removed_conn.is_outgoing);
+        } else {
+            warn!("⚠️ No active connection found for {}", peer_address);
+        }
+        
+        // Remove from active streams (this will close the socket)
+        if let Some(removed_stream) = self.active_streams.write().await.remove(peer_address) {
+            info!(" Removed stream for {}", peer_address);
+            
+            // The stream will be dropped here, closing the socket
+            drop(removed_stream);
+        } else {
+            warn!("⚠️ No active stream found for {}", peer_address);
+        }
+        
+        // Remove from authenticated peers
+        if self.authenticated_peers.write().await.remove(peer_address).is_some() {
+            info!(" Removed authentication for {}", peer_address);
+        }
+        
+        info!("✅ Disconnected from {}", peer_address);
+        Ok(())
+    }
+    
+    /// Disconnect all peers and cleanup resources
+    pub async fn disconnect_all(&self) -> Result<()> {
+        info!("🔌 Disconnecting from all peers");
+        
+        let peer_addresses: Vec<String> = self.active_connections.read().await
+            .keys()
+            .cloned()
+            .collect();
+        
+        let mut disconnect_count = 0;
+        for peer_addr in peer_addresses {
+            if self.disconnect_peer(&peer_addr).await.is_ok() {
+                disconnect_count += 1;
+            }
+        }
+        
+        info!("✅ Disconnected from {} peers", disconnect_count);
+        Ok(())
     }
 }
 

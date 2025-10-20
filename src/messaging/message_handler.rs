@@ -81,10 +81,11 @@ impl MeshMessageHandler {
         &self, 
         peer: PublicKey, 
         capabilities: Vec<crate::types::mesh_capability::MeshCapability>, 
-        location: Option<crate::types::geographic::GeographicLocation>,
+        _location: Option<crate::types::geographic::GeographicLocation>,
         shared_resources: crate::types::mesh_capability::SharedResources
     ) -> Result<()> {
-        info!("Discovered peer with {} capabilities", capabilities.len());
+        info!("Discovered peer {:?} with {} capabilities", 
+              hex::encode(&peer.key_id[0..8]), capabilities.len());
         
         // Process peer capabilities for legitimate mesh services
         for capability in &capabilities {
@@ -153,10 +154,15 @@ impl MeshMessageHandler {
         connection_details: Option<crate::types::connection_details::ConnectionDetails>
     ) -> Result<()> {
         if accepted {
-            info!("Connectivity accepted: {} kbps at {} tokens/MB", 
-                  available_bandwidth_kbps, cost_tokens_per_mb);
+            info!("Connectivity accepted from provider {:?}: {} kbps at {} tokens/MB", 
+                  hex::encode(&provider.key_id[0..8]), available_bandwidth_kbps, cost_tokens_per_mb);
+            
+            // TODO: Use connection_details to establish actual mesh connection
+            if let Some(_details) = connection_details {
+                info!(" Connection details received - TODO: establish connection");
+            }
         } else {
-            info!("Connectivity request denied");
+            info!("Connectivity request denied by provider {:?}", hex::encode(&provider.key_id[0..8]));
         }
         Ok(())
     }
@@ -169,8 +175,8 @@ impl MeshMessageHandler {
         payload: Vec<u8>, 
         max_hops: u8
     ) -> Result<()> {
-        info!("GLOBAL long-range route: {} bytes to destination via {} relays", 
-              payload.len(), relay_chain.len());
+        info!("GLOBAL long-range route: {} bytes to destination {:?} via {} relays", 
+              payload.len(), hex::encode(&destination.key_id[0..8]), relay_chain.len());
         
         // ZHTP supports unlimited global routing through mesh relays
         if max_hops > 0 {
@@ -223,8 +229,16 @@ impl MeshMessageHandler {
         info!("UBI distribution: {} tokens to recipient (round {})", 
               amount_tokens, distribution_round);
         
-        // TODO: Implement UBI proof verification
-        let verification_result = true;
+        // TODO: Implement actual ZK proof verification using lib-proofs
+        // For now, reject if proof is empty
+        if proof.is_empty() {
+            warn!("❌ Empty ZK proof for UBI distribution - rejecting");
+            return Err(anyhow::anyhow!("UBI distribution requires valid ZK proof"));
+        }
+        
+        // Placeholder: actual verification would use lib-proofs
+        // verification_result = lib_proofs::verify_ubi_proof(&proof, &recipient, amount_tokens, distribution_round)?;
+        let verification_result = true; // TODO: Replace with actual verification
         
         if !verification_result {
             warn!("Invalid ZK proof for UBI distribution - rejecting");
@@ -286,7 +300,15 @@ impl MeshMessageHandler {
         body: Vec<u8>,
         timestamp: u64,
     ) -> Result<()> {
-        info!("Native ZHTP Request: {} {} from {:?}", method, uri, requester);
+        info!("Native ZHTP Request: {} {} from {:?}", method, uri, hex::encode(&requester.key_id[0..8]));
+        
+        // TODO: Implement full ZHTP request routing
+        // - Parse headers (Content-Type, Authorization, etc.)
+        // - Process body based on Content-Type
+        // - Validate timestamp (replay protection)
+        // - Route to appropriate handler based on URI
+        info!(" Headers: {} present, Body: {} bytes, Timestamp: {}", 
+              headers.len(), body.len(), timestamp);
         
         // This would route to the ZHTP API handler
         // For now, just log the request
@@ -306,6 +328,15 @@ impl MeshMessageHandler {
         timestamp: u64,
     ) -> Result<()> {
         info!("ZHTP Response received: {} {} (request_id: {})", status, status_message, request_id);
+        
+        // TODO: Implement full ZHTP response handling
+        // - Parse response headers
+        // - Process response body
+        // - Validate timestamp
+        // - Match with pending request and fulfill promise
+        info!(" Headers: {} present, Body: {} bytes, Timestamp: {}", 
+              headers.len(), body.len(), timestamp);
+        
         Ok(())
     }
 
@@ -316,8 +347,13 @@ impl MeshMessageHandler {
         request_id: u64,
         from_height: Option<u64>,
     ) -> Result<()> {
-        info!(" Blockchain request from peer (request_id: {}, from_height: {:?})", 
-              request_id, from_height);
+        info!(" Blockchain request from peer {:?} (request_id: {}, from_height: {:?})", 
+              hex::encode(&requester.key_id[0..8]), request_id, from_height);
+        
+        // TODO: Send blockchain data back to requester
+        // - Query blockchain from runtime layer
+        // - Chunk data appropriately
+        // - Send BlockchainData messages back to requester
         
         // This will be implemented in the runtime layer to access blockchain
         // For now, we log the request - the actual blockchain export will be done
@@ -338,6 +374,10 @@ impl MeshMessageHandler {
     ) -> Result<()> {
         info!(" Blockchain data chunk {}/{} received ({} bytes, request_id: {})", 
               chunk_index + 1, total_chunks, data.len(), request_id);
+        
+        // TODO: Verify chunk hash against complete_data_hash
+        // When all chunks received, verify complete data hash matches
+        info!("Expected complete hash: {}", hex::encode(complete_data_hash));
         
         // This will be implemented in the runtime layer to reassemble chunks
         // For now, we log the receipt - the actual reassembly will be done
@@ -390,6 +430,7 @@ mod tests {
             connections.insert(reporter.clone(), MeshConnection {
                 peer_id: reporter.clone(),
                 protocol: crate::protocols::NetworkProtocol::BluetoothLE,
+                peer_address: None,
                 signal_strength: 0.5,
                 bandwidth_capacity: 1000000,
                 latency_ms: 100,
@@ -397,6 +438,11 @@ mod tests {
                 data_transferred: 0,
                 tokens_earned: 0,
                 stability_score: 0.5,
+                zhtp_authenticated: false,
+                quantum_secure: true,
+                peer_dilithium_pubkey: None,
+                kyber_shared_secret: None,
+                trust_score: 0.0,
             });
         }
         

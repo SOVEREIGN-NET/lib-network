@@ -9,6 +9,11 @@ use anyhow::Result;
 use std::collections::HashMap;
 use tracing::{info, warn, error};
 
+// Import common Bluetooth utilities
+use crate::protocols::bluetooth::device::{BleDevice, CharacteristicInfo, BluetoothDeviceInfo};
+use crate::protocols::bluetooth::common::{parse_mac_address, format_mac_address, mac_to_dbus_path, zhtp_uuids};
+use crate::protocols::bluetooth::gatt::{GattMessage, GattOperation, supports_operation, parse_characteristic_properties};
+
 /// Enhanced D-Bus XML parser for BlueZ GATT operations
 #[cfg(all(target_os = "linux", feature = "enhanced-parsing"))]
 pub struct BlueZGattParser {

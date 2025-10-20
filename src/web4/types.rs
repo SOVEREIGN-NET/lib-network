@@ -1,6 +1,5 @@
 //! Web4 Domain Registry Types and Structures
 
-use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use lib_proofs::ZeroKnowledgeProof;

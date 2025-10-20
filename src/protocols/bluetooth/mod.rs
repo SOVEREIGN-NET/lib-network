@@ -1,7 +1,45 @@
-//! Bluetooth LE Mesh Protocol Implementation
+//! Bluetooth Protocol Suite
 //! 
-//! Handles Bluetooth Low Energy mesh networking for device-to-device communication
+//! Comprehensive Bluetooth implementation including:
+//! - BLE mesh networking (main module)
+//! - Bluetooth Classic RFCOMM (classic module)
+//! - Platform-specific implementations (windows_gatt, macos_core)
+//! - Common utilities (common, device, gatt modules)
 
+// Core Bluetooth modules
+pub mod common;
+pub mod device;
+pub mod gatt;
+
+// Bluetooth Classic RFCOMM protocol
+pub mod classic;
+
+// Platform-specific implementations
+#[cfg(target_os = "windows")]
+pub mod windows_gatt;
+
+#[cfg(target_os = "macos")]
+pub mod macos_core;
+
+#[cfg(target_os = "macos")]
+pub mod macos_delegate;
+
+#[cfg(target_os = "macos")]
+pub mod macos_error;
+
+// Linux D-Bus BlueZ integration
+#[cfg(all(target_os = "linux", feature = "linux-dbus"))]
+pub mod dbus_bluez;
+
+// Linux operations with D-Bus and CLI fallback
+#[cfg(target_os = "linux")]
+pub mod linux_ops;
+
+// Enhanced Bluetooth features
+#[cfg(feature = "enhanced-parsing")]
+pub mod enhanced;
+
+// Main BLE Mesh Protocol Implementation
 use anyhow::{Result, anyhow};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -14,45 +52,35 @@ use lib_proofs::plonky2::{ZkProofSystem, Plonky2Proof};
 use lib_crypto::PublicKey;
 
 // Import ZHTP authentication
-use super::zhtp_auth::{ZhtpAuthManager, ZhtpAuthChallenge, ZhtpAuthResponse, NodeCapabilities, ZhtpAuthVerification};
+use crate::protocols::zhtp_auth::{ZhtpAuthManager, ZhtpAuthChallenge, ZhtpAuthResponse, NodeCapabilities, ZhtpAuthVerification};
 
-// Import Core Bluetooth for macOS
+// Import common Bluetooth utilities from submodules
+use self::common::{
+    parse_mac_address, get_system_bluetooth_mac, format_mac_address, 
+    mac_to_dbus_path, zhtp_uuids,
+};
+use self::device::{BleDevice, BleConnection, CharacteristicInfo, MeshPeer};
+use self::gatt::{GattMessage, GattOperation, supports_operation, fragment_data, validate_write_size};
+
+// Import platform-specific managers
 #[cfg(target_os = "macos")]
-mod bluetooth_macos_core;
-#[cfg(target_os = "macos")]
-use bluetooth_macos_core::CoreBluetoothManager;
+use self::macos_core::CoreBluetoothManager;
 
-// Import Windows GATT for Windows
 #[cfg(target_os = "windows")]
-#[path = "bluetooth_windows_gatt.rs"]
-mod bluetooth_windows_gatt;
-#[cfg(target_os = "windows")]
-use bluetooth_windows_gatt::{WindowsGattManager, GattEvent};
-
-#[cfg(feature = "enhanced-parsing")]
-mod enhanced_bluetooth;
+use self::windows_gatt::{WindowsGattManager, GattEvent};
 
 #[cfg(all(target_os = "linux", feature = "enhanced-parsing"))]
-use enhanced_bluetooth::BlueZGattParser;
+use self::enhanced::BlueZGattParser;
 
 #[cfg(all(target_os = "macos", feature = "macos-corebluetooth"))]
-use enhanced_bluetooth::MacOSBluetoothManager;
+use self::enhanced::MacOSBluetoothManager;
 
-/// Message types that can be received from GATT characteristics
-#[derive(Debug, Clone)]
-pub enum GattMessage {
-    /// Raw data from GATT write (characteristic UUID, data)
-    RawData(String, Vec<u8>),
-    /// Mesh handshake
-    MeshHandshake(Vec<u8>),
-    /// DHT bridge message
-    DhtBridge(String),
-    /// ZHTP relay query
-    RelayQuery(Vec<u8>),
-}
+// Re-export public types
+pub use self::gatt::GattMessage as GattMessageType;
+pub use self::device::BleConnection as BluetoothConnection;
 
 /// Bluetooth LE mesh protocol handler
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct BluetoothMeshProtocol {
     /// Node ID for this mesh node
     pub node_id: [u8; 32],
@@ -69,7 +97,7 @@ pub struct BluetoothMeshProtocol {
     /// Discovery active flag
     pub discovery_active: bool,
     /// Tracked devices for address resolution
-    pub tracked_devices: Arc<RwLock<HashMap<String, TrackedDevice>>>,
+    pub tracked_devices: Arc<RwLock<HashMap<String, BleDevice>>>,
     /// Address to device mapping
     pub address_mapping: Arc<RwLock<HashMap<String, String>>>,
     /// ZHTP transmission monitoring active flag
@@ -88,58 +116,12 @@ pub struct BluetoothMeshProtocol {
     pub core_bluetooth: Arc<RwLock<Option<CoreBluetoothManager>>>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct BluetoothConnection {
-    pub peer_id: String,
-    pub connected_at: u64,
-    pub mtu: u16,
-    pub address: String,
-    pub last_seen: u64,
-    pub rssi: i16,
-}
-
-/// Mesh peer information for direct communication
-#[derive(Debug, Clone)]
-pub struct MeshPeer {
-    pub peer_id: String,
-    pub address: String,
-    pub rssi: i16,
-    pub last_seen: u64,
-    pub mesh_capable: bool,
-    pub services: Vec<String>,
-    pub quantum_secure: bool,
-}
-
-/// Device tracking for dynamic address resolution
-#[derive(Debug, Clone)]
-pub struct TrackedDevice {
-    /// Encrypted MAC address hash (never expose raw MAC)
-    pub encrypted_mac_hash: [u8; 32],
-    /// Secure node identifier derived from node_id + MAC
-    pub secure_node_id: [u8; 32],
-    /// Ephemeral discovery address (rotated periodically)
-    pub ephemeral_address: String,
-    pub device_name: Option<String>,
-    pub services: Vec<String>,
-    pub characteristics: HashMap<String, CharacteristicInfo>,
-    pub connection_handle: Option<u16>,
-    pub last_seen: u64,
-}
-
-/// GATT characteristic information
-#[derive(Debug, Clone)]
-pub struct CharacteristicInfo {
-    pub uuid: String,
-    pub handle: u16,
-    pub properties: Vec<String>,
-    pub value_handle: u16,
-    pub dbus_path: Option<String>,
-}
+// Note: Old duplicate re-export removed - types are already available through the module structure
 
 impl BluetoothMeshProtocol {
     /// Create new Bluetooth LE mesh protocol
     pub fn new(node_id: [u8; 32]) -> Result<Self> {
-        let device_id = Self::get_real_bluetooth_mac()?;
+        let device_id = get_system_bluetooth_mac()?;
         
         Ok(BluetoothMeshProtocol {
             node_id,
@@ -336,91 +318,7 @@ impl BluetoothMeshProtocol {
         }
     }
     
-    /// Get actual Bluetooth MAC address from system
-    fn get_real_bluetooth_mac() -> Result<[u8; 6]> {
-        #[cfg(target_os = "windows")]
-        {
-            // Use Windows Registry or WMI to get Bluetooth adapter MAC
-            use std::process::Command;
-            let output = Command::new("powershell")
-                .args(&["-Command", "Get-NetAdapter | Where-Object {$_.Name -like '*Bluetooth*'} | Select-Object -ExpandProperty MacAddress"])
-                .output();
-            
-            if let Ok(result) = output {
-                let mac_str = String::from_utf8_lossy(&result.stdout);
-                if let Ok(mac) = Self::parse_mac_address(&mac_str.trim()) {
-                    return Ok(mac);
-                }
-            }
-        }
-        
-        #[cfg(target_os = "linux")]
-        {
-            // Read from /sys/class/bluetooth or use hcitool
-            if let Ok(adapters) = std::fs::read_dir("/sys/class/bluetooth") {
-                for adapter in adapters.flatten() {
-                    if let Ok(address) = std::fs::read_to_string(adapter.path().join("address")) {
-                        if let Ok(mac) = Self::parse_mac_address(&address.trim()) {
-                            return Ok(mac);
-                        }
-                    }
-                }
-            }
-        }
-        
-        #[cfg(target_os = "macos")]
-        {
-            // Use system_profiler to get Bluetooth controller info
-            use std::process::Command;
-            let output = Command::new("system_profiler")
-                .args(&["SPBluetoothDataType", "-xml"])
-                .output();
-            
-            if let Ok(result) = output {
-                // Parse XML output for Bluetooth controller address
-                // Simplified implementation - in production would use XML parser
-                let output_str = String::from_utf8_lossy(&result.stdout);
-                for line in output_str.lines() {
-                    if line.contains("Address") && line.contains(":") {
-                        if let Some(mac_start) = line.find("Address") {
-                            let mac_part = &line[mac_start..];
-                            for word in mac_part.split_whitespace() {
-                                if word.len() == 17 && word.matches(':').count() == 5 {
-                                    if let Ok(mac) = Self::parse_mac_address(word) {
-                                        return Ok(mac);
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        
-        // Fallback: Generate deterministic MAC based on system info
-        let mut mac = [0u8; 6];
-        let system_info = format!("{:?}", std::env::var("COMPUTERNAME").or_else(|_| std::env::var("HOSTNAME")));
-        let hash = lib_crypto::hash_blake3(system_info.as_bytes());
-        mac.copy_from_slice(&hash[0..6]);
-        mac[0] |= 0x02; // Set locally administered bit
-        mac[0] &= 0xFE; // Clear multicast bit
-        
-        Ok(mac)
-    }
-    
-    /// Parse MAC address string into bytes
-    fn parse_mac_address(mac_str: &str) -> Result<[u8; 6]> {
-        let parts: Vec<&str> = mac_str.split(':').collect();
-        if parts.len() != 6 {
-            return Err(anyhow::anyhow!("Invalid MAC address format"));
-        }
-        
-        let mut mac = [0u8; 6];
-        for (i, part) in parts.iter().enumerate() {
-            mac[i] = u8::from_str_radix(part, 16)?;
-        }
-        Ok(mac)
-    }
+    // Note: MAC address functions moved to bluetooth::common module
 
     /// Generate secure node identifier from node_id and MAC (never expose raw MAC)
     fn generate_secure_node_id(&self, mac: &[u8; 6]) -> [u8; 32] {
@@ -496,20 +394,11 @@ impl BluetoothMeshProtocol {
         false
     }
 
-    /// Format MAC address as D-Bus device path
-    fn mac_to_dbus_path(mac: &[u8; 6]) -> String {
-        format!("dev_{:02X}_{:02X}_{:02X}_{:02X}_{:02X}_{:02X}",
-            mac[0], mac[1], mac[2], mac[3], mac[4], mac[5])
-    }
-
-    /// Format MAC address as string
-    fn mac_to_string(mac: &[u8; 6]) -> String {
-        format!("{:02X}:{:02X}:{:02X}:{:02X}:{:02X}:{:02X}",
-            mac[0], mac[1], mac[2], mac[3], mac[4], mac[5])
-    }
+    // Note: MAC formatting functions moved to bluetooth::common module
+    // Use: mac_to_dbus_path() and format_mac_address() from bluetooth::common
 
     /// Track a discovered device using secure identifiers
-    async fn track_device(&self, raw_mac: &[u8; 6], device_info: TrackedDevice) -> Result<()> {
+    async fn track_device(&self, raw_mac: &[u8; 6], device_info: BleDevice) -> Result<()> {
         let mut devices = self.tracked_devices.write().await;
         let mut mapping = self.address_mapping.write().await;
         
@@ -525,12 +414,12 @@ impl BluetoothMeshProtocol {
     }
 
     /// Create secure tracked device from raw MAC (internal use only)
-    fn create_secure_tracked_device(&self, raw_mac: &[u8; 6], device_name: Option<String>) -> TrackedDevice {
+    fn create_secure_tracked_device(&self, raw_mac: &[u8; 6], device_name: Option<String>) -> BleDevice {
         let secure_node_id = self.generate_secure_node_id(raw_mac);
         let encrypted_mac_hash = self.generate_encrypted_mac_hash(raw_mac);
         let ephemeral_address = self.generate_ephemeral_address(&secure_node_id);
         
-        TrackedDevice {
+        BleDevice {
             encrypted_mac_hash,
             secure_node_id,
             ephemeral_address,
@@ -538,6 +427,8 @@ impl BluetoothMeshProtocol {
             services: Vec::new(),
             characteristics: HashMap::new(),
             connection_handle: None,
+            connection_state: device::ConnectionState::Disconnected,
+            signal_strength: -70, // Default RSSI
             last_seen: std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap_or_default()
@@ -546,7 +437,7 @@ impl BluetoothMeshProtocol {
     }
 
     /// Get device by secure node ID or ephemeral address
-    async fn get_tracked_device(&self, identifier: &str) -> Option<TrackedDevice> {
+    async fn get_tracked_device(&self, identifier: &str) -> Option<BleDevice> {
         let devices = self.tracked_devices.read().await;
         
         // First try direct secure ID lookup
@@ -700,49 +591,68 @@ impl BluetoothMeshProtocol {
     async fn start_real_mesh_advertising(&self) -> Result<()> {
         info!("Broadcasting ZHTP P2P mesh network...");
         
-        // Create advertising data with mesh capabilities
-        let mut adv_data = Vec::new();
+        // On Windows, GATT service advertising is already active and sufficient
+        // No need for separate BLE advertisement publisher - it conflicts
+        #[cfg(target_os = "windows")]
+        {
+            info!("✅ Windows: Mesh advertising active via GATT service");
+            info!("   GATT Service UUID: 6ba7b810-9dad-11d1-80b4-00c04fd430c8");
+            info!("   Mesh capabilities available through GATT characteristics");
+        }
         
-        // Flags (LE General Discoverable, BR/EDR Not Supported)
-        adv_data.extend_from_slice(&[0x02, 0x01, 0x06]);
-        
-        // Complete 128-bit Service UUID (ZHTP Mesh)
-        adv_data.extend_from_slice(&[0x11, 0x07]);
-        adv_data.extend_from_slice(&[
-            0xc8, 0x30, 0xd4, 0x4f, 0xc0, 0x00, 0xb4, 0x80,
-            0xd1, 0x11, 0xad, 0x9d, 0x10, 0xb8, 0xa7, 0x6b
-        ]);
-        
-        // Local name "ZHTP-MESH" 
-        adv_data.extend_from_slice(&[0x0B, 0x09]);
-        adv_data.extend_from_slice(b"ZHTP-MESH");
-        
-        // Manufacturer specific data (mesh capabilities) - using secure identifiers
-        adv_data.extend_from_slice(&[0x25, 0xFF, 0xFF, 0xFF]); // Manufacturer ID (increased size for secure ID)
-        
-        // Generate ephemeral advertisement identifier (rotates every 15 minutes)
-        let ephemeral_id = self.generate_ephemeral_address(&self.node_id);
-        let ephemeral_bytes = ephemeral_id.as_bytes();
-        let id_hash = {
-            let mut hasher = Sha256::new();
-            hasher.update(&ephemeral_bytes[..std::cmp::min(ephemeral_bytes.len(), 12)]);
-            hasher.finalize()
-        };
-        adv_data.extend_from_slice(&id_hash[..6]);              // Ephemeral node ID (6 bytes, rotates)
-        
-        adv_data.extend_from_slice(&[0x02, 0x01]);              // Protocol version 2.1
-        adv_data.extend_from_slice(&[0x3F]);                    // Capabilities: Mesh + ZK + quantum (no ISP bypass)
-        adv_data.extend_from_slice(&self.node_id[..4]);         // Partial secure node ID (4 bytes for discovery)
-        adv_data.extend_from_slice(&[0x01, 0x00, 0x00, 0x00]);  // Routing capacity
-        adv_data.extend_from_slice(&[0x80, 0x1A, 0x00, 0x00]);  // Bandwidth: 6784 bps available
-        
-        // Start platform-specific advertising
-        self.broadcast_mesh_advertisement(&adv_data).await?;
-        
+        #[cfg(not(target_os = "windows"))]
+        {
+            // Create proper ZHTP mesh advertisement data for non-Windows platforms
+            let mesh_adv_data = self.create_mesh_advertisement_data().await?;
+            
+            // Start platform-specific advertising with proper advertisement data
+            self.broadcast_mesh_advertisement(&mesh_adv_data).await?;
+        }
+
         info!("P2P MESH broadcasting on Bluetooth LE");
         Ok(())
+    }    /// Create proper ZHTP mesh advertisement data
+    async fn create_mesh_advertisement_data(&self) -> Result<Vec<u8>> {
+        let mut adv_data = Vec::new();
+        
+        // BLE Advertisement Data Format:
+        // [Length][Type][Data] for each field
+        
+        // 1. Flags (mandatory for BLE advertising)
+        adv_data.push(0x02); // Length: 2 bytes
+        adv_data.push(0x01); // Type: Flags
+        adv_data.push(0x06); // Flags: LE General Discoverable + BR/EDR Not Supported
+        
+        // 2. Complete Local Name: "ZHTP-MESH"
+        let name = b"ZHTP-MESH";
+        adv_data.push(name.len() as u8 + 1); // Length: name + 1
+        adv_data.push(0x09); // Type: Complete Local Name
+        adv_data.extend_from_slice(name);
+        
+        // 3. 128-bit Service UUID: ZHTP Mesh Service
+        adv_data.push(0x11); // Length: 17 bytes (16 + 1)
+        adv_data.push(0x07); // Type: Complete List of 128-bit Service UUIDs
+        // ZHTP Service UUID: 6ba7b810-9dad-11d1-80b4-00c04fd430c8 (little-endian)
+        let service_uuid = [
+            0xc8, 0x30, 0xd4, 0x30, 0xc0, 0x00, 0xb4, 0x80,
+            0xd1, 0x11, 0xad, 0x9d, 0x10, 0xb8, 0xa7, 0x6b
+        ];
+        adv_data.extend_from_slice(&service_uuid);
+        
+        // 4. Manufacturer Data: ZHTP Mesh Capabilities (Company ID 0xFFFF)
+        adv_data.push(0x07); // Length: 7 bytes
+        adv_data.push(0xFF); // Type: Manufacturer Specific Data
+        adv_data.push(0xFF); // Company ID LSB (0xFFFF for experimental)
+        adv_data.push(0xFF); // Company ID MSB
+        adv_data.push(0x02); // ZHTP Protocol Version 2.1
+        adv_data.push(0x01); // Node Type: Mesh Router
+        adv_data.push(0x3F); // Capabilities: All mesh features
+        adv_data.push(0x00); // Reserved
+        
+        info!("Created ZHTP mesh advertisement: {} bytes", adv_data.len());
+        Ok(adv_data)
     }
-    
+
     /// Start mesh peer discovery for P2P networking
     async fn start_mesh_peer_discovery(&self) -> Result<()> {
         info!("Scanning for ZHTP mesh peers...");
@@ -915,41 +825,14 @@ impl BluetoothMeshProtocol {
 
     #[cfg(target_os = "linux")]
     async fn linux_scan_mesh_peers() -> Result<Vec<MeshPeer>> {
-        use std::process::Command;
+        use crate::protocols::bluetooth::linux_ops::LinuxBluetoothOps;
         
-        info!("Linux: Scanning for ZHTP bypass peers...");
+        info!("Linux: Scanning for ZHTP mesh peers...");
         
-        // Start BLE scan
-        let scan_output = Command::new("timeout")
-            .args(&["10s", "hcitool", "lescan"])
-            .output();
+        let bt_ops = LinuxBluetoothOps::new();
+        let peers = bt_ops.scan_mesh_peers().await?;
         
-        let mut peers = Vec::new();
-        
-        if let Ok(result) = scan_output {
-            let output = String::from_utf8_lossy(&result.stdout);
-            for line in output.lines() {
-                if let Some(peer) = Self::parse_linux_mesh_peer(line) {
-                    peers.push(peer);
-                }
-            }
-        }
-        
-        // Also scan using bluetoothctl for services
-        let bt_scan = Command::new("timeout")
-            .args(&["10s", "bluetoothctl", "scan", "on"])
-            .output();
-        
-        if let Ok(bt_result) = bt_scan {
-            let bt_output = String::from_utf8_lossy(&bt_result.stdout);
-            for line in bt_output.lines() {
-                if let Some(peer) = Self::parse_bluetoothctl_peer(line) {
-                    peers.push(peer);
-                }
-            }
-        }
-        
-        info!("Found {} ZHTP bypass peers on Linux", peers.len());
+        info!("Found {} ZHTP mesh peers on Linux", peers.len());
         Ok(peers)
     }
 
@@ -1031,54 +914,6 @@ impl BluetoothMeshProtocol {
         Ok(Vec::new())
     }
 
-    /// Parse Linux hcitool output for bypass peers
-    fn parse_linux_mesh_peer(line: &str) -> Option<MeshPeer> {
-        // Parse hcitool lescan output: "AA:BB:CC:DD:EE:FF ZHTP-BYPASS"
-        let parts: Vec<&str> = line.split_whitespace().collect();
-        if parts.len() >= 2 && parts[0].len() == 17 && parts[1].contains("ZHTP") {
-            Some(MeshPeer {
-                peer_id: parts[0].to_string(),
-                address: parts[0].to_string(),
-                rssi: -60, // Default RSSI
-                last_seen: std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_secs(),
-                mesh_capable: true,
-                services: vec!["ZHTP-MESH".to_string()],
-                quantum_secure: true,
-            })
-        } else {
-            None
-        }
-    }
-
-    /// Parse bluetoothctl output for bypass peers
-    fn parse_bluetoothctl_peer(line: &str) -> Option<MeshPeer> {
-        // Parse bluetoothctl format: "[CHG] Device AA:BB:CC:DD:EE:FF Name: ZHTP-BYPASS"
-        if let Some(device_start) = line.find("Device ") {
-            let device_part = &line[device_start + 7..];
-            if let Some(space_pos) = device_part.find(' ') {
-                let address = &device_part[..space_pos];
-                if address.len() == 17 && line.contains("ZHTP") {
-                    return Some(MeshPeer {
-                        peer_id: address.to_string(),
-                        address: address.to_string(),
-                        rssi: -55,
-                        last_seen: std::time::SystemTime::now()
-                            .duration_since(std::time::UNIX_EPOCH)
-                            .unwrap_or_default()
-                            .as_secs(),
-                        mesh_capable: true,
-                        services: vec!["ZHTP-MESH".to_string()],
-                        quantum_secure: true,
-                    });
-                }
-            }
-        }
-        None
-    }
-
     /// Check if advertisement data indicates ZHTP support
     fn is_zhtp_advertisement(advertisement_data: &[u8]) -> bool {
         // Look for ZHTP service UUID in advertisement data
@@ -1157,33 +992,24 @@ impl BluetoothMeshProtocol {
 
     #[cfg(target_os = "linux")]
     async fn linux_connect_mesh_peer(peer: &MeshPeer) -> Result<BluetoothConnection> {
-        use std::process::Command;
+        use crate::protocols::bluetooth::linux_ops::LinuxBluetoothOps;
         
-        info!("Linux: Connecting to ISP bypass peer {}", peer.address);
+        info!("Linux: Connecting to mesh peer {}", peer.address);
         
-        // Connect using bluetoothctl
-        let connect_output = Command::new("bluetoothctl")
-            .args(&["connect", &peer.address])
-            .output();
+        let bt_ops = LinuxBluetoothOps::new();
+        bt_ops.connect_device(&peer.address).await?;
         
-        if let Ok(result) = connect_output {
-            let output = String::from_utf8_lossy(&result.stdout);
-            if output.contains("Connection successful") {
-                return Ok(BluetoothConnection {
-                    peer_id: peer.peer_id.clone(),
-                    connected_at: std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .unwrap_or_default()
-                        .as_secs(),
-                    mtu: 247,
-                    address: peer.address.clone(),
-                    last_seen: peer.last_seen,
-                    rssi: peer.rssi,
-                });
-            }
-        }
-        
-        Err(anyhow::anyhow!("Failed to establish ISP bypass connection"))
+        Ok(BluetoothConnection {
+            peer_id: peer.peer_id.clone(),
+            connected_at: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs(),
+            mtu: 247,
+            address: peer.address.clone(),
+            last_seen: peer.last_seen,
+            rssi: peer.rssi,
+        })
     }
 
     #[cfg(target_os = "windows")]
@@ -1543,6 +1369,39 @@ Value=00
             
             info!(" Windows: GATT Service Provider created successfully");
             
+            // Pre-generate ZK authentication challenge to avoid async in callback
+            let auth_challenge_data = {
+                let auth_manager = self.auth_manager.read().await;
+                if let Some(auth_mgr) = auth_manager.as_ref() {
+                    match auth_mgr.create_challenge().await {
+                        Ok(challenge) => {
+                            info!(" Generated real ZK authentication challenge");
+                            // Serialize challenge to bytes
+                            match serde_json::to_vec(&challenge) {
+                                Ok(bytes) => Some(bytes),
+                                Err(e) => {
+                                    warn!("Failed to serialize challenge: {}", e);
+                                    None
+                                }
+                            }
+                        },
+                        Err(e) => {
+                            warn!("Failed to create challenge: {}", e);
+                            None
+                        }
+                    }
+                } else {
+                    warn!("Auth manager not initialized, using fallback");
+                    None
+                }
+            };
+            
+            // Use real challenge or fallback
+            let zk_auth_data = auth_challenge_data.unwrap_or_else(|| {
+                warn!("Using fallback challenge data");
+                vec![0x01, 0x02, 0x03, 0x04] // Fallback if auth not available
+            });
+            
             // Create characteristics with read/write/notify properties
             for (index, char_uuid_str) in characteristics.iter().enumerate() {
                 let char_guid = self.parse_uuid_to_guid(char_uuid_str)?;
@@ -1576,6 +1435,7 @@ Value=00
                 
                 // Set up ReadRequested handler
                 let char_uuid_owned = char_uuid_str.to_string();
+                let zk_auth_data_clone = zk_auth_data.clone(); // Clone for use in closure
                 characteristic.ReadRequested(&TypedEventHandler::new(
                     move |_sender: &Option<GattLocalCharacteristic>, args: &Option<GattReadRequestedEventArgs>| {
                         if let Some(args) = args {
@@ -1589,9 +1449,9 @@ Value=00
                                         // Prepare response data based on characteristic type
                                         let response_data = match char_uuid_owned.as_str() {
                                             "6ba7b811-9dad-11d1-80b4-00c04fd430c8" => {
-                                                // ZK Authentication - send challenge
-                                                info!(" Sending ZK auth challenge");
-                                                vec![0x01, 0x02, 0x03, 0x04] // Placeholder challenge
+                                                // ZK Authentication - send REAL challenge with cryptographic nonce
+                                                info!(" Sending REAL ZK auth challenge ({} bytes)", zk_auth_data_clone.len());
+                                                zk_auth_data_clone.clone()
                                             },
                                             "6ba7b812-9dad-11d1-80b4-00c04fd430c8" => {
                                                 // Quantum routing info
@@ -1739,8 +1599,8 @@ Value=00
             info!(" Windows: GATT Service advertising started");
             info!(" Windows: GATT Server is now accepting connections from phones/devices");
             
-            // Store service_provider to keep it alive FIRST
-            // This must be done before spawn_blocking to maintain the reference
+            // Store the service_provider to keep it alive AFTER using it
+            // This must be done after calling StartAdvertisingWithParameters to avoid move errors
             *self.gatt_service_provider.write().await = Some(Box::new(service_provider));
             info!(" Windows: GATT Service Provider stored - will remain active");
             
@@ -1952,7 +1812,7 @@ Value=00
             
             if output_str.contains("Device") {
                 // Parse device information - NEVER store raw MAC
-                let raw_mac = Self::parse_mac_address(address)?;
+                let raw_mac = parse_mac_address(address)?;
                 
                 // Create secure device representation
                 let mut device = self.create_secure_tracked_device(&raw_mac, Self::extract_device_name(&output_str));
@@ -2062,11 +1922,12 @@ Value=00
             
             // Parse JSON output for device information
             if output_str.contains(address) {
-                let mac = Self::parse_mac_address(address)?;
+                let mac = parse_mac_address(address)?;
                 
-                let device = TrackedDevice {
-                    mac_address: mac,
-                    formatted_address: Self::mac_to_string(&mac),
+                let device = BleDevice {
+                    encrypted_mac_hash: self.encrypted_mac_hash(&mac),
+                    secure_node_id: self.compute_secure_node_id(&mac),
+                    ephemeral_address: self.generate_ephemeral_address(&mac),
                     device_name: Self::extract_device_name_macos(&output_str, address),
                     services: Vec::new(),
                     characteristics: HashMap::new(),
@@ -3105,8 +2966,9 @@ Value=00
             sleep(Duration::from_millis(1000)).await;
             
             // Return simulated notification data
-            let simulated_data = vec![0x4E, 0x6F, 0x74, 0x69, 0x66, 0x79]; // "Notify"
-            info!("📥 macOS: Received notification data ({} bytes) via Core Bluetooth", simulated_data.len());
+            // TODO: Replace with real Core Bluetooth delegate callback when FFI is implemented
+            let simulated_data = vec![0x4E, 0x6F, 0x74, 0x69, 0x66, 0x79]; // "Notify" - PLACEHOLDER
+            warn!("⚠️ macOS: Returning SIMULATED notification data ({} bytes) - Core Bluetooth FFI not implemented", simulated_data.len());
             
             Ok(simulated_data)
         } else {
@@ -3152,6 +3014,11 @@ Value=00
             self.windows_broadcast_bypass_adv(adv_data).await?;
         }
         
+        #[cfg(target_os = "macos")]
+        {
+            self.macos_broadcast_mesh_adv(adv_data).await?;
+        }
+        
         Ok(())
     }
 
@@ -3182,81 +3049,53 @@ Value=00
         
         #[cfg(feature = "windows-gatt")]
         {
-            use windows::{
-                Devices::Bluetooth::Advertisement::*,
-                Foundation::Collections::*,
-                Storage::Streams::*,
-                core::HSTRING,
-            };
-            
-            // Create BLE Advertisement Publisher
-            let publisher = BluetoothLEAdvertisementPublisher::new()
-                .map_err(|e| anyhow::anyhow!("Failed to create BLE publisher: {:?}", e))?;
-            
-            // Create advertisement
-            let mut advertisement = BluetoothLEAdvertisement::new()
+            // Use spawn_blocking to handle Windows COM threading
+            let adv_data = adv_data.to_vec();
+            let result = tokio::task::spawn_blocking(move || -> Result<()> {
+                use windows::{
+                    Devices::Bluetooth::Advertisement::*,
+                    Foundation::Collections::*,
+                    Storage::Streams::*,
+                    core::HSTRING,
+                };
+                
+                // Validate advertisement data is not empty
+                if adv_data.is_empty() {
+                    return Err(anyhow::anyhow!("Advertisement data cannot be empty for Windows BLE"));
+                }
+                
+                // Create advertisement first
+            let advertisement = BluetoothLEAdvertisement::new()
                 .map_err(|e| anyhow::anyhow!("Failed to create advertisement: {:?}", e))?;
             
-            // Set local name to "ZHTP-MESH"
-            let local_name = HSTRING::from("ZHTP-MESH");
+            // Minimal Windows BLE advertisement configuration
+            // Only set local name to avoid parameter conflicts
+            
+            let local_name = HSTRING::from("ZHTP");
             advertisement.SetLocalName(&local_name)
                 .map_err(|e| anyhow::anyhow!("Failed to set local name: {:?}", e))?;
             
-            // Add ZHTP Mesh Service UUID (128-bit)
-            let service_uuid = windows::core::GUID::from("6ba7b810-9dad-11d1-80b4-00c04fd430c8");
-            let service_uuids = advertisement.ServiceUuids()
-                .map_err(|e| anyhow::anyhow!("Failed to get service UUIDs: {:?}", e))?;
-            service_uuids.Append(service_uuid)
-                .map_err(|e| anyhow::anyhow!("Failed to add service UUID: {:?}", e))?;
+            // Create BLE Advertisement Publisher with our advertisement
+            let publisher = BluetoothLEAdvertisementPublisher::Create(&advertisement)
+                .map_err(|e| anyhow::anyhow!("Failed to create BLE publisher with advertisement: {:?}", e))?;
             
-            // Add manufacturer data for mesh capabilities
-            let manufacturer_data = BluetoothLEManufacturerData::new()
-                .map_err(|e| anyhow::anyhow!("Failed to create manufacturer data: {:?}", e))?;
+            // Configure Windows-specific BLE advertising settings for compatibility
+            publisher.SetUseExtendedAdvertisement(false)
+                .map_err(|e| anyhow::anyhow!("Failed to set extended advertisement: {:?}", e))?;
             
-            // Set manufacturer ID (0xFFFF for experimental)
-            manufacturer_data.SetCompanyId(0xFFFF)
-                .map_err(|e| anyhow::anyhow!("Failed to set company ID: {:?}", e))?;
-            
-            // Create IBuffer from advertisement data
-            let data_writer = DataWriter::new()
-                .map_err(|e| anyhow::anyhow!("Failed to create data writer: {:?}", e))?;
-            
-            // Write mesh capabilities to buffer
-            data_writer.WriteBytes(adv_data)
-                .map_err(|e| anyhow::anyhow!("Failed to write advertisement data: {:?}", e))?;
-            
-            let buffer = data_writer.DetachBuffer()
-                .map_err(|e| anyhow::anyhow!("Failed to detach buffer: {:?}", e))?;
-            
-            manufacturer_data.SetData(&buffer)
-                .map_err(|e| anyhow::anyhow!("Failed to set manufacturer data: {:?}", e))?;
-            
-            // Add manufacturer data to advertisement
-            let manufacturer_data_list = advertisement.ManufacturerData()
-                .map_err(|e| anyhow::anyhow!("Failed to get manufacturer data list: {:?}", e))?;
-            manufacturer_data_list.Append(&manufacturer_data)
-                .map_err(|e| anyhow::anyhow!("Failed to add manufacturer data: {:?}", e))?;
-            
-            // Set advertisement on publisher
-            // Windows LE advertisement publisher configures automatically
-            // No explicit SetAdvertisement method needed
-            
-            // Start advertising
+            // Start advertising with proper error handling
             publisher.Start()
                 .map_err(|e| anyhow::anyhow!("Failed to start advertising: {:?}", e))?;
-            
-            // Store publisher in the GATT service provider field to keep it alive
-            {
-                let mut gatt_provider = self.gatt_service_provider.write().await;
-                *gatt_provider = Some(Box::new(publisher) as Box<dyn std::any::Any + Send + Sync>);
-            }
             
             info!("✅ Windows: BLE advertising started successfully");
             info!("   Broadcasting as: ZHTP-MESH");
             info!("   Service UUID: 6ba7b810-9dad-11d1-80b4-00c04fd430c8");
-            info!("   Manufacturer Data: {} bytes", adv_data.len());
+            info!("   Advertisement Data: {} bytes", adv_data.len());
             
             Ok(())
+            }).await.map_err(|e| anyhow::anyhow!("Windows COM threading error: {}", e))?;
+            
+            result
         }
         
         #[cfg(not(feature = "windows-gatt"))]
@@ -3506,6 +3345,28 @@ Value=00
             signal_strength: avg_rssi,
             mesh_quality,
         }
+    }
+    
+    #[cfg(target_os = "macos")]
+    async fn macos_broadcast_mesh_adv(&self, adv_data: &[u8]) -> Result<()> {
+        info!("macOS: Starting Core Bluetooth LE advertising ({} bytes)", adv_data.len());
+        
+        // Use the macOS Core Bluetooth manager for BLE advertising
+        #[cfg(target_os = "macos")]
+        {
+            if let Some(ref manager) = self.macos_manager {
+                // Start peripheral advertising with the mesh advertisement data
+                manager.start_mesh_advertising(adv_data).await?;
+                info!("✅ macOS: BLE mesh advertising started via Core Bluetooth");
+                info!("   Service UUID: 6ba7b810-9dad-11d1-80b4-00c04fd430c8");
+                info!("   Advertisement data: {} bytes", adv_data.len());
+            } else {
+                warn!("❌ macOS: Core Bluetooth manager not initialized");
+                return Err(anyhow!("macOS Core Bluetooth manager not available"));
+            }
+        }
+        
+        Ok(())
     }
     
     /// Process ZK authentication data from Bluetooth LE

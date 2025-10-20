@@ -36,7 +36,6 @@ pub mod relays;
 pub mod routing;
 pub mod protocols;
 pub mod bootstrap;
-pub mod messaging;
 pub mod monitoring;
 pub mod zk_integration;
 pub mod testing;

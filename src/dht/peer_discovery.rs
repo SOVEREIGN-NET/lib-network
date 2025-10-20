@@ -8,9 +8,9 @@ use anyhow::{Result, anyhow};
 use serde::{Serialize, Deserialize};
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH, Duration};
+use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::RwLock;
-use tracing::{info, warn, debug, error};
+use tracing::{info, warn, debug};
 
 use lib_crypto::{PublicKey, hash_blake3};
 use lib_crypto::post_quantum::dilithium::{dilithium2_verify};

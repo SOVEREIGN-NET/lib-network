@@ -69,6 +69,7 @@ pub struct ZhtpAuthVerification {
 }
 
 /// ZHTP Authentication Manager
+#[derive(Debug)]
 pub struct ZhtpAuthManager {
     /// This node's Dilithium keypair
     node_dilithium_keypair: (Vec<u8>, Vec<u8>), // (public_key, secret_key)
