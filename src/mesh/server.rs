@@ -2,13 +2,14 @@ use anyhow::{anyhow, Result};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tokio::time::Duration;
+use tokio::time::{Duration, Instant};
 use uuid::Uuid;
-use tracing::{info, warn, error};
+use tracing::{info, warn, error, debug};
 use serde_json;
 
 use lib_crypto::{PublicKey, Signature};
 use crate::mesh::{MeshConnection, MeshProtocolStats};
+use crate::protocols::NetworkProtocol;
 
 /// Simple in-memory routing statistics (no blockchain state)
 #[derive(Debug, Clone, Default)]
@@ -23,6 +24,127 @@ pub struct RoutingStats {
     pub successful_routes: u64,
     /// Number of failed routing operations
     pub failed_routes: u64,
+    /// Protocol usage distribution (for bonus calculation)
+    pub protocol_usage: HashMap<String, u64>,
+}
+
+/// Quality metrics for calculating quality bonuses
+#[derive(Debug, Clone)]
+pub struct QualityMetrics {
+    /// When the node started
+    pub start_time: Instant,
+    /// Total successful operations
+    pub successful_ops: u64,
+    /// Total failed operations
+    pub failed_ops: u64,
+    /// Latency samples (in milliseconds)
+    pub latency_samples: Vec<u64>,
+    /// Maximum latency samples to keep
+    pub max_samples: usize,
+}
+
+impl Default for QualityMetrics {
+    fn default() -> Self {
+        Self {
+            start_time: Instant::now(),
+            successful_ops: 0,
+            failed_ops: 0,
+            latency_samples: Vec::new(),
+            max_samples: 1000, // Keep last 1000 samples
+        }
+    }
+}
+
+impl QualityMetrics {
+    /// Calculate uptime percentage
+    pub fn uptime_percentage(&self) -> f64 {
+        // For now, assume 100% uptime if node is running
+        // In production, this would track downtime periods
+        100.0
+    }
+    
+    /// Calculate success rate percentage
+    pub fn success_rate(&self) -> f64 {
+        let total = self.successful_ops + self.failed_ops;
+        if total == 0 {
+            return 100.0;
+        }
+        (self.successful_ops as f64 / total as f64) * 100.0
+    }
+    
+    /// Calculate average latency in milliseconds
+    pub fn average_latency(&self) -> f64 {
+        if self.latency_samples.is_empty() {
+            return 0.0;
+        }
+        let sum: u64 = self.latency_samples.iter().sum();
+        sum as f64 / self.latency_samples.len() as f64
+    }
+    
+    /// Record a successful operation with latency
+    pub fn record_success(&mut self, latency_ms: u64) {
+        self.successful_ops += 1;
+        self.latency_samples.push(latency_ms);
+        
+        // Keep only recent samples
+        if self.latency_samples.len() > self.max_samples {
+            self.latency_samples.remove(0);
+        }
+    }
+    
+    /// Record a failed operation
+    pub fn record_failure(&mut self) {
+        self.failed_ops += 1;
+    }
+    
+    /// Calculate quality bonus multiplier based on metrics
+    pub fn calculate_quality_multiplier(&self) -> f64 {
+        let mut multiplier = 1.0;
+        
+        // Uptime bonus: +5% for >99% uptime
+        let uptime = self.uptime_percentage();
+        if uptime > 99.0 {
+            multiplier += 0.05;
+            debug!("Quality bonus: +5% for {}% uptime", uptime);
+        }
+        
+        // Success rate bonus: +10% for >95% success
+        let success = self.success_rate();
+        if success > 95.0 {
+            multiplier += 0.10;
+            debug!("Quality bonus: +10% for {}% success rate", success);
+        }
+        
+        // Latency bonus: +5% for <50ms average
+        let latency = self.average_latency();
+        if latency > 0.0 && latency < 50.0 {
+            multiplier += 0.05;
+            debug!("Quality bonus: +5% for {:.1}ms average latency", latency);
+        }
+        
+        multiplier
+    }
+}
+
+/// Storage statistics tracked by the mesh server
+/// 
+/// Tracks storage contributions for economic reward calculations
+#[derive(Debug, Clone, Default)]
+pub struct StorageStats {
+    /// Total number of content items stored
+    pub items_stored: u64,
+    /// Total bytes stored (cumulative size of all content)
+    pub bytes_stored: u64,
+    /// Total number of content retrievals served
+    pub retrievals_served: u64,
+    /// Total storage duration in hours (sum of all content storage time)
+    pub storage_duration_hours: u64,
+    /// Theoretical tokens earned from storage (for display only)
+    pub theoretical_tokens_earned: u64,
+    /// Number of successful storage operations
+    pub successful_storage_ops: u64,
+    /// Number of failed storage operations
+    pub failed_storage_ops: u64,
 }
 
 // use crate::types::*; // Removed - unused imports
@@ -68,8 +190,6 @@ pub struct SecurityAuditLog {
     pub success: bool,
     pub reason: String,
 }
-
-use crate::protocols::NetworkProtocol;
 
 use crate::bootstrap::{start_tcp_bootstrap_server, start_udp_bootstrap_server};
 use crate::monitoring::health_monitoring::HealthMonitor;
@@ -123,6 +243,12 @@ pub struct ZhtpMeshServer {
     
     /// Routing statistics and performance metrics (in-memory counters)
     pub routing_stats: Arc<RwLock<RoutingStats>>,
+    
+    /// Storage statistics and performance metrics (in-memory counters)
+    pub storage_stats: Arc<RwLock<StorageStats>>,
+    
+    /// Quality metrics for bonus calculation
+    pub quality_metrics: Arc<RwLock<QualityMetrics>>,
     
     /// Active Bluetooth LE mesh protocol instance
     pub bluetooth_protocol: Option<Arc<RwLock<crate::protocols::bluetooth::BluetoothMeshProtocol>>>,
@@ -289,27 +415,78 @@ fn filter_protocols_by_hardware(
 }
 
 impl ZhtpMeshServer {
-    /// Record routing activity when we forward a message
-    /// Note: This only tracks statistics. Actual token rewards should be handled
-    /// by the application layer (zhtp) via blockchain transactions.
+    /// Record routing activity when we forward a message with protocol and quality bonuses
+    /// 
+    /// # Arguments
+    /// * `data_size` - Size of the routed data in bytes
+    /// * `hop_count` - Number of hops in the route
+    /// * `protocol` - Network protocol used (for protocol bonuses)
+    /// * `latency_ms` - Latency of the operation in milliseconds (for quality bonuses)
+    /// 
+    /// # Bonuses
+    /// * **Protocol Bonuses**:
+    ///   - Bluetooth LE: 2.0x (mesh-first incentive)
+    ///   - WiFi Direct: 1.5x (local mesh)
+    ///   - LoRaWAN: 3.0x (rural/long-range)
+    ///   - TCP: 1.0x (standard internet, no bonus)
+    /// * **Quality Bonuses** (calculated separately):
+    ///   - +5% for >99% uptime
+    ///   - +10% for >95% success rate
+    ///   - +5% for <50ms average latency
     pub async fn record_routing_activity(
         &self,
         data_size: usize,
         hop_count: u8,
+        protocol: NetworkProtocol,
+        latency_ms: u64,
     ) -> Result<()> {
-        // Calculate theoretical reward for display purposes
+        // Calculate base reward components
         let base_reward = 10; // 10 tokens per message routed
         let size_bonus = (data_size / 1024) as u64; // 1 token per KB
         let hop_bonus = hop_count as u64 * 5; // 5 tokens per hop
-        let theoretical_reward = base_reward + size_bonus + hop_bonus;
         
-        // Update in-memory statistics only
+        // Sum base components
+        let base_total = base_reward + size_bonus + hop_bonus;
+        
+        // Apply protocol multiplier (mesh incentive!)
+        let protocol_multiplier = match protocol {
+            NetworkProtocol::BluetoothLE => 2.0,      // 2x for true mesh
+            NetworkProtocol::BluetoothClassic => 1.8, // 1.8x for BT classic
+            NetworkProtocol::WiFiDirect => 1.5,       // 1.5x for local mesh
+            NetworkProtocol::LoRaWAN => 3.0,          // 3x for rural/long-range
+            NetworkProtocol::Satellite => 2.5,        // 2.5x for satellite
+            NetworkProtocol::TCP => 1.0,              // Standard internet (no bonus)
+            NetworkProtocol::UDP => 1.1,              // Slight bonus for UDP mesh
+        };
+        
+        let reward_with_protocol = (base_total as f64 * protocol_multiplier) as u64;
+        
+        // Get quality multiplier
+        let quality_multiplier = {
+            let metrics = self.quality_metrics.read().await;
+            metrics.calculate_quality_multiplier()
+        };
+        
+        // Apply quality multiplier
+        let final_reward = (reward_with_protocol as f64 * quality_multiplier) as u64;
+        
+        // Update quality metrics (record success with latency)
+        {
+            let mut metrics = self.quality_metrics.write().await;
+            metrics.record_success(latency_ms);
+        }
+        
+        // Update in-memory statistics
         {
             let mut stats = self.routing_stats.write().await;
             stats.messages_routed += 1;
             stats.bytes_routed += data_size as u64;
-            stats.theoretical_tokens_earned += theoretical_reward;
+            stats.theoretical_tokens_earned += final_reward;
             stats.successful_routes += 1;
+            
+            // Track protocol usage for statistics
+            let protocol_name = format!("{:?}", protocol);
+            *stats.protocol_usage.entry(protocol_name).or_insert(0) += 1;
         }
         
         // Also update mesh protocol stats
@@ -318,9 +495,34 @@ impl ZhtpMeshServer {
             mesh_stats.total_data_routed += data_size as u64;
         }
         
-        info!("Routed {} bytes ({} hops) - theoretical reward: {} tokens", 
-              data_size, hop_count, theoretical_reward);
+        info!(
+            "Routed {} bytes ({} hops) via {:?} - base: {}, protocol: {}x, quality: {:.2}x, final: {} tokens",
+            data_size, hop_count, protocol, base_total, protocol_multiplier, quality_multiplier, final_reward
+        );
+        
         Ok(())
+    }
+    
+    /// Record routing failure (for quality metrics)
+    pub async fn record_routing_failure(&self) -> Result<()> {
+        let mut metrics = self.quality_metrics.write().await;
+        metrics.record_failure();
+        
+        let mut stats = self.routing_stats.write().await;
+        stats.failed_routes += 1;
+        
+        Ok(())
+    }
+    
+    /// Get quality metrics summary
+    pub async fn get_quality_summary(&self) -> (f64, f64, f64, f64) {
+        let metrics = self.quality_metrics.read().await;
+        (
+            metrics.uptime_percentage(),
+            metrics.success_rate(),
+            metrics.average_latency(),
+            metrics.calculate_quality_multiplier(),
+        )
     }
     
     /// Get node's routing statistics
@@ -855,6 +1057,12 @@ impl ZhtpMeshServer {
         // Initialize routing statistics (in-memory counters only)
         let routing_stats = Arc::new(RwLock::new(RoutingStats::default()));
         
+        // Initialize storage statistics (in-memory counters only)
+        let storage_stats = Arc::new(RwLock::new(StorageStats::default()));
+        
+        // Initialize quality metrics for bonus calculation
+        let quality_metrics = Arc::new(RwLock::new(QualityMetrics::default()));
+        
         let server = ZhtpMeshServer {
             server_id,
             mesh_node,
@@ -870,6 +1078,12 @@ impl ZhtpMeshServer {
             
             // Simple routing statistics tracking (no wallets needed)
             routing_stats,
+            
+            // Simple storage statistics tracking (no wallets needed)
+            storage_stats,
+            
+            // Quality metrics for bonus calculation
+            quality_metrics,
             
             // Initialize protocol instances as None - will be created when protocols start
             bluetooth_protocol: None,
@@ -1823,6 +2037,149 @@ impl ZhtpMeshServer {
         
         info!("ZHTP Mesh Server stopped successfully");
         Ok(())
+    }
+    
+    /// Get theoretical tokens earned from routing (for reward processing)
+    /// 
+    /// This returns the accumulated theoretical tokens that would be earned
+    /// based on routing activity. Used by the routing reward processor to
+    /// determine when to create reward transactions.
+    pub async fn get_theoretical_tokens_earned(&self) -> u64 {
+        let stats = self.routing_stats.read().await;
+        stats.theoretical_tokens_earned
+    }
+    
+    /// Get total bytes routed (for metrics and monitoring)
+    pub async fn get_total_bytes_routed(&self) -> u64 {
+        let stats = self.routing_stats.read().await;
+        stats.bytes_routed
+    }
+    
+    /// Get total messages routed (for metrics and monitoring)
+    pub async fn get_total_messages_routed(&self) -> u64 {
+        let stats = self.routing_stats.read().await;
+        stats.messages_routed
+    }
+    
+    /// Reset theoretical tokens counter after successful reward claim
+    /// 
+    /// This should be called after a reward transaction has been successfully
+    /// created and added to the blockchain to prevent double-counting.
+    /// 
+    /// # Example
+    /// ```rust
+    /// // After creating reward transaction
+    /// mesh_server.reset_reward_counter().await;
+    /// ```
+    pub async fn reset_reward_counter(&self) {
+        let mut stats = self.routing_stats.write().await;
+        let previous = stats.theoretical_tokens_earned;
+        stats.theoretical_tokens_earned = 0;
+        
+        if previous > 0 {
+            info!("🔄 Routing reward counter reset: {} ZHTP claimed", previous);
+        }
+    }
+    
+    /// Get complete routing statistics snapshot
+    /// 
+    /// Returns a complete snapshot of current routing statistics including:
+    /// - Messages routed
+    /// - Bytes routed
+    /// - Theoretical tokens earned
+    /// - Success/failure rates
+    pub async fn get_routing_stats_snapshot(&self) -> RoutingStats {
+        let stats = self.routing_stats.read().await;
+        stats.clone()
+    }
+    
+    /// Get the node's unique identifier as a 32-byte array
+    /// 
+    /// Converts the server's UUID to a 32-byte array for use in blockchain
+    /// transactions and reward attribution. The UUID (16 bytes) is padded
+    /// with zeros to create a 32-byte identifier.
+    /// 
+    /// # Returns
+    /// A 32-byte array representing this node's unique identifier
+    pub fn get_node_id(&self) -> [u8; 32] {
+        let uuid_bytes = self.server_id.as_bytes();
+        let mut node_id = [0u8; 32];
+        node_id[..16].copy_from_slice(uuid_bytes);
+        node_id
+    }
+    
+    // ==================== Storage Statistics Methods ====================
+    
+    /// Update storage statistics when content is stored
+    /// 
+    /// This should be called by the storage system when new content is successfully stored.
+    /// It updates the running totals for items stored, bytes stored, and storage duration.
+    /// 
+    /// # Arguments
+    /// * `content_size` - Size in bytes of the stored content
+    /// * `duration_hours` - Expected storage duration in hours
+    /// * `tokens_earned` - Theoretical tokens earned for this storage operation
+    pub async fn record_storage_operation(
+        &self,
+        content_size: u64,
+        duration_hours: u64,
+        tokens_earned: u64,
+    ) {
+        let mut stats = self.storage_stats.write().await;
+        stats.items_stored += 1;
+        stats.bytes_stored += content_size;
+        stats.storage_duration_hours += duration_hours;
+        stats.theoretical_tokens_earned += tokens_earned;
+        stats.successful_storage_ops += 1;
+        
+        info!(
+            "📦 Storage recorded: {} bytes, {} hours, {} ZHTP earned",
+            content_size, duration_hours, tokens_earned
+        );
+    }
+    
+    /// Update storage statistics when content is retrieved
+    /// 
+    /// This should be called by the storage system when content is successfully retrieved.
+    pub async fn record_retrieval_operation(&self) {
+        let mut stats = self.storage_stats.write().await;
+        stats.retrievals_served += 1;
+        
+        info!("📤 Retrieval served: total retrievals = {}", stats.retrievals_served);
+    }
+    
+    /// Record a failed storage operation
+    pub async fn record_storage_failure(&self) {
+        let mut stats = self.storage_stats.write().await;
+        stats.failed_storage_ops += 1;
+    }
+    
+    /// Reset theoretical tokens counter after successful reward claim
+    /// 
+    /// This should be called after a storage reward transaction has been successfully
+    /// created and added to the blockchain to prevent double-counting.
+    pub async fn reset_storage_reward_counter(&self) {
+        let mut stats = self.storage_stats.write().await;
+        let previous = stats.theoretical_tokens_earned;
+        stats.theoretical_tokens_earned = 0;
+        
+        if previous > 0 {
+            info!("🔄 Storage reward counter reset: {} ZHTP claimed", previous);
+        }
+    }
+    
+    /// Get complete storage statistics snapshot
+    /// 
+    /// Returns a complete snapshot of current storage statistics including:
+    /// - Items stored
+    /// - Bytes stored
+    /// - Retrievals served
+    /// - Storage duration
+    /// - Theoretical tokens earned
+    /// - Success/failure rates
+    pub async fn get_storage_stats_snapshot(&self) -> StorageStats {
+        let stats = self.storage_stats.read().await;
+        stats.clone()
     }
 }
 

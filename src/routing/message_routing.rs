@@ -27,6 +27,8 @@ pub struct MeshMessageRouter {
     pub delivery_tracking: Arc<RwLock<HashMap<u64, DeliveryStatus>>>,
     /// Route cache for optimization
     pub route_cache: Arc<RwLock<HashMap<PublicKey, CachedRoute>>>,
+    /// Optional mesh server reference for reward tracking
+    pub mesh_server: Option<Arc<RwLock<crate::mesh::server::ZhtpMeshServer>>>,
 }
 
 /// Routing table for mesh network
@@ -174,6 +176,32 @@ impl MeshMessageRouter {
             })),
             delivery_tracking: Arc::new(RwLock::new(HashMap::new())),
             route_cache: Arc::new(RwLock::new(HashMap::new())),
+            mesh_server: None, // Can be set later with set_mesh_server()
+        }
+    }
+    
+    /// Set mesh server reference for reward tracking
+    pub fn set_mesh_server(&mut self, mesh_server: Arc<RwLock<crate::mesh::server::ZhtpMeshServer>>) {
+        self.mesh_server = Some(mesh_server);
+    }
+    
+    /// Estimate message size in bytes
+    fn estimate_message_size(message: &ZhtpMeshMessage) -> usize {
+        match message {
+            ZhtpMeshMessage::ZhtpRequest { body, headers, .. } => {
+                body.len() + headers.iter().map(|(k, v)| k.len() + v.len()).sum::<usize>() + 100
+            },
+            ZhtpMeshMessage::ZhtpResponse { body, headers, .. } => {
+                body.len() + headers.iter().map(|(k, v)| k.len() + v.len()).sum::<usize>() + 100
+            },
+            ZhtpMeshMessage::LongRangeRoute { payload, relay_chain, .. } => {
+                payload.len() + relay_chain.iter().map(|s| s.len()).sum::<usize>() + 64
+            },
+            ZhtpMeshMessage::BlockchainData { data, .. } => data.len() + 100,
+            ZhtpMeshMessage::NewBlock { block, .. } => block.len() + 100,
+            ZhtpMeshMessage::NewTransaction { transaction, .. } => transaction.len() + 100,
+            ZhtpMeshMessage::UbiDistribution { proof, .. } => proof.len() + 100,
+            _ => 256, // Default estimate for other message types
         }
     }
     
@@ -516,6 +544,38 @@ impl MeshMessageRouter {
                     .duration_since(std::time::UNIX_EPOCH)
                     .unwrap_or_default()
                     .as_secs();
+            }
+        }
+        
+        // Record routing activity for rewards (if mesh server available)
+        if let Some(mesh_server) = &self.mesh_server {
+            let message_size = Self::estimate_message_size(&message);
+            let hop_count = route.len() as u8;
+            
+            // Use the protocol of the first hop (or most significant protocol)
+            let primary_protocol = route.first()
+                .map(|hop| hop.protocol.clone())
+                .unwrap_or(NetworkProtocol::TCP);
+            
+            // Calculate average latency across all hops
+            let total_latency: u64 = route.iter().map(|hop| hop.latency_ms as u64).sum();
+            let avg_latency = if !route.is_empty() { 
+                total_latency / route.len() as u64 
+            } else { 
+                0 
+            };
+            
+            // Record the routing activity with rewards
+            if let Err(e) = mesh_server.read().await.record_routing_activity(
+                message_size,
+                hop_count,
+                primary_protocol,
+                avg_latency,
+            ).await {
+                warn!("Failed to record routing activity: {}", e);
+            } else {
+                info!("✅ Routing rewards recorded: {} bytes, {} hops, avg {}ms latency", 
+                      message_size, hop_count, avg_latency);
             }
         }
         

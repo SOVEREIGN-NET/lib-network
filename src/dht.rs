@@ -17,6 +17,7 @@ use tokio::sync::{RwLock, Mutex};
 use tracing::{info, warn, debug};
 
 use lib_storage::{UnifiedStorageSystem, UnifiedStorageConfig};
+use lib_storage::dht::routing::KademliaRouter;
 use lib_identity::ZhtpIdentity;
 
 // Native binary DHT protocol
@@ -40,7 +41,6 @@ pub use relay::ZhtpRelayProtocol;
 pub use peer_discovery::{ZhtpPeerRegistry, ZhtpPeerInfo, PeerQueryFilter, find_zhtp_peers, find_best_relay_peer};
 
 /// DHT Client with native binary protocol support
-#[derive(Debug)]
 pub struct DHTClient {
     /// Identity for DHT operations
     identity: ZhtpIdentity,
@@ -48,7 +48,9 @@ pub struct DHTClient {
     storage_system: Arc<RwLock<UnifiedStorageSystem>>,
     /// Enhanced content resolution cache with LRU+TTL
     content_cache: Arc<ThreadSafeDHTCache>,
-    /// Peer information
+    /// Kademlia routing table for O(log N) peer discovery
+    kademlia_router: Arc<RwLock<KademliaRouter>>,
+    /// Legacy peer list (for backwards compatibility)
     peers: Arc<RwLock<Vec<String>>>,
     /// DHT statistics
     stats: Arc<Mutex<DHTStatistics>>,
@@ -56,6 +58,16 @@ pub struct DHTClient {
     protocol_handler: Arc<Mutex<Option<DhtProtocolHandler>>>,
     /// ZHTP blockchain-verified peer registry
     peer_registry: Arc<ZhtpPeerRegistry>,
+}
+
+impl std::fmt::Debug for DHTClient {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DHTClient")
+            .field("identity", &self.identity)
+            .field("cache_size", &"<cached>")
+            .field("kademlia_router", &"<routing_table>")
+            .finish()
+    }
 }
 
 /// DHT operation statistics
@@ -203,6 +215,11 @@ impl DHTClient {
         // Initialize ZHTP peer registry
         let peer_registry = Arc::new(ZhtpPeerRegistry::new(identity.clone()));
         
+        // Initialize Kademlia routing table with K=20 (standard)
+        let kademlia_router = Arc::new(RwLock::new(
+            KademliaRouter::new(identity.id.clone(), 20)
+        ));
+        
         let client = Self {
             identity: identity.clone(),
             storage_system: Arc::new(RwLock::new(storage_system)),
@@ -210,6 +227,7 @@ impl DHTClient {
                 1000,  // Max 1000 cached entries
                 std::time::Duration::from_secs(3600) // 1 hour TTL
             )),
+            kademlia_router,
             peers: Arc::new(RwLock::new(Vec::new())),
             stats: Arc::new(Mutex::new(DHTStatistics::default())),
             protocol_handler: Arc::new(Mutex::new(None)),

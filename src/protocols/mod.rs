@@ -10,6 +10,7 @@ pub mod satellite;
 pub mod zhtp_auth;
 pub mod zhtp_encryption;
 
+
 // Enhanced protocol implementations with platform-specific optimizations
 // NOTE: enhanced_bluetooth functionality is in bluetooth/enhanced.rs, not a separate top-level module
 // #[cfg(feature = "enhanced-bluetooth")]
