@@ -1,5 +1,5 @@
 use anyhow::Result;
-// use tokio::time::Duration; // Removed - unused import
+use std::time::Duration;
 use rand;
 use crate::types::wifi_security::WiFiSecurity;
 use crate::discovery::hardware::HardwareCapabilities;
@@ -27,6 +27,23 @@ fn estimate_bandwidth_from_signal(signal_dbm: i32) -> u32 {
         5 // Weak signal
     } else {
         1 // Very weak signal
+    }
+}
+
+/// Estimate WiFi channel from signal strength
+/// Returns a default channel estimate based on signal strength
+fn estimate_channel_from_signal(signal_dbm: i32) -> u8 {
+    // This is a simplified estimation - in practice, channel would be
+    // extracted from frequency or beacon frame information
+    // Common 2.4GHz channels: 1, 6, 11
+    // Common 5GHz channels: 36, 40, 44, 48, 149, 153, 157, 161
+    
+    if signal_dbm >= -50 {
+        6 // Strong signal, assume common 2.4GHz channel
+    } else if signal_dbm >= -70 {
+        11 // Moderate signal
+    } else {
+        1 // Weak signal, default channel
     }
 }
 

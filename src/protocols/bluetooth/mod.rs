@@ -1782,7 +1782,8 @@ Value=00
             // Update tracked device with characteristics
             if let Some(mut device) = self.get_tracked_device(device_address).await {
                 device.characteristics = characteristics;
-                self.track_device(device_address, device).await?;
+                let raw_mac = parse_mac_address(device_address)?;
+                self.track_device(&raw_mac, device).await?;
             }
         }
         

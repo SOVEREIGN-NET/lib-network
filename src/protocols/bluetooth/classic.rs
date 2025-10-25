@@ -1738,7 +1738,7 @@ impl BluetoothClassicProtocol {
         info!(" Linux: Connecting to RFCOMM service on {} channel {}", device_address, channel);
         
         // Parse MAC address
-        let mac_bytes = Self::parse_mac_address(device_address)?;
+        let mac_bytes = parse_mac_address(device_address)?;
         
         // RFCOMM protocol constant
         const BTPROTO_RFCOMM: i32 = 3;
@@ -2311,11 +2311,11 @@ mod tests {
     #[test]
     fn test_mac_address_parsing() {
         let mac_str = "AA:BB:CC:DD:EE:FF";
-        let mac = BluetoothClassicProtocol::parse_mac_address(mac_str).unwrap();
+        let mac = parse_mac_address(mac_str).unwrap();
         assert_eq!(mac, [0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF]);
         
         let mac_str2 = "AA-BB-CC-DD-EE-FF";
-        let mac2 = BluetoothClassicProtocol::parse_mac_address(mac_str2).unwrap();
+        let mac2 = parse_mac_address(mac_str2).unwrap();
         assert_eq!(mac2, [0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF]);
     }
     
