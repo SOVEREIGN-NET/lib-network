@@ -41,6 +41,10 @@ pub mod rfcomm_channels {
     pub const COORDINATION: u8 = 4;      // DHT queries, coordination
 }
 
+// macOS Bluetooth constants (from IOBluetooth framework)
+#[cfg(target_os = "macos")]
+const AF_BLUETOOTH: i32 = 31; // PF_BLUETOOTH on macOS
+
 /// Bluetooth Classic RFCOMM mesh protocol handler
 #[derive(Clone)]
 pub struct BluetoothClassicProtocol {
@@ -916,7 +920,7 @@ impl BluetoothClassicProtocol {
         // Create RFCOMM socket using BSD API
         let sock_fd = unsafe {
             libc::socket(
-                libc::AF_BLUETOOTH,
+                AF_BLUETOOTH,
                 libc::SOCK_STREAM,
                 BTPROTO_RFCOMM,
             )
@@ -938,7 +942,7 @@ impl BluetoothClassicProtocol {
         
         let addr = sockaddr_rc {
             rc_len: std::mem::size_of::<sockaddr_rc>() as u8,
-            rc_family: libc::AF_BLUETOOTH as libc::sa_family_t,
+            rc_family: AF_BLUETOOTH as libc::sa_family_t,
             rc_bdaddr: [0; 6], // BDADDR_ANY - bind to any local Bluetooth adapter
             rc_channel: RFCOMM_CHANNEL,
         };
@@ -1906,14 +1910,14 @@ impl BluetoothClassicProtocol {
         info!("🍎 macOS: Connecting to RFCOMM service on {} channel {}", device_address, channel);
         
         // Parse MAC address
-        let mac_bytes = Self::parse_mac_address(device_address)?;
+        let mac_bytes = parse_mac_address(device_address)?;
         
         // RFCOMM protocol constant
         const BTPROTO_RFCOMM: i32 = 3;
         
         // Create RFCOMM socket using BSD API
         let sock_fd = unsafe {
-            libc::socket(libc::AF_BLUETOOTH, libc::SOCK_STREAM, BTPROTO_RFCOMM)
+            libc::socket(AF_BLUETOOTH, libc::SOCK_STREAM, BTPROTO_RFCOMM)
         };
         
         if sock_fd < 0 {
@@ -1931,7 +1935,7 @@ impl BluetoothClassicProtocol {
         
         let addr = sockaddr_rc {
             rc_len: std::mem::size_of::<sockaddr_rc>() as u8,
-            rc_family: libc::AF_BLUETOOTH as libc::sa_family_t,
+            rc_family: AF_BLUETOOTH as libc::sa_family_t,
             rc_bdaddr: mac_bytes,
             rc_channel: channel,
         };
