@@ -2,14 +2,16 @@
 //! 
 //! Central message routing and handling for ZHTP mesh protocol
 
-use anyhow::Result;
+use anyhow::{Result, anyhow};
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::RwLock;
 use tracing::{info, warn, error};
 use lib_crypto::PublicKey;
 
-use crate::types::mesh_message::ZhtpMeshMessage;
+use crate::types::mesh_message::{ZhtpMeshMessage, MeshMessageEnvelope};
+use crate::types::network_protocol::NetworkProtocol;
 use crate::mesh::connection::MeshConnection;
 
 use crate::relays::LongRangeRelay;
@@ -23,6 +25,10 @@ pub struct MeshMessageHandler {
     pub long_range_relays: Arc<RwLock<HashMap<String, LongRangeRelay>>>,
     /// Revenue pools
     pub revenue_pools: Arc<RwLock<HashMap<String, u64>>>,
+    /// Message router for sending responses (Phase 2)
+    pub message_router: Option<Arc<RwLock<crate::routing::message_routing::MeshMessageRouter>>>,
+    /// Node ID for this handler (Phase 2)
+    pub node_id: Option<PublicKey>,
 }
 
 impl MeshMessageHandler {
@@ -36,7 +42,19 @@ impl MeshMessageHandler {
             mesh_connections,
             long_range_relays,
             revenue_pools,
+            message_router: None,
+            node_id: None,
         }
+    }
+    
+    /// Set message router for sending responses (Phase 2)
+    pub fn set_message_router(&mut self, router: Arc<RwLock<crate::routing::message_routing::MeshMessageRouter>>) {
+        self.message_router = Some(router);
+    }
+    
+    /// Set node ID (Phase 2)
+    pub fn set_node_id(&mut self, node_id: PublicKey) {
+        self.node_id = Some(node_id);
     }
     
     /// Handle incoming mesh message
@@ -71,6 +89,12 @@ impl MeshMessageHandler {
             },
             ZhtpMeshMessage::BlockchainData { request_id, chunk_index, total_chunks, data, complete_data_hash } => {
                 self.handle_blockchain_data(request_id, chunk_index, total_chunks, data, complete_data_hash).await?;
+            },
+            ZhtpMeshMessage::NewBlock { block, sender, height, timestamp } => {
+                self.handle_new_block(block, sender, height, timestamp).await?;
+            },
+            ZhtpMeshMessage::NewTransaction { transaction, sender, tx_hash, fee } => {
+                self.handle_new_transaction(transaction, sender, tx_hash, fee).await?;
             },
         }
         Ok(())
@@ -290,7 +314,7 @@ impl MeshMessageHandler {
         Ok(())
     }
     
-    /// Handle native ZHTP protocol request from browser/API clients
+    /// Handle native ZHTP protocol request from browser/API clients (UPDATED - Phase 3)
     async fn handle_lib_request(
         &self,
         requester: PublicKey,
@@ -300,21 +324,125 @@ impl MeshMessageHandler {
         body: Vec<u8>,
         timestamp: u64,
     ) -> Result<()> {
-        info!("Native ZHTP Request: {} {} from {:?}", method, uri, hex::encode(&requester.key_id[0..8]));
+        info!("📥 Native ZHTP Request: {} {} from {:?}", method, uri, hex::encode(&requester.key_id[0..8]));
         
-        // TODO: Implement full ZHTP request routing
-        // - Parse headers (Content-Type, Authorization, etc.)
-        // - Process body based on Content-Type
-        // - Validate timestamp (replay protection)
-        // - Route to appropriate handler based on URI
-        info!(" Headers: {} present, Body: {} bytes, Timestamp: {}", 
-              headers.len(), body.len(), timestamp);
+        // Validate timestamp (replay protection)
+        let now = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs();
+        if now.abs_diff(timestamp) > 300 {  // 5 minute window
+            warn!("❌ Request timestamp too old/future: {} vs {}", timestamp, now);
+            return self.send_error_response(requester, 400, "Request timestamp invalid".to_string()).await;
+        }
         
-        // This would route to the ZHTP API handler
-        // For now, just log the request
-        info!(" ZHTP Request processed: {} {}", method, uri);
+        info!("✅ Timestamp valid, headers: {}, body: {} bytes", headers.len(), body.len());
+        
+        // For Phase 3, we'll create a simplified ZHTP response
+        // In production, this would forward to lib-protocols ZHTP server
+        // For now, we'll handle basic requests directly
+        
+        let (status, status_message, response_body) = match method.as_str() {
+            "GET" => {
+                info!("Processing GET request for {}", uri);
+                // Simulate content retrieval
+                if uri == "/health" {
+                    (200, "OK".to_string(), b"Mesh node healthy".to_vec())
+                } else if uri.starts_with("/content/") {
+                    (200, "OK".to_string(), format!("Content for {}", uri).into_bytes())
+                } else {
+                    (404, "Not Found".to_string(), b"Resource not found".to_vec())
+                }
+            }
+            "POST" => {
+                info!("Processing POST request for {}", uri);
+                (200, "OK".to_string(), b"Data received".to_vec())
+            }
+            _ => {
+                (405, "Method Not Allowed".to_string(), b"Method not supported".to_vec())
+            }
+        };
+        
+        // Generate request ID for tracking
+        let request_id = self.generate_request_id().await;
+        
+        // Create response message
+        let mut response_headers = HashMap::new();
+        response_headers.insert("Content-Type".to_string(), "text/plain".to_string());
+        response_headers.insert("Content-Length".to_string(), response_body.len().to_string());
+        response_headers.insert("X-Mesh-Node".to_string(), "ZHTP/1.0".to_string());
+        
+        let response_message = ZhtpMeshMessage::ZhtpResponse {
+            request_id,
+            status,
+            status_message: status_message.clone(),
+            headers: response_headers,
+            body: response_body,
+            timestamp: SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs(),
+        };
+        
+        // Send response back to requester via mesh
+        info!("📤 Sending response {} {} back to requester", status, status_message);
+        self.send_response_to_requester(requester, response_message).await?;
+        
+        info!("✅ ZHTP Request processed: {} {}", method, uri);
         
         Ok(())
+    }
+    
+    /// Send response back through mesh network (NEW - Phase 3)
+    async fn send_response_to_requester(
+        &self,
+        requester: PublicKey,
+        response: ZhtpMeshMessage,
+    ) -> Result<()> {
+        if let Some(router) = &self.message_router {
+            if let Some(my_id) = &self.node_id {
+                let router_guard = router.read().await;
+                router_guard.route_message_with_forwarding(
+                    requester.clone(),
+                    response,
+                    my_id.clone()
+                ).await?;
+                info!("✅ Response routed back to requester");
+            } else {
+                warn!("⚠️ Node ID not set, cannot send response");
+            }
+        } else {
+            warn!("⚠️ Message router not available, cannot send response");
+        }
+        Ok(())
+    }
+    
+    /// Send error response (NEW - Phase 3)
+    async fn send_error_response(
+        &self,
+        requester: PublicKey,
+        status: u16,
+        message: String,
+    ) -> Result<()> {
+        let request_id = self.generate_request_id().await;
+        let mut headers = HashMap::new();
+        headers.insert("Content-Type".to_string(), "text/plain".to_string());
+        
+        let error_message = ZhtpMeshMessage::ZhtpResponse {
+            request_id,
+            status,
+            status_message: message.clone(),
+            headers,
+            body: message.into_bytes(),
+            timestamp: SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs(),
+        };
+        
+        self.send_response_to_requester(requester, error_message).await
+    }
+    
+    /// Generate unique request ID (NEW - Phase 3)
+    async fn generate_request_id(&self) -> u64 {
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos() as u64;
+        
+        // Combine timestamp with random bits for uniqueness
+        timestamp ^ (rand::random::<u64>() >> 16)
     }
     
     /// Handle native ZHTP protocol response
@@ -340,27 +468,130 @@ impl MeshMessageHandler {
         Ok(())
     }
 
-    /// Handle blockchain request from peer
+    /// Handle blockchain request from peer (UPDATED - Phase 3)
     async fn handle_blockchain_request(
         &self,
         requester: PublicKey,
         request_id: u64,
         from_height: Option<u64>,
     ) -> Result<()> {
-        info!(" Blockchain request from peer {:?} (request_id: {}, from_height: {:?})", 
+        info!("📦 Blockchain request from peer {:?} (request_id: {}, from_height: {:?})", 
               hex::encode(&requester.key_id[0..8]), request_id, from_height);
         
-        // TODO: Send blockchain data back to requester
-        // - Query blockchain from runtime layer
-        // - Chunk data appropriately
-        // - Send BlockchainData messages back to requester
+        // Try to get blockchain from shared instance
+        let blockchain_result = lib_blockchain::get_shared_blockchain().await;
         
-        // This will be implemented in the runtime layer to access blockchain
-        // For now, we log the request - the actual blockchain export will be done
-        // by the unified_server when it receives this message
-        info!("Blockchain request queued for processing by runtime");
+        if blockchain_result.is_err() {
+            warn!("⚠️ Blockchain not available, cannot export data");
+            return Ok(());
+        }
         
+        let blockchain = blockchain_result?;
+        let blockchain_read = blockchain.read().await;
+        
+        // Export blockchain data from specified height
+        let blockchain_data = if let Some(height) = from_height {
+            // Export blocks from height onwards
+            let start_idx = height as usize;
+            let end_idx = blockchain_read.blocks.len();
+            
+            if start_idx >= end_idx {
+                warn!("⚠️ Requested height {} beyond chain length {}", height, end_idx);
+                return Ok(());
+            }
+            
+            let blocks: Vec<_> = blockchain_read.blocks[start_idx..end_idx].to_vec();
+            info!("📊 Exporting {} blocks from height {}", blocks.len(), height);
+            bincode::serialize(&blocks)?
+        } else {
+            // Export entire blockchain
+            info!("📊 Exporting entire blockchain ({} blocks)", blockchain_read.blocks.len());
+            bincode::serialize(&blockchain_read.blocks)?
+        };
+        
+        drop(blockchain_read);
+        drop(blockchain);
+        
+        info!("📦 Serialized {} bytes of blockchain data", blockchain_data.len());
+        
+        // Get protocol being used for peer to determine chunking
+        let protocol = self.get_protocol_for_peer(&requester).await.unwrap_or(NetworkProtocol::BluetoothLE);
+        
+        // Chunk data based on protocol MTU
+        let chunks = self.chunk_blockchain_data(request_id, blockchain_data, &protocol)?;
+        
+        info!("📦 Created {} chunks for transmission", chunks.len());
+        
+        // Send chunks back to requester via mesh
+        if let Some(my_id) = &self.node_id {
+            for (i, chunk_message) in chunks.into_iter().enumerate() {
+                if let Some(router) = &self.message_router {
+                    info!("📤 Sending chunk {}/{}", i + 1, "total");
+                    let router_guard = router.read().await;
+                    router_guard.route_message_with_forwarding(
+                        requester.clone(),
+                        chunk_message,
+                        my_id.clone(),
+                    ).await?;
+                }
+                
+                // Small delay to avoid overwhelming network
+                tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+            }
+        }
+        
+        info!("✅ Blockchain data sent to requester");
         Ok(())
+    }
+    
+    /// Get protocol being used for peer (NEW - Phase 3)
+    async fn get_protocol_for_peer(&self, peer_id: &PublicKey) -> Result<NetworkProtocol> {
+        let connections = self.mesh_connections.read().await;
+        connections.get(peer_id)
+            .map(|c| c.protocol.clone())
+            .ok_or_else(|| anyhow!("No connection to peer"))
+    }
+    
+    /// Chunk blockchain data for protocol (NEW - Phase 3)
+    fn chunk_blockchain_data(
+        &self,
+        request_id: u64,
+        data: Vec<u8>,
+        protocol: &NetworkProtocol,
+    ) -> Result<Vec<ZhtpMeshMessage>> {
+        // Calculate chunk size based on protocol
+        let chunk_size = match protocol {
+            NetworkProtocol::BluetoothLE => 200,        // BLE 5.0 conservative
+            NetworkProtocol::BluetoothClassic => 800,   // Bluetooth Classic larger MTU
+            NetworkProtocol::WiFiDirect => 1400,        // WiFi Direct near-ethernet
+            NetworkProtocol::LoRaWAN => 50,             // LoRa very small packets
+            _ => 512,                                    // Default safe size
+        };
+        
+        // Calculate complete data hash
+        use sha2::{Sha256, Digest};
+        let mut hasher = Sha256::new();
+        hasher.update(&data);
+        let complete_data_hash: [u8; 32] = hasher.finalize().into();
+        
+        // Split into chunks
+        let chunks: Vec<&[u8]> = data.chunks(chunk_size).collect();
+        let total_chunks = chunks.len() as u32;
+        
+        info!("📦 Chunking {} bytes into {} chunks of ~{} bytes", data.len(), total_chunks, chunk_size);
+        
+        // Create ZhtpMeshMessage for each chunk
+        let messages: Vec<ZhtpMeshMessage> = chunks.into_iter().enumerate().map(|(i, chunk)| {
+            ZhtpMeshMessage::BlockchainData {
+                request_id,
+                chunk_index: i as u32,
+                total_chunks,
+                data: chunk.to_vec(),
+                complete_data_hash,
+            }
+        }).collect();
+        
+        Ok(messages)
     }
 
     /// Handle incoming blockchain data chunks
@@ -383,6 +614,96 @@ impl MeshMessageHandler {
         // For now, we log the receipt - the actual reassembly will be done
         // by the unified_server/bootstrap logic
         info!("Blockchain chunk stored for reassembly");
+        
+        Ok(())
+    }
+    
+    /// Handle new block announcement (NEW - Phase 3)
+    pub async fn handle_new_block(
+        &self,
+        block: Vec<u8>,
+        sender: PublicKey,
+        height: u64,
+        timestamp: u64,
+    ) -> Result<()> {
+        info!("📦 New block announcement: height {} from {:?} ({} bytes)", 
+              height, hex::encode(&sender.key_id[0..4]), block.len());
+        
+        // Try to get blockchain from shared instance
+        let blockchain_result = lib_blockchain::get_shared_blockchain().await;
+        
+        if blockchain_result.is_err() {
+            warn!("⚠️ Blockchain not available, cannot process block");
+            return Ok(());
+        }
+        
+        let blockchain = blockchain_result?;
+        
+        // Deserialize block
+        let deserialized_block: lib_blockchain::Block = match bincode::deserialize(&block) {
+            Ok(b) => b,
+            Err(e) => {
+                warn!("❌ Failed to deserialize block: {}", e);
+                return Err(anyhow!("Block deserialization failed: {}", e));
+            }
+        };
+        
+        info!("✅ Block deserialized successfully, adding to chain");
+        
+        // Add block to blockchain
+        let mut blockchain_write = blockchain.write().await;
+        match blockchain_write.add_block(deserialized_block) {
+            Ok(_) => {
+                info!("✅ Block {} added to blockchain", height);
+            }
+            Err(e) => {
+                warn!("❌ Failed to add block: {}", e);
+                return Err(anyhow!("Block addition failed: {}", e));
+            }
+        }
+        
+        Ok(())
+    }
+    
+    /// Handle new transaction announcement (NEW - Phase 3)
+    pub async fn handle_new_transaction(
+        &self,
+        transaction: Vec<u8>,
+        sender: PublicKey,
+        tx_hash: [u8; 32],
+        fee: u64,
+    ) -> Result<()> {
+        info!("💰 New transaction from {:?}: hash={}, fee={}", 
+              hex::encode(&sender.key_id[0..4]), 
+              hex::encode(&tx_hash[0..8]),
+              fee);
+        
+        // Try to get blockchain from shared instance
+        let blockchain_result = lib_blockchain::get_shared_blockchain().await;
+        
+        if blockchain_result.is_err() {
+            warn!("⚠️ Blockchain not available, cannot process transaction");
+            return Ok(());
+        }
+        
+        let blockchain = blockchain_result?;
+        
+        // Deserialize transaction
+        let deserialized_tx: lib_blockchain::Transaction = match bincode::deserialize(&transaction) {
+            Ok(tx) => tx,
+            Err(e) => {
+                warn!("❌ Failed to deserialize transaction: {}", e);
+                return Err(anyhow!("Transaction deserialization failed: {}", e));
+            }
+        };
+        
+        info!("✅ Transaction deserialized successfully, adding to mempool");
+        
+        // Add transaction to pending transactions (mempool)
+        let mut blockchain_write = blockchain.write().await;
+        blockchain_write.add_pending_transaction(deserialized_tx);
+        
+        info!("✅ Transaction added to mempool");
         
         Ok(())
     }

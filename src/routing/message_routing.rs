@@ -10,7 +10,7 @@ use tracing::{info, warn, error, debug};
 use lib_crypto::PublicKey;
 use serde::{Serialize, Deserialize};
 
-use crate::types::mesh_message::ZhtpMeshMessage;
+use crate::types::mesh_message::{ZhtpMeshMessage, MeshMessageEnvelope};
 use crate::mesh::connection::MeshConnection;
 use crate::relays::LongRangeRelay;
 use crate::protocols::NetworkProtocol;
@@ -29,6 +29,12 @@ pub struct MeshMessageRouter {
     pub route_cache: Arc<RwLock<HashMap<PublicKey, CachedRoute>>>,
     /// Optional mesh server reference for reward tracking
     pub mesh_server: Option<Arc<RwLock<crate::mesh::server::ZhtpMeshServer>>>,
+    /// Bluetooth protocol handler for sending messages (Phase 2)
+    pub bluetooth_handler: Option<Arc<RwLock<crate::protocols::bluetooth::classic::BluetoothClassicProtocol>>>,
+    /// WiFi Direct protocol handler (Phase 2)
+    pub wifi_handler: Option<Arc<RwLock<crate::protocols::wifi::WiFiDirectProtocol>>>,
+    /// LoRa protocol handler (Phase 2)
+    pub lora_handler: Option<Arc<RwLock<crate::protocols::lora::LoRaProtocol>>>,
 }
 
 /// Routing table for mesh network
@@ -177,12 +183,30 @@ impl MeshMessageRouter {
             delivery_tracking: Arc::new(RwLock::new(HashMap::new())),
             route_cache: Arc::new(RwLock::new(HashMap::new())),
             mesh_server: None, // Can be set later with set_mesh_server()
+            bluetooth_handler: None,
+            wifi_handler: None,
+            lora_handler: None,
         }
     }
     
     /// Set mesh server reference for reward tracking
     pub fn set_mesh_server(&mut self, mesh_server: Arc<RwLock<crate::mesh::server::ZhtpMeshServer>>) {
         self.mesh_server = Some(mesh_server);
+    }
+    
+    /// Set Bluetooth protocol handler (Phase 2)
+    pub fn set_bluetooth_handler(&mut self, handler: Arc<RwLock<crate::protocols::bluetooth::classic::BluetoothClassicProtocol>>) {
+        self.bluetooth_handler = Some(handler);
+    }
+    
+    /// Set WiFi Direct protocol handler (Phase 2)
+    pub fn set_wifi_handler(&mut self, handler: Arc<RwLock<crate::protocols::wifi::WiFiDirectProtocol>>) {
+        self.wifi_handler = Some(handler);
+    }
+    
+    /// Set LoRa protocol handler (Phase 2)
+    pub fn set_lora_handler(&mut self, handler: Arc<RwLock<crate::protocols::lora::LoRaProtocol>>) {
+        self.lora_handler = Some(handler);
     }
     
     /// Estimate message size in bytes
@@ -712,6 +736,177 @@ impl MeshMessageRouter {
         }
         
         Ok(())
+    }
+    
+    // ==================== PHASE 2: Multi-Hop Routing Integration ====================
+    
+    /// Find next hop for destination (simplified from full route) - Phase 2
+    pub async fn find_next_hop_for_destination(&self, destination: &PublicKey) -> Result<PublicKey> {
+        debug!("Finding next hop for destination {:?}", hex::encode(&destination.key_id[0..4]));
+        
+        // Check for direct connection first
+        let connections = self.mesh_connections.read().await;
+        if connections.contains_key(destination) {
+            info!("✅ Direct connection to destination available");
+            return Ok(destination.clone());
+        }
+        
+        // Check cached route
+        if let Some(cached) = self.get_cached_route(destination).await {
+            if let Some(first_hop) = cached.hops.first() {
+                info!("📍 Using cached route, next hop: {:?}", hex::encode(&first_hop.peer_id.key_id[0..4]));
+                return Ok(first_hop.peer_id.clone());
+            }
+        }
+        
+        // Calculate new route - need a sender, use any connected peer or destination
+        let sender = connections.keys().next().unwrap_or(destination).clone();
+        let full_route = self.find_optimal_route(destination, &sender).await?;
+        
+        if full_route.is_empty() {
+            return Err(anyhow!("No route found to destination"));
+        }
+        
+        // Cache the route
+        let quality_score = self.calculate_route_quality(&full_route).await;
+        self.cache_route(destination.clone(), full_route.clone(), quality_score).await;
+        
+        // Return first hop
+        let first_hop = full_route.first().unwrap();
+        info!("🔍 Calculated new route, first hop: {:?}", hex::encode(&first_hop.peer_id.key_id[0..4]));
+        Ok(first_hop.peer_id.clone())
+    }
+    
+    /// Calculate route quality score - Phase 2
+    async fn calculate_route_quality(&self, route: &[RouteHop]) -> f64 {
+        if route.is_empty() {
+            return 0.0;
+        }
+        
+        let total_latency: u32 = route.iter().map(|h| h.latency_ms).sum();
+        let hop_count = route.len();
+        
+        // Quality = (1 / latency) × (1 / hops) × 1000
+        // Higher is better, normalized to 0.0-1.0
+        let base_score = 1000.0 / ((total_latency as f64 + 1.0) * (hop_count as f64 + 1.0));
+        base_score.min(1.0).max(0.0)
+    }
+    
+    /// Full route execution with forwarding - Phase 2
+    pub async fn route_message_with_forwarding(
+        &self,
+        destination: PublicKey,
+        message: ZhtpMeshMessage,
+        origin: PublicKey,
+    ) -> Result<u64> {
+        info!("🚀 Routing message to {:?}", hex::encode(&destination.key_id[0..4]));
+        
+        // Create envelope
+        let message_id = self.generate_message_id().await;
+        let envelope = MeshMessageEnvelope::new(
+            message_id,
+            origin.clone(),
+            destination.clone(),
+            message,
+        );
+        
+        info!("📦 Created envelope {} (TTL: {})", message_id, envelope.ttl);
+        
+        // Find next hop
+        let next_hop = self.find_next_hop_for_destination(&destination).await?;
+        
+        info!("📤 Sending to next hop: {:?}", hex::encode(&next_hop.key_id[0..4]));
+        
+        // Send to next hop
+        self.send_to_peer(&next_hop, &envelope).await?;
+        
+        // Track delivery
+        self.track_delivery(envelope).await;
+        
+        info!("✅ Message routing initiated successfully");
+        
+        Ok(message_id)
+    }
+    
+    /// Send envelope to peer (delegates to protocol layer) - Phase 2
+    async fn send_to_peer(&self, peer_id: &PublicKey, envelope: &MeshMessageEnvelope) -> Result<()> {
+        debug!("Sending envelope {} to peer {:?}", envelope.message_id, hex::encode(&peer_id.key_id[0..4]));
+        
+        let connections = self.mesh_connections.read().await;
+        let connection = connections.get(peer_id)
+            .ok_or_else(|| anyhow!("No connection to peer"))?;
+        
+        // Delegate to appropriate protocol handler based on connection type
+        match connection.protocol {
+            NetworkProtocol::BluetoothLE | NetworkProtocol::BluetoothClassic => {
+                // Get Bluetooth protocol handler
+                if let Some(bt_handler) = &self.bluetooth_handler {
+                    let handler = bt_handler.read().await;
+                    handler.send_mesh_envelope(peer_id, envelope).await?;
+                    info!("📡 Sent via Bluetooth");
+                } else {
+                    return Err(anyhow!("Bluetooth handler not available"));
+                }
+            }
+            NetworkProtocol::WiFiDirect => {
+                // Get WiFi Direct handler
+                if let Some(wifi_handler) = &self.wifi_handler {
+                    let handler = wifi_handler.read().await;
+                    // WiFi handler would need send_mesh_envelope method
+                    warn!("WiFi Direct sending not yet implemented");
+                    return Err(anyhow!("WiFi Direct handler not fully implemented"));
+                } else {
+                    return Err(anyhow!("WiFi Direct handler not available"));
+                }
+            }
+            NetworkProtocol::LoRaWAN => {
+                // Get LoRa handler
+                if let Some(lora_handler) = &self.lora_handler {
+                    let handler = lora_handler.read().await;
+                    // LoRa handler would need send_mesh_envelope method
+                    warn!("LoRa sending not yet implemented");
+                    return Err(anyhow!("LoRa handler not fully implemented"));
+                } else {
+                    return Err(anyhow!("LoRa handler not available"));
+                }
+            }
+            _ => {
+                return Err(anyhow!("Unsupported protocol for mesh forwarding: {:?}", connection.protocol));
+            }
+        }
+        
+        Ok(())
+    }
+    
+    /// Track message delivery - Phase 2
+    async fn track_delivery(&self, envelope: MeshMessageEnvelope) {
+        let status = DeliveryStatus {
+            message_id: envelope.message_id,
+            destination: envelope.destination.clone(),
+            stage: DeliveryStage::Routing,
+            route: vec![], // Will be filled as message traverses network
+            current_hop: 0,
+            attempts: 1,
+            started_at: envelope.timestamp,
+            last_update: envelope.timestamp,
+        };
+        
+        let mut tracking = self.delivery_tracking.write().await;
+        tracking.insert(envelope.message_id, status);
+        
+        debug!("📊 Tracking message {}", envelope.message_id);
+    }
+    
+    /// Generate unique message ID - Phase 2
+    async fn generate_message_id(&self) -> u64 {
+        use std::time::{SystemTime, UNIX_EPOCH};
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos() as u64;
+        
+        // Combine timestamp with random bits for uniqueness
+        timestamp ^ (rand::random::<u64>() >> 16)
     }
 }
 

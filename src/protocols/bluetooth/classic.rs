@@ -18,6 +18,7 @@ use serde::{Serialize, Deserialize};
 
 use lib_crypto::PublicKey;
 use crate::protocols::zhtp_auth::{ZhtpAuthManager, NodeCapabilities, ZhtpAuthVerification};
+use crate::types::mesh_message::{MeshMessageEnvelope, ZhtpMeshMessage};
 
 // Import common Bluetooth utilities to avoid duplication
 use super::common::{
@@ -61,6 +62,10 @@ pub struct BluetoothClassicProtocol {
     /// Platform-specific RFCOMM service handle
     #[cfg(all(target_os = "windows", feature = "windows-gatt"))]
     pub service_provider: Arc<RwLock<Option<Box<dyn std::any::Any + Send + Sync>>>>,
+    /// Message router for forwarding (will be set during initialization)
+    pub message_router: Option<Arc<RwLock<crate::routing::message_routing::MeshMessageRouter>>>,
+    /// Message handler for local processing (will be set during initialization)
+    pub message_handler: Option<Arc<RwLock<crate::messaging::message_handler::MeshMessageHandler>>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -511,6 +516,8 @@ impl BluetoothClassicProtocol {
             authenticated_peers: Arc::new(RwLock::new(HashMap::new())),
             #[cfg(all(target_os = "windows", feature = "windows-gatt"))]
             service_provider: Arc::new(RwLock::new(None)),
+            message_router: None,
+            message_handler: None,
         })
     }
     
@@ -1052,6 +1059,56 @@ impl BluetoothClassicProtocol {
         }
         
         Ok(())
+    }
+    
+    /// Send mesh message envelope via RFCOMM (NEW - Phase 1)
+    pub async fn send_mesh_envelope(
+        &self,
+        peer_id: &PublicKey,
+        envelope: &MeshMessageEnvelope,
+    ) -> Result<()> {
+        // Convert PublicKey to Bluetooth address
+        // For now, we'll need to look up the address in connections
+        let target_address = self.get_address_for_peer(peer_id).await?;
+        
+        info!("📤 Sending mesh envelope {} to {:?} via RFCOMM", 
+              envelope.message_id, 
+              hex::encode(&peer_id.key_id[0..4]));
+        
+        // Serialize envelope
+        let bytes = envelope.to_bytes()?;
+        
+        info!("Serialized envelope: {} bytes", bytes.len());
+        
+        // Send via existing send_mesh_message
+        self.send_mesh_message(&target_address, &bytes).await?;
+        
+        info!("✅ Mesh envelope sent successfully");
+        
+        Ok(())
+    }
+    
+    /// Get Bluetooth address for a peer (lookup in active connections)
+    async fn get_address_for_peer(&self, peer_id: &PublicKey) -> Result<String> {
+        let connections = self.active_connections.read().await;
+        
+        // Try to find connection by checking authenticated peers
+        let auth_peers = self.authenticated_peers.read().await;
+        for (address, verification) in auth_peers.iter() {
+            if verification.peer_pubkey.key_id == peer_id.key_id {
+                if connections.contains_key(address) {
+                    return Ok(address.clone());
+                }
+            }
+        }
+        
+        Err(anyhow!("No active connection to peer {:?}", hex::encode(&peer_id.key_id[0..8])))
+    }
+    
+    /// Get node ID as PublicKey
+    pub fn get_node_id(&self) -> Result<PublicKey> {
+        // Convert node_id bytes to PublicKey
+        PublicKey::from_bytes(&self.node_id)
     }
     
     /// Transmit packet via RFCOMM
@@ -2138,11 +2195,143 @@ impl BluetoothClassicProtocol {
     
     /// Handle mesh data message
     async fn handle_mesh_data_message(&self, data: &[u8], peer_addr: &str) -> Result<()> {
-        info!("📦 Processing mesh data message from {} ({} bytes)", peer_addr, data.len());
+        info!("📦 Received mesh data message from {} ({} bytes)", peer_addr, data.len());
         
-        // TODO: Implement mesh data handling (blockchain sync, DHT replication, etc.)
-        // For now, just log the message
-        debug!("Mesh data: {:?}", &data[..std::cmp::min(32, data.len())]);
+        // Deserialize envelope
+        let envelope = match MeshMessageEnvelope::from_bytes(data) {
+            Ok(env) => env,
+            Err(e) => {
+                warn!("Failed to deserialize mesh envelope: {}", e);
+                return Err(e);
+            }
+        };
+        
+        info!("📨 Envelope {} from {:?} to {:?} (TTL: {}, hop: {})", 
+              envelope.message_id,
+              hex::encode(&envelope.origin.key_id[0..4]),
+              hex::encode(&envelope.destination.key_id[0..4]),
+              envelope.ttl,
+              envelope.hop_count);
+        
+        // Get my node ID
+        let my_id = self.get_node_id()?;
+        
+        // Check if message is for me
+        if envelope.is_for_me(&my_id) {
+            info!("✅ Message is for me, processing locally");
+            return self.process_local_message(envelope).await;
+        }
+        
+        // Check if should forward
+        if envelope.should_drop() {
+            warn!("❌ Message TTL expired, dropping");
+            return Ok(());
+        }
+        
+        // Check for loops
+        if envelope.contains_in_route(&my_id) {
+            warn!("❌ Loop detected in route, dropping message");
+            return Ok(());
+        }
+        
+        // Forward to next hop
+        info!("📨 Message needs forwarding to {:?}", 
+              hex::encode(&envelope.destination.key_id[0..4]));
+        return self.forward_message(envelope).await;
+    }
+    
+    /// Process message intended for this node (NEW - Phase 1)
+    async fn process_local_message(&self, envelope: MeshMessageEnvelope) -> Result<()> {
+        info!("Processing local message type: {:?}", std::mem::discriminant(&envelope.message));
+        
+        // Get message handler if available
+        if let Some(handler) = &self.message_handler {
+            let handler_guard = handler.read().await;
+            
+            // Dispatch to appropriate handler based on message type
+            match envelope.message {
+                ZhtpMeshMessage::ZhtpRequest { requester, method, uri, headers, body, timestamp } => {
+                    handler_guard.handle_lib_request(requester, method, uri, headers, body, timestamp).await?;
+                }
+                ZhtpMeshMessage::ZhtpResponse { request_id, status, status_message, headers, body, timestamp } => {
+                    handler_guard.handle_lib_response(request_id, status, status_message, headers, body, timestamp).await?;
+                }
+                ZhtpMeshMessage::BlockchainRequest { requester, request_id, from_height } => {
+                    handler_guard.handle_blockchain_request(requester, request_id, from_height).await?;
+                }
+                ZhtpMeshMessage::BlockchainData { request_id, chunk_index, total_chunks, data, complete_data_hash } => {
+                    handler_guard.handle_blockchain_data(request_id, chunk_index, total_chunks, data, complete_data_hash).await?;
+                }
+                ZhtpMeshMessage::NewBlock { .. } => {
+                    info!("NewBlock message received - handler not yet implemented");
+                    // TODO: Implement in Phase 3
+                }
+                ZhtpMeshMessage::NewTransaction { .. } => {
+                    info!("NewTransaction message received - handler not yet implemented");
+                    // TODO: Implement in Phase 3
+                }
+                ZhtpMeshMessage::UbiDistribution { recipient, amount_tokens, distribution_round, proof } => {
+                    handler_guard.handle_ubi_distribution(recipient, amount_tokens, distribution_round, proof).await?;
+                }
+                ZhtpMeshMessage::HealthReport { reporter, network_quality, available_bandwidth, connected_peers, uptime_hours } => {
+                    handler_guard.handle_health_report(reporter, network_quality, available_bandwidth, connected_peers, uptime_hours).await?;
+                }
+                ZhtpMeshMessage::PeerDiscovery { capabilities, location, shared_resources } => {
+                    handler_guard.handle_peer_discovery(envelope.origin, capabilities, location, shared_resources).await?;
+                }
+                _ => {
+                    warn!("Unhandled message type, using default handler");
+                    // For now, just log
+                }
+            }
+        } else {
+            warn!("No message handler available, message not processed");
+        }
+        
+        Ok(())
+    }
+    
+    /// Forward message to next hop (NEW - Phase 1)
+    async fn forward_message(&self, mut envelope: MeshMessageEnvelope) -> Result<()> {
+        // Increment hop count
+        let my_id = self.get_node_id()?;
+        envelope.increment_hop(my_id.clone());
+        
+        info!("🔀 Forwarding message {} (hop {})", envelope.message_id, envelope.hop_count);
+        
+        // Find next hop using message router
+        if let Some(router) = &self.message_router {
+            let router_guard = router.read().await;
+            
+            match router_guard.find_next_hop_for_destination(&envelope.destination).await {
+                Ok(next_hop) => {
+                    info!("📍 Next hop: {:?}", hex::encode(&next_hop.key_id[0..4]));
+                    
+                    // Send to next hop
+                    self.send_mesh_envelope(&next_hop, &envelope).await?;
+                    
+                    // Record routing activity for rewards
+                    let message_size = envelope.size();
+                    if let Some(mesh_server) = router_guard.mesh_server.as_ref() {
+                        mesh_server.read().await.record_routing_activity(
+                            message_size,
+                            envelope.hop_count,
+                            crate::types::network_protocol::NetworkProtocol::BluetoothClassic,
+                            50, // Estimated latency in ms
+                        ).await?;
+                    }
+                    
+                    info!("✅ Message forwarded successfully");
+                }
+                Err(e) => {
+                    warn!("❌ Failed to find route: {}", e);
+                    return Err(e);
+                }
+            }
+        } else {
+            warn!("No message router available, cannot forward");
+            return Err(anyhow!("Message router not initialized"));
+        }
         
         Ok(())
     }

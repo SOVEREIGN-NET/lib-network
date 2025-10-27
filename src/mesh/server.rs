@@ -261,6 +261,12 @@ pub struct ZhtpMeshServer {
     /// Active protocol status tracking
     pub active_protocols: Arc<RwLock<HashMap<NetworkProtocol, bool>>>,
     
+    // Message Routing and Handling (Phase 4)
+    /// Message router for multi-hop forwarding
+    pub message_router: Option<Arc<RwLock<crate::routing::message_routing::MeshMessageRouter>>>,
+    /// Message handler for processing received messages
+    pub message_handler: Option<Arc<RwLock<crate::messaging::message_handler::MeshMessageHandler>>>,
+    
     // Safety and Emergency Features
     /// Emergency stop flag for immediate shutdown
     pub emergency_stop: Arc<RwLock<bool>>,
@@ -1091,6 +1097,11 @@ impl ZhtpMeshServer {
             lorawan_protocol: None,
             satellite_protocol: None,
             active_protocols: Arc::new(RwLock::new(HashMap::new())),
+            
+            // Initialize message routing and handling (Phase 4)
+            message_router: None,
+            message_handler: None,
+            
             // Initialize safety features
             emergency_stop: Arc::new(RwLock::new(false)),
             max_connections: Arc::new(RwLock::new(100)), // Default safety limit
@@ -1289,15 +1300,93 @@ impl ZhtpMeshServer {
         Ok(())
     }
     
-    /// Start mesh protocol message handler
+    /// Start mesh protocol message handler (UPDATED - Phase 4)
     async fn start_mesh_message_handler(&self) -> Result<()> {
-        info!("Starting mesh message handler...");
+        info!("🚀 Initializing mesh message forwarding system (Phase 4)...");
+        
+        // Initialize message forwarding components
+        self.initialize_message_forwarding().await?;
         
         // Use the correct mesh port from configuration (33444) instead of hardcoded 9333
         let mesh_port = 33444; // This should match DEFAULT_MESH_PORT from zhtp crate
         
         // Start UDP server for mesh packet handling
         start_udp_bootstrap_server(self.server_id, mesh_port).await?;
+        
+        Ok(())
+    }
+    
+    /// Initialize message forwarding system (NEW - Phase 4)
+    pub async fn initialize_message_forwarding(&self) -> Result<()> {
+        info!("📡 Initializing message forwarding components...");
+        
+        // Create message handler
+        let message_handler = Arc::new(RwLock::new(
+            crate::messaging::message_handler::MeshMessageHandler::new(
+                self.mesh_connections.clone(),
+                self.long_range_relays.clone(),
+                self.revenue_pools.clone(),
+            )
+        ));
+        
+        // Create message router
+        let message_router = Arc::new(RwLock::new(
+            crate::routing::message_routing::MeshMessageRouter::new(
+                self.mesh_connections.clone(),
+                self.long_range_relays.clone(),
+            )
+        ));
+        
+        // Set mesh server reference in router for reward tracking
+        {
+            let mut router_guard = message_router.write().await;
+            router_guard.mesh_server = Some(Arc::new(RwLock::new(self.clone())));
+        }
+        
+        // Set router reference in message handler
+        {
+            let mut handler_guard = message_handler.write().await;
+            handler_guard.set_message_router(message_router.clone());
+            
+            // Set node ID in handler
+            let node = self.mesh_node.read().await;
+            let node_id = PublicKey::from_bytes(&node.node_id)?;
+            handler_guard.set_node_id(node_id);
+        }
+        
+        // Set protocol handlers in router
+        {
+            let mut router_guard = message_router.write().await;
+            
+            if let Some(bt_protocol) = &self.bluetooth_protocol {
+                router_guard.bluetooth_handler = Some(bt_protocol.clone());
+            }
+            
+            if let Some(wifi_protocol) = &self.wifi_direct_protocol {
+                router_guard.wifi_handler = Some(wifi_protocol.clone());
+            }
+            
+            if let Some(lora_protocol) = &self.lorawan_protocol {
+                router_guard.lora_handler = Some(lora_protocol.clone());
+            }
+        }
+        
+        // Set router and handler in protocol instances
+        if let Some(bt_protocol) = &self.bluetooth_protocol {
+            let mut bt_guard = bt_protocol.write().await;
+            bt_guard.message_router = Some(message_router.clone());
+            bt_guard.message_handler = Some(message_handler.clone());
+        }
+        
+        // Store in server (need to cast away const - this is during initialization)
+        // We'll use unsafe here since we know initialization happens before concurrent access
+        unsafe {
+            let server_mut = self as *const Self as *mut Self;
+            (*server_mut).message_router = Some(message_router);
+            (*server_mut).message_handler = Some(message_handler);
+        }
+        
+        info!("✅ Message forwarding system initialized successfully");
         
         Ok(())
     }
