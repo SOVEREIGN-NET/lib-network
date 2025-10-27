@@ -31,8 +31,14 @@ rand = "0.8"
 # Hex encoding for debugging
 hex = "0.4"
 
+# System calls (for Bluetooth Classic on macOS/Linux)
+libc = "0.2"
+
 # Cryptographic hashing
 sha2 = "0.10"
+
+# Date and time utilities
+chrono = "0.4"
 
 # Network IP detection
 local-ip-address = "0.5"
@@ -59,6 +65,7 @@ lib-economy = { path = "../lib-economy" }
 lib-protocols = { path = "../lib-protocols" }
 lib-identity = { path = "../lib-identity" }
 lib-storage = { path = "../lib-storage" }
+nix = { version = "0.30.1", features = ["socket"] }
 
 # Platform-specific GATT and Bluetooth APIs
 [target.'cfg(target_os = "linux")'.dependencies]
@@ -67,11 +74,9 @@ dbus = { version = "0.9", optional = true }       # Direct D-Bus communication w
 dbus-tokio = { version = "0.7", optional = true } # Async D-Bus support
 
 [target.'cfg(target_os = "macos")'.dependencies]
-objc = "0.2"                                      # Objective-C runtime for Core Bluetooth FFI
-objc-foundation = "0.1"                           # Foundation types (NSString, NSArray, etc.)
-objc_id = "0.1"                                   # Object ID handling
-block = "0.1"                                     # Block (closure) support for callbacks
-cocoa = "0.25"                                    # macOS Cocoa framework bindings
+objc2 = "0.6"                                     # Modern Objective-C runtime for Core Bluetooth FFI
+objc2-foundation = { version = "0.3", features = ["NSString", "NSArray", "NSDictionary", "NSData", "NSError"] }
+block2 = "0.6"                                    # Block (closure) support for callbacks
 
 [target.'cfg(target_os = "windows")'.dependencies]  
 windows = { version = "0.51", features = [        # Windows Runtime APIs

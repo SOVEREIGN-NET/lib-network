@@ -2,9 +2,9 @@
 // Comprehensive NSError parsing and Core Bluetooth error code mapping
 
 #[cfg(target_os = "macos")]
-use objc::runtime::Object;
+use objc2::runtime::AnyObject;
 #[cfg(target_os = "macos")]
-use objc::{msg_send, sel, sel_impl};
+use objc2::{msg_send, sel};
 #[cfg(target_os = "macos")]
 use anyhow::{anyhow, Result};
 #[cfg(target_os = "macos")]
@@ -308,7 +308,7 @@ impl std::error::Error for NSErrorInfo {}
 /// # Safety
 /// The error pointer must be a valid NSError object or null
 #[cfg(target_os = "macos")]
-pub unsafe fn parse_nserror(error: *mut Object) -> Option<NSErrorInfo> {
+pub unsafe fn parse_nserror(error: *mut AnyObject) -> Option<NSErrorInfo> {
     if error.is_null() {
         return None;
     }
@@ -317,7 +317,7 @@ pub unsafe fn parse_nserror(error: *mut Object) -> Option<NSErrorInfo> {
     let code: i64 = msg_send![error, code];
     
     // Extract error domain
-    let domain_obj: *mut Object = msg_send![error, domain];
+    let domain_obj: *mut AnyObject = msg_send![error, domain];
     let domain = if !domain_obj.is_null() {
         let domain_cstr: *const i8 = msg_send![domain_obj, UTF8String];
         std::ffi::CStr::from_ptr(domain_cstr).to_string_lossy().to_string()
@@ -326,7 +326,7 @@ pub unsafe fn parse_nserror(error: *mut Object) -> Option<NSErrorInfo> {
     };
     
     // Extract localized description
-    let desc_obj: *mut Object = msg_send![error, localizedDescription];
+    let desc_obj: *mut AnyObject = msg_send![error, localizedDescription];
     let localized_description = if !desc_obj.is_null() {
         let desc_cstr: *const i8 = msg_send![desc_obj, UTF8String];
         std::ffi::CStr::from_ptr(desc_cstr).to_string_lossy().to_string()
@@ -362,7 +362,7 @@ pub unsafe fn parse_nserror(error: *mut Object) -> Option<NSErrorInfo> {
 /// # Safety
 /// The error pointer must be a valid NSError object or null
 #[cfg(target_os = "macos")]
-pub unsafe fn check_nserror(error: *mut Object) -> Result<()> {
+pub unsafe fn check_nserror(error: *mut AnyObject) -> Result<()> {
     if let Some(error_info) = parse_nserror(error) {
         error_info.into_result()
     } else {
@@ -376,7 +376,7 @@ pub unsafe fn check_nserror(error: *mut Object) -> Result<()> {
 /// # Safety
 /// The error pointer must be a valid NSError object or null
 #[cfg(target_os = "macos")]
-pub unsafe fn log_nserror(error: *mut Object, context: &str) -> bool {
+pub unsafe fn log_nserror(error: *mut AnyObject, context: &str) -> bool {
     if let Some(error_info) = parse_nserror(error) {
         use tracing::error;
         error!("❌ {} - {}", context, error_info.to_error_message());

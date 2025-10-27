@@ -1782,7 +1782,8 @@ Value=00
             // Update tracked device with characteristics
             if let Some(mut device) = self.get_tracked_device(device_address).await {
                 device.characteristics = characteristics;
-                self.track_device(device_address, device).await?;
+                let raw_mac = parse_mac_address(device_address)?;
+                self.track_device(&raw_mac, device).await?;
             }
         }
         
@@ -1925,20 +1926,23 @@ Value=00
                 let mac = parse_mac_address(address)?;
                 
                 let device = BleDevice {
-                    encrypted_mac_hash: self.encrypted_mac_hash(&mac),
-                    secure_node_id: self.compute_secure_node_id(&mac),
-                    ephemeral_address: self.generate_ephemeral_address(&mac),
+                    encrypted_mac_hash: self.generate_encrypted_mac_hash(&mac),
+                    secure_node_id: self.generate_secure_node_id(&mac),
+                    ephemeral_address: self.generate_ephemeral_address(&self.generate_secure_node_id(&mac)),
                     device_name: Self::extract_device_name_macos(&output_str, address),
                     services: Vec::new(),
                     characteristics: HashMap::new(),
                     connection_handle: None,
+                    connection_state: crate::protocols::bluetooth::device::ConnectionState::Disconnected,
+                    signal_strength: -100,
                     last_seen: std::time::SystemTime::now()
                         .duration_since(std::time::UNIX_EPOCH)
                         .unwrap_or_default()
                         .as_secs(),
                 };
                 
-                self.track_device(address, device).await?;
+                let mac_bytes = mac;
+                self.track_device(&mac_bytes, device).await?;
                 info!("macOS: Discovered device {}", address);
             }
         }
@@ -2751,7 +2755,8 @@ Value=00
             // Update tracked device with characteristics
             if let Some(mut device) = self.get_tracked_device(device_address).await {
                 device.characteristics = characteristics;
-                self.track_device(device_address, device).await?;
+                let mac_bytes = parse_mac_address(device_address)?;
+                self.track_device(&mac_bytes, device).await?;
             }
         }
         
@@ -3354,7 +3359,7 @@ Value=00
         // Use the macOS Core Bluetooth manager for BLE advertising
         #[cfg(target_os = "macos")]
         {
-            if let Some(ref manager) = self.macos_manager {
+            if let Some(ref manager) = *self.core_bluetooth.read().await {
                 // Start peripheral advertising with the mesh advertisement data
                 manager.start_mesh_advertising(adv_data).await?;
                 info!("✅ macOS: BLE mesh advertising started via Core Bluetooth");

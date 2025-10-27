@@ -576,6 +576,47 @@ impl WiFiDirectMeshProtocol {
         Ok(devices)
     }
     
+    #[cfg(target_os = "linux")]
+    async fn linux_scan_groups(&self) -> Result<Vec<String>> {
+        use std::process::Command;
+        
+        let mut groups = Vec::new();
+        
+        // Use wpa_cli to scan for P2P groups
+        let output = Command::new("wpa_cli")
+            .args(&["-i", "wlan0", "p2p_group_show"])
+            .output();
+        
+        if let Ok(result) = output {
+            let output_str = String::from_utf8_lossy(&result.stdout);
+            for line in output_str.lines() {
+                if line.starts_with("group=") {
+                    let group_name = line.trim_start_matches("group=");
+                    groups.push(group_name.to_string());
+                }
+            }
+        }
+        
+        // Also try listing active P2P networks
+        let network_output = Command::new("wpa_cli")
+            .args(&["-i", "wlan0", "list_networks"])
+            .output();
+        
+        if let Ok(result) = network_output {
+            let output_str = String::from_utf8_lossy(&result.stdout);
+            for line in output_str.lines() {
+                if line.contains("P2P-GROUP") {
+                    let parts: Vec<&str> = line.split('\t').collect();
+                    if parts.len() > 1 {
+                        groups.push(parts[1].to_string());
+                    }
+                }
+            }
+        }
+        
+        Ok(groups)
+    }
+    
     #[cfg(target_os = "windows")]
     async fn windows_scan_p2p_devices() -> Result<Vec<WiFiDirectConnection>> {
         // Windows WiFi Direct scanning would use WiFiDirectAPI
@@ -912,7 +953,7 @@ impl WiFiDirectMeshProtocol {
         // WiFi Direct group scanning using platform-specific commands
         #[cfg(target_os = "linux")]
         {
-            return self.linux_scan_wifi_direct_groups().await;
+            return self.linux_scan_groups().await;
         }
         
         #[cfg(target_os = "windows")]

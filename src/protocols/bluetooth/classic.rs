@@ -42,6 +42,10 @@ pub mod rfcomm_channels {
     pub const COORDINATION: u8 = 4;      // DHT queries, coordination
 }
 
+// macOS Bluetooth constants (from IOBluetooth framework)
+#[cfg(target_os = "macos")]
+const AF_BLUETOOTH: i32 = 31; // PF_BLUETOOTH on macOS
+
 /// Bluetooth Classic RFCOMM mesh protocol handler
 #[derive(Clone)]
 pub struct BluetoothClassicProtocol {
@@ -923,7 +927,7 @@ impl BluetoothClassicProtocol {
         // Create RFCOMM socket using BSD API
         let sock_fd = unsafe {
             libc::socket(
-                libc::AF_BLUETOOTH,
+                AF_BLUETOOTH,
                 libc::SOCK_STREAM,
                 BTPROTO_RFCOMM,
             )
@@ -945,7 +949,7 @@ impl BluetoothClassicProtocol {
         
         let addr = sockaddr_rc {
             rc_len: std::mem::size_of::<sockaddr_rc>() as u8,
-            rc_family: libc::AF_BLUETOOTH as libc::sa_family_t,
+            rc_family: AF_BLUETOOTH as libc::sa_family_t,
             rc_bdaddr: [0; 6], // BDADDR_ANY - bind to any local Bluetooth adapter
             rc_channel: RFCOMM_CHANNEL,
         };
@@ -1791,7 +1795,7 @@ impl BluetoothClassicProtocol {
         info!(" Linux: Connecting to RFCOMM service on {} channel {}", device_address, channel);
         
         // Parse MAC address
-        let mac_bytes = Self::parse_mac_address(device_address)?;
+        let mac_bytes = parse_mac_address(device_address)?;
         
         // RFCOMM protocol constant
         const BTPROTO_RFCOMM: i32 = 3;
@@ -1963,14 +1967,14 @@ impl BluetoothClassicProtocol {
         info!("🍎 macOS: Connecting to RFCOMM service on {} channel {}", device_address, channel);
         
         // Parse MAC address
-        let mac_bytes = Self::parse_mac_address(device_address)?;
+        let mac_bytes = parse_mac_address(device_address)?;
         
         // RFCOMM protocol constant
         const BTPROTO_RFCOMM: i32 = 3;
         
         // Create RFCOMM socket using BSD API
         let sock_fd = unsafe {
-            libc::socket(libc::AF_BLUETOOTH, libc::SOCK_STREAM, BTPROTO_RFCOMM)
+            libc::socket(AF_BLUETOOTH, libc::SOCK_STREAM, BTPROTO_RFCOMM)
         };
         
         if sock_fd < 0 {
@@ -1988,7 +1992,7 @@ impl BluetoothClassicProtocol {
         
         let addr = sockaddr_rc {
             rc_len: std::mem::size_of::<sockaddr_rc>() as u8,
-            rc_family: libc::AF_BLUETOOTH as libc::sa_family_t,
+            rc_family: AF_BLUETOOTH as libc::sa_family_t,
             rc_bdaddr: mac_bytes,
             rc_channel: channel,
         };
@@ -2496,11 +2500,11 @@ mod tests {
     #[test]
     fn test_mac_address_parsing() {
         let mac_str = "AA:BB:CC:DD:EE:FF";
-        let mac = BluetoothClassicProtocol::parse_mac_address(mac_str).unwrap();
+        let mac = parse_mac_address(mac_str).unwrap();
         assert_eq!(mac, [0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF]);
         
         let mac_str2 = "AA-BB-CC-DD-EE-FF";
-        let mac2 = BluetoothClassicProtocol::parse_mac_address(mac_str2).unwrap();
+        let mac2 = parse_mac_address(mac_str2).unwrap();
         assert_eq!(mac2, [0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF]);
     }
     

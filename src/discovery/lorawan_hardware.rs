@@ -284,31 +284,31 @@ async fn test_serial_lorawan_module(port: &str, chip_type: &str) -> Result<LoRaW
     debug!(" Testing serial LoRaWAN module on {} ({})", port, chip_type);
     
     // Try to open serial port
-    let mut port = serialport::new(port, 9600)
+    let mut serial_port = serialport::new(port, 9600)
         .timeout(Duration::from_secs(1))
         .open()?;
     
     // Send AT command to test if it's a LoRaWAN module
-    port.write_all(b"AT\r\n")?;
+    serial_port.write_all(b"AT\r\n")?;
     
     let mut buffer = [0u8; 64];
-    if let Ok(bytes_read) = port.read(&mut buffer) {
+    if let Ok(bytes_read) = serial_port.read(&mut buffer) {
         let response = String::from_utf8_lossy(&buffer[..bytes_read]);
         
         if response.contains("OK") || response.contains("AT") {
             // Try LoRaWAN-specific commands
-            port.write_all(b"AT+VER?\r\n")?;
+            serial_port.write_all(b"AT+VER?\r\n")?;
             
-            if let Ok(bytes_read) = port.read(&mut buffer) {
+            if let Ok(bytes_read) = serial_port.read(&mut buffer) {
                 let version_response = String::from_utf8_lossy(&buffer[..bytes_read]);
                 
                 if version_response.to_lowercase().contains("lora") {
-                    info!("LoRaWAN module detected on {} ({})", port.device_name().unwrap_or("unknown"), chip_type);
+                    info!("LoRaWAN module detected on {} ({})", port, chip_type);
                     
                     return Ok(LoRaWANHardware {
                         device_name: format!("{} LoRaWAN Module", chip_type),
                         connection_type: "USB".to_string(),
-                        device_path: Some(port.device_name().unwrap_or("unknown").to_string()),
+                        device_path: Some(port.to_string()),
                         frequency_bands: vec![FrequencyBand::EU868, FrequencyBand::US915], // Common defaults
                         max_tx_power: 14,
                         capabilities: LoRaWANCapabilities {
@@ -325,7 +325,7 @@ async fn test_serial_lorawan_module(port: &str, chip_type: &str) -> Result<LoRaW
         }
     }
     
-    Err(anyhow::anyhow!("No LoRaWAN module detected on {}", port.device_name().unwrap_or("unknown")))
+    Err(anyhow::anyhow!("No LoRaWAN module detected on {}", port))
 }
 
 #[cfg(target_os = "linux")]

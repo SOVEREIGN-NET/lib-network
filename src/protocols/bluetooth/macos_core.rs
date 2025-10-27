@@ -4,39 +4,29 @@
 #[cfg(target_os = "macos")]
 use anyhow::{Result, anyhow};
 #[cfg(target_os = "macos")]
-use tracing::{info, warn, error, debug};
+use tracing::{info, warn, debug};
 #[cfg(target_os = "macos")]
 use std::collections::HashMap;
 #[cfg(target_os = "macos")]
 use std::sync::Arc;
 #[cfg(target_os = "macos")]
+use std::ffi::CStr;
+#[cfg(target_os = "macos")]
 use tokio::sync::{RwLock, Mutex};
-#[cfg(target_os = "macos")]
-use serde::{Serialize, Deserialize};
 
-// Objective-C FFI imports
+// Objective-C FFI imports (objc2)
 #[cfg(target_os = "macos")]
-use objc::{msg_send, sel, sel_impl, runtime::{Class, Object, Sel}};
+use objc2::{msg_send, sel, runtime::{AnyObject, AnyClass, Object}};
 #[cfg(target_os = "macos")]
-use objc_foundation::{NSString, NSArray, NSDictionary, NSData};
+use objc2::rc::Retained;
 #[cfg(target_os = "macos")]
-use objc_id::{Id, Owned, Shared};
-#[cfg(target_os = "macos")]
-use block::ConcreteBlock;
-#[cfg(target_os = "macos")]
-use std::os::raw::c_void;
+use objc2_foundation::NSString;
 
 // Import common Bluetooth utilities
 #[cfg(target_os = "macos")]
-use crate::protocols::bluetooth::device::{BleDevice, CharacteristicInfo, BluetoothDeviceInfo};
-#[cfg(target_os = "macos")]
-use crate::protocols::bluetooth::common::{parse_mac_address, format_mac_address, zhtp_uuids};
-#[cfg(target_os = "macos")]
-use crate::protocols::bluetooth::gatt::{GattMessage, GattOperation, supports_operation};
+use crate::protocols::bluetooth::device::{BleDevice, BluetoothDeviceInfo, ConnectionState};
 #[cfg(target_os = "macos")]
 use crate::protocols::bluetooth::macos_delegate;
-#[cfg(target_os = "macos")]
-use crate::protocols::bluetooth::macos_error::{NSErrorInfo, check_nserror};
 
 /// Events emitted by Core Bluetooth callbacks
 #[cfg(target_os = "macos")]
@@ -168,19 +158,42 @@ pub struct CoreBluetoothManager {
     /// Characteristic value cache for notifications
     characteristic_values: Arc<RwLock<HashMap<String, Vec<u8>>>>,
     /// Notification callbacks
+    #[allow(dead_code)]
     notification_handlers: Arc<RwLock<HashMap<String, Box<dyn Fn(Vec<u8>) + Send + Sync>>>>,
     /// Event channel for Core Bluetooth callbacks
     event_sender: tokio::sync::mpsc::UnboundedSender<CoreBluetoothEvent>,
     event_receiver: Arc<Mutex<Option<tokio::sync::mpsc::UnboundedReceiver<CoreBluetoothEvent>>>>,
 }
 
+#[cfg(target_os = "macos")]
+impl std::fmt::Debug for CoreBluetoothManager {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CoreBluetoothManager")
+            .field("central_manager", &self.central_manager)
+            .field("peripheral_manager", &self.peripheral_manager)
+            .field("discovered_peripherals", &self.discovered_peripherals)
+            .field("services_cache", &self.services_cache)
+            .field("characteristic_values", &self.characteristic_values)
+            .field("notification_handlers", &"<handlers>")
+            .finish()
+    }
+}
+
 /// Handle to Core Bluetooth Central Manager with real Objective-C object
 #[cfg(target_os = "macos")]
 pub struct CBCentralManagerHandle {
     /// Raw pointer to CBCentralManager Objective-C object
-    manager_ptr: *mut Object,
+    manager_ptr: *mut AnyObject,
     /// Delegate for handling callbacks
     delegate: CBCentralManagerDelegate,
+}
+
+impl std::fmt::Debug for CBCentralManagerHandle {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CBCentralManagerHandle")
+            .field("manager_ptr", &self.manager_ptr)
+            .finish()
+    }
 }
 
 // Safety: CBCentralManagerHandle can be sent between threads
@@ -192,9 +205,17 @@ unsafe impl Sync for CBCentralManagerHandle {}
 #[cfg(target_os = "macos")]
 pub struct CBPeripheralManagerHandle {
     /// Raw pointer to CBPeripheralManager Objective-C object
-    manager_ptr: *mut Object,
+    manager_ptr: *mut AnyObject,
     /// Delegate for handling callbacks
     delegate: CBPeripheralManagerDelegate,
+}
+
+impl std::fmt::Debug for CBPeripheralManagerHandle {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CBPeripheralManagerHandle")
+            .field("manager_ptr", &self.manager_ptr)
+            .finish()
+    }
 }
 
 // Safety: CBPeripheralManagerHandle can be sent between threads
@@ -235,6 +256,7 @@ pub struct CBCharacteristicHandle {
 
 /// Central manager delegate for handling Core Bluetooth events
 #[cfg(target_os = "macos")]
+#[derive(Debug)]
 pub struct CBCentralManagerDelegate {
     /// Event channel sender for async communication
     pub event_sender: tokio::sync::mpsc::UnboundedSender<CoreBluetoothEvent>,
@@ -242,21 +264,10 @@ pub struct CBCentralManagerDelegate {
 
 /// Peripheral manager delegate for GATT server operations
 #[cfg(target_os = "macos")]
+#[derive(Debug)]
 pub struct CBPeripheralManagerDelegate {
     /// Event channel sender for async communication
     pub event_sender: tokio::sync::mpsc::UnboundedSender<CoreBluetoothEvent>,
-}
-
-/// Core Bluetooth power state
-#[cfg(target_os = "macos")]
-#[derive(Debug, Clone, PartialEq)]
-pub enum BluetoothState {
-    Unknown,
-    Resetting,
-    Unsupported,
-    Unauthorized,
-    PoweredOff,
-    PoweredOn,
 }
 
 #[cfg(target_os = "macos")]
@@ -316,10 +327,18 @@ impl CoreBluetoothManager {
                     CoreBluetoothEvent::PeripheralDisconnected(id) => {
                         info!("❌ Disconnected: {}", id);
                     }
-                    CoreBluetoothEvent::ServicesDiscovered { peripheral_id, services } => {
-                        info!("📋 Services discovered for {}: {} services", peripheral_id, services.len());
+                    CoreBluetoothEvent::ServicesDiscovered { peripheral_id, service_uuids } => {
+                        info!("📋 Services discovered for {}: {} services", peripheral_id, service_uuids.len());
                         let mut cache = services_cache.write().await;
-                        cache.insert(peripheral_id, services);
+                        // Convert Vec<String> to Vec<CBServiceHandle>
+                        let service_handles: Vec<CBServiceHandle> = service_uuids.into_iter()
+                            .map(|uuid| CBServiceHandle {
+                                uuid,
+                                is_primary: true,
+                                characteristics: Vec::new(),
+                            })
+                            .collect();
+                        cache.insert(peripheral_id, service_handles);
                     }
                     CoreBluetoothEvent::CharacteristicValueUpdated { peripheral_id, characteristic_uuid, value } => {
                         debug!("📖 Characteristic updated: {} / {} ({} bytes)", 
@@ -557,7 +576,7 @@ impl CoreBluetoothManager {
     
     /// Create Objective-C delegate object for CBCentralManager
     /// This creates a custom NSObject subclass that implements CBCentralManagerDelegate protocol
-    unsafe fn create_central_manager_delegate_object(event_sender: tokio::sync::mpsc::UnboundedSender<CoreBluetoothEvent>) -> *mut Object {
+    unsafe fn create_central_manager_delegate_object(event_sender: tokio::sync::mpsc::UnboundedSender<CoreBluetoothEvent>) -> *mut AnyObject {
         // For now, we'll use a simple approach without creating a custom class
         // In production, you'd use objc::declare::ClassDecl to create a proper delegate class
         // with protocol implementations
@@ -573,7 +592,7 @@ impl CoreBluetoothManager {
     }
     
     /// Create Objective-C delegate object for CBPeripheralManager
-    unsafe fn create_peripheral_manager_delegate_object(event_sender: tokio::sync::mpsc::UnboundedSender<CoreBluetoothEvent>) -> *mut Object {
+    unsafe fn create_peripheral_manager_delegate_object(event_sender: tokio::sync::mpsc::UnboundedSender<CoreBluetoothEvent>) -> *mut AnyObject {
         // TODO: Implement proper delegate class with protocol methods:
         // - peripheralManagerDidUpdateState:
         // - peripheralManager:didAddService:error:
@@ -597,16 +616,16 @@ impl CoreBluetoothManager {
             );
             
             // Get CBCentralManager class
-            let cls = Class::get("CBCentralManager").ok_or_else(|| {
+            let cls = AnyClass::get(c"CBCentralManager").ok_or_else(|| {
                 anyhow!("CBCentralManager class not found - Core Bluetooth framework missing")
             })?;
             
             // Allocate and initialize CBCentralManager with delegate
             // [CBCentralManager alloc]
-            let manager: *mut Object = msg_send![cls, alloc];
+            let manager: *mut AnyObject = msg_send![cls, alloc];
             
             // [manager initWithDelegate:delegate queue:nil]
-            let manager: *mut Object = msg_send![manager, initWithDelegate:delegate_obj queue:nil];
+            let manager: *mut AnyObject = msg_send![manager, initWithDelegate:delegate_obj queue:std::ptr::null_mut::<Object>()];
             
             if manager.is_null() {
                 return Err(anyhow!("Failed to create CBCentralManager"));
@@ -634,13 +653,13 @@ impl CoreBluetoothManager {
             );
             
             // Get CBPeripheralManager class
-            let cls = Class::get("CBPeripheralManager").ok_or_else(|| {
+            let cls = AnyClass::get(c"CBPeripheralManager").ok_or_else(|| {
                 anyhow!("CBPeripheralManager class not found - Core Bluetooth framework missing")
             })?;
             
             // Allocate and initialize with delegate
-            let manager: *mut Object = msg_send![cls, alloc];
-            let manager: *mut Object = msg_send![manager, initWithDelegate:delegate_obj queue:nil];
+            let manager: *mut AnyObject = msg_send![cls, alloc];
+            let manager: *mut AnyObject = msg_send![manager, initWithDelegate:delegate_obj queue:std::ptr::null_mut::<Object>()];
             
             if manager.is_null() {
                 return Err(anyhow!("Failed to create CBPeripheralManager"));
@@ -672,23 +691,23 @@ impl CoreBluetoothManager {
                 info!("🎯 Scanning for services: {:?}", uuids);
                 
                 // Get CBUUID class
-                let cbuuid_cls = Class::get("CBUUID").ok_or_else(|| {
+                let cbuuid_cls = AnyClass::get(c"CBUUID").ok_or_else(|| {
                     anyhow!("CBUUID class not found")
                 })?;
                 
                 // Convert service UUIDs to CBUUID objects
-                let mut uuid_objects: Vec<*mut Object> = Vec::new();
+                let mut uuid_objects: Vec<*mut AnyObject> = Vec::new();
                 for uuid_str in uuids {
                     let ns_string = NSString::from_str(uuid_str);
-                    let cbuuid: *mut Object = msg_send![cbuuid_cls, UUIDWithString: ns_string];
+                    let cbuuid: *mut AnyObject = msg_send![cbuuid_cls, UUIDWithString: &*ns_string];
                     uuid_objects.push(cbuuid);
                 }
                 
                 // Create NSArray with UUIDs
-                let array_cls = Class::get("NSArray").ok_or_else(|| {
+                let array_cls = AnyClass::get(c"NSArray").ok_or_else(|| {
                     anyhow!("NSArray class not found")
                 })?;
-                let array: *mut Object = msg_send![array_cls, arrayWithObjects:uuid_objects.as_ptr() count:uuid_objects.len()];
+                let array: *mut AnyObject = msg_send![array_cls, arrayWithObjects:uuid_objects.as_ptr() count:uuid_objects.len()];
                 Some(array)
             } else {
                 info!("🌐 Scanning for all peripherals");
@@ -697,8 +716,8 @@ impl CoreBluetoothManager {
             
             // Start scanning: [centralManager scanForPeripheralsWithServices:serviceUUIDs options:nil]
             let _: () = match ns_array {
-                Some(arr) => msg_send![manager.manager_ptr, scanForPeripheralsWithServices:arr options:nil],
-                None => msg_send![manager.manager_ptr, scanForPeripheralsWithServices:nil options:nil],
+                Some(arr) => msg_send![manager.manager_ptr, scanForPeripheralsWithServices:arr options:std::ptr::null_mut::<Object>()],
+                None => msg_send![manager.manager_ptr, scanForPeripheralsWithServices:std::ptr::null_mut::<Object>() options:std::ptr::null_mut::<Object>()],
             };
             
             info!("✅ Scan started successfully");
@@ -724,10 +743,10 @@ impl CoreBluetoothManager {
         unsafe {
             // Get the peripheral object pointer
             if let Some(peripheral_ptr) = peripheral.peripheral_ptr {
-                let peripheral_obj = peripheral_ptr as *mut Object;
+                let peripheral_obj = peripheral_ptr as *mut AnyObject;
                 
                 // [centralManager connectPeripheral:peripheral options:nil]
-                let _: () = msg_send![manager.manager_ptr, connectPeripheral:peripheral_obj options:nil];
+                let _: () = msg_send![manager.manager_ptr, connectPeripheral:peripheral_obj options:std::ptr::null_mut::<Object>()];
                 
                 info!("✅ Connection initiated");
             } else {
@@ -743,7 +762,7 @@ impl CoreBluetoothManager {
         
         unsafe {
             if let Some(peripheral_ptr) = peripheral.peripheral_ptr {
-                let peripheral_obj = peripheral_ptr as *mut Object;
+                let peripheral_obj = peripheral_ptr as *mut AnyObject;
                 
                 // [centralManager cancelPeripheralConnection:peripheral]
                 let _: () = msg_send![manager.manager_ptr, cancelPeripheralConnection:peripheral_obj];
@@ -762,14 +781,14 @@ impl CoreBluetoothManager {
         
         unsafe {
             if let Some(peripheral_ptr) = peripheral.peripheral_ptr {
-                let peripheral_obj = peripheral_ptr as *mut Object;
+                let peripheral_obj = peripheral_ptr as *mut AnyObject;
                 
                 // [peripheral discoverServices:nil] - discovers all services
-                let _: () = msg_send![peripheral_obj, discoverServices:nil];
+                let _: () = msg_send![peripheral_obj, discoverServices:std::ptr::null_mut::<Object>()];
                 
                 // In real implementation, we'd wait for delegate callback
                 // For now, retrieve services synchronously
-                let services: *mut Object = msg_send![peripheral_obj, services];
+                let services: *mut AnyObject = msg_send![peripheral_obj, services];
                 
                 if services.is_null() {
                     info!("⚠️ No services discovered yet");
@@ -784,11 +803,11 @@ impl CoreBluetoothManager {
                 
                 // Iterate through services
                 for i in 0..count {
-                    let service: *mut Object = msg_send![services, objectAtIndex:i];
+                    let service: *mut AnyObject = msg_send![services, objectAtIndex:i];
                     
                     // Get service UUID
-                    let uuid_obj: *mut Object = msg_send![service, UUID];
-                    let uuid_str: *mut Object = msg_send![uuid_obj, UUIDString];
+                    let uuid_obj: *mut AnyObject = msg_send![service, UUID];
+                    let uuid_str: *mut AnyObject = msg_send![uuid_obj, UUIDString];
                     let uuid_cstr: *const i8 = msg_send![uuid_str, UTF8String];
                     let uuid = std::ffi::CStr::from_ptr(uuid_cstr)
                         .to_string_lossy()
@@ -821,22 +840,22 @@ impl CoreBluetoothManager {
                 .ok_or_else(|| anyhow!("Peripheral not found"))?;
             
             if let Some(peripheral_ptr) = peripheral.peripheral_ptr {
-                let peripheral_obj = peripheral_ptr as *mut Object;
+                let peripheral_obj = peripheral_ptr as *mut AnyObject;
                 
                 // Get services
-                let services: *mut Object = msg_send![peripheral_obj, services];
+                let services: *mut AnyObject = msg_send![peripheral_obj, services];
                 if services.is_null() {
                     return Err(anyhow!("No services available"));
                 }
                 
                 // Find matching service
                 let service_count: usize = msg_send![services, count];
-                let mut target_service: Option<*mut Object> = None;
+                let mut target_service: Option<*mut AnyObject> = None;
                 
                 for i in 0..service_count {
-                    let service: *mut Object = msg_send![services, objectAtIndex:i];
-                    let uuid_obj: *mut Object = msg_send![service, UUID];
-                    let uuid_str: *mut Object = msg_send![uuid_obj, UUIDString];
+                    let service: *mut AnyObject = msg_send![services, objectAtIndex:i];
+                    let uuid_obj: *mut AnyObject = msg_send![service, UUID];
+                    let uuid_str: *mut AnyObject = msg_send![uuid_obj, UUIDString];
                     let uuid_cstr: *const i8 = msg_send![uuid_str, UTF8String];
                     let uuid = std::ffi::CStr::from_ptr(uuid_cstr).to_string_lossy();
                     
@@ -849,19 +868,19 @@ impl CoreBluetoothManager {
                 let service = target_service.ok_or_else(|| anyhow!("Service not found"))?;
                 
                 // Get characteristics
-                let characteristics: *mut Object = msg_send![service, characteristics];
+                let characteristics: *mut AnyObject = msg_send![service, characteristics];
                 if characteristics.is_null() {
                     return Err(anyhow!("No characteristics available"));
                 }
                 
                 // Find matching characteristic
                 let char_count: usize = msg_send![characteristics, count];
-                let mut target_char: Option<*mut Object> = None;
+                let mut target_char: Option<*mut AnyObject> = None;
                 
                 for i in 0..char_count {
-                    let characteristic: *mut Object = msg_send![characteristics, objectAtIndex:i];
-                    let uuid_obj: *mut Object = msg_send![characteristic, UUID];
-                    let uuid_str: *mut Object = msg_send![uuid_obj, UUIDString];
+                    let characteristic: *mut AnyObject = msg_send![characteristics, objectAtIndex:i];
+                    let uuid_obj: *mut AnyObject = msg_send![characteristic, UUID];
+                    let uuid_str: *mut AnyObject = msg_send![uuid_obj, UUIDString];
                     let uuid_cstr: *const i8 = msg_send![uuid_str, UTF8String];
                     let uuid = std::ffi::CStr::from_ptr(uuid_cstr).to_string_lossy();
                     
@@ -878,7 +897,7 @@ impl CoreBluetoothManager {
                 
                 // In real implementation, we'd wait for delegate callback
                 // For now, retrieve value synchronously
-                let value_data: *mut Object = msg_send![characteristic, value];
+                let value_data: *mut AnyObject = msg_send![characteristic, value];
                 
                 if value_data.is_null() {
                     return Ok(Vec::new());
@@ -909,22 +928,22 @@ impl CoreBluetoothManager {
                 .ok_or_else(|| anyhow!("Peripheral not found"))?;
             
             if let Some(peripheral_ptr) = peripheral.peripheral_ptr {
-                let peripheral_obj = peripheral_ptr as *mut Object;
+                let peripheral_obj = peripheral_ptr as *mut AnyObject;
                 
                 // Find service and characteristic (similar to read_characteristic)
-                let services: *mut Object = msg_send![peripheral_obj, services];
+                let services: *mut AnyObject = msg_send![peripheral_obj, services];
                 if services.is_null() {
                     return Err(anyhow!("No services available"));
                 }
                 
                 // Find service
                 let service_count: usize = msg_send![services, count];
-                let mut target_service: Option<*mut Object> = None;
+                let mut target_service: Option<*mut AnyObject> = None;
                 
                 for i in 0..service_count {
-                    let service: *mut Object = msg_send![services, objectAtIndex:i];
-                    let uuid_obj: *mut Object = msg_send![service, UUID];
-                    let uuid_str: *mut Object = msg_send![uuid_obj, UUIDString];
+                    let service: *mut AnyObject = msg_send![services, objectAtIndex:i];
+                    let uuid_obj: *mut AnyObject = msg_send![service, UUID];
+                    let uuid_str: *mut AnyObject = msg_send![uuid_obj, UUIDString];
                     let uuid_cstr: *const i8 = msg_send![uuid_str, UTF8String];
                     let uuid = std::ffi::CStr::from_ptr(uuid_cstr).to_string_lossy();
                     
@@ -937,18 +956,18 @@ impl CoreBluetoothManager {
                 let service = target_service.ok_or_else(|| anyhow!("Service not found"))?;
                 
                 // Find characteristic
-                let characteristics: *mut Object = msg_send![service, characteristics];
+                let characteristics: *mut AnyObject = msg_send![service, characteristics];
                 if characteristics.is_null() {
                     return Err(anyhow!("No characteristics available"));
                 }
                 
                 let char_count: usize = msg_send![characteristics, count];
-                let mut target_char: Option<*mut Object> = None;
+                let mut target_char: Option<*mut AnyObject> = None;
                 
                 for i in 0..char_count {
-                    let characteristic: *mut Object = msg_send![characteristics, objectAtIndex:i];
-                    let uuid_obj: *mut Object = msg_send![characteristic, UUID];
-                    let uuid_str: *mut Object = msg_send![uuid_obj, UUIDString];
+                    let characteristic: *mut AnyObject = msg_send![characteristics, objectAtIndex:i];
+                    let uuid_obj: *mut AnyObject = msg_send![characteristic, UUID];
+                    let uuid_str: *mut AnyObject = msg_send![uuid_obj, UUIDString];
                     let uuid_cstr: *const i8 = msg_send![uuid_str, UTF8String];
                     let uuid = std::ffi::CStr::from_ptr(uuid_cstr).to_string_lossy();
                     
@@ -961,8 +980,8 @@ impl CoreBluetoothManager {
                 let characteristic = target_char.ok_or_else(|| anyhow!("Characteristic not found"))?;
                 
                 // Create NSData from bytes
-                let ns_data_cls = Class::get("NSData").ok_or_else(|| anyhow!("NSData class not found"))?;
-                let ns_data: *mut Object = msg_send![ns_data_cls, dataWithBytes:data.as_ptr() length:data.len()];
+                let ns_data_cls = AnyClass::get(c"NSData").ok_or_else(|| anyhow!("NSData class not found"))?;
+                let ns_data: *mut AnyObject = msg_send![ns_data_cls, dataWithBytes:data.as_ptr() length:data.len()];
                 
                 // Write value: [peripheral writeValue:data forCharacteristic:characteristic type:CBCharacteristicWriteWithResponse]
                 // type: 0 = CBCharacteristicWriteWithResponse, 1 = CBCharacteristicWriteWithoutResponse
@@ -987,10 +1006,10 @@ impl CoreBluetoothManager {
                 .ok_or_else(|| anyhow!("Peripheral not found"))?;
             
             if let Some(peripheral_ptr) = peripheral.peripheral_ptr {
-                let peripheral_obj = peripheral_ptr as *mut Object;
+                let peripheral_obj = peripheral_ptr as *mut AnyObject;
                 
                 // Get all services
-                let services: *mut Object = msg_send![peripheral_obj, services];
+                let services: *mut AnyObject = msg_send![peripheral_obj, services];
                 if services.is_null() {
                     return Err(anyhow!("No services available"));
                 }
@@ -999,8 +1018,8 @@ impl CoreBluetoothManager {
                 let service_count: usize = msg_send![services, count];
                 
                 for i in 0..service_count {
-                    let service: *mut Object = msg_send![services, objectAtIndex:i];
-                    let characteristics: *mut Object = msg_send![service, characteristics];
+                    let service: *mut AnyObject = msg_send![services, objectAtIndex:i];
+                    let characteristics: *mut AnyObject = msg_send![service, characteristics];
                     
                     if characteristics.is_null() {
                         continue;
@@ -1009,9 +1028,9 @@ impl CoreBluetoothManager {
                     let char_count: usize = msg_send![characteristics, count];
                     
                     for j in 0..char_count {
-                        let characteristic: *mut Object = msg_send![characteristics, objectAtIndex:j];
-                        let uuid_obj: *mut Object = msg_send![characteristic, UUID];
-                        let uuid_str: *mut Object = msg_send![uuid_obj, UUIDString];
+                        let characteristic: *mut AnyObject = msg_send![characteristics, objectAtIndex:j];
+                        let uuid_obj: *mut AnyObject = msg_send![characteristic, UUID];
+                        let uuid_str: *mut AnyObject = msg_send![uuid_obj, UUIDString];
                         let uuid_cstr: *const i8 = msg_send![uuid_str, UTF8String];
                         let uuid = std::ffi::CStr::from_ptr(uuid_cstr).to_string_lossy();
                         
@@ -1039,38 +1058,38 @@ impl CoreBluetoothManager {
         
         unsafe {
             // Get CBUUID class
-            let cbuuid_cls = Class::get("CBUUID").ok_or_else(|| anyhow!("CBUUID class not found"))?;
+            let cbuuid_cls = AnyClass::get(c"CBUUID").ok_or_else(|| anyhow!("CBUUID class not found"))?;
             
             // Create service UUID
             let service_uuid_ns = NSString::from_str(service_uuid);
-            let service_cbuuid: *mut Object = msg_send![cbuuid_cls, UUIDWithString:service_uuid_ns];
+            let service_cbuuid: *mut AnyObject = msg_send![cbuuid_cls, UUIDWithString:&*service_uuid_ns];
             
             // Get CBMutableService class
-            let mutable_service_cls = Class::get("CBMutableService").ok_or_else(|| {
+            let mutable_service_cls = AnyClass::get(c"CBMutableService").ok_or_else(|| {
                 anyhow!("CBMutableService class not found")
             })?;
             
             // Create mutable service: [[CBMutableService alloc] initWithType:UUID primary:YES]
-            let service: *mut Object = msg_send![mutable_service_cls, alloc];
+            let service: *mut AnyObject = msg_send![mutable_service_cls, alloc];
             let is_primary: bool = true;
-            let service: *mut Object = msg_send![service, initWithType:service_cbuuid primary:is_primary];
+            let service: *mut AnyObject = msg_send![service, initWithType:service_cbuuid primary:is_primary];
             
             // Create characteristics
             if !characteristics.is_empty() {
-                let mutable_char_cls = Class::get("CBMutableCharacteristic").ok_or_else(|| {
+                let mutable_char_cls = AnyClass::get(c"CBMutableCharacteristic").ok_or_else(|| {
                     anyhow!("CBMutableCharacteristic class not found")
                 })?;
                 
-                let mut char_objects: Vec<*mut Object> = Vec::new();
+                let mut char_objects: Vec<*mut AnyObject> = Vec::new();
                 
                 for (char_uuid, initial_value) in characteristics {
                     // Create characteristic UUID
                     let char_uuid_ns = NSString::from_str(char_uuid);
-                    let char_cbuuid: *mut Object = msg_send![cbuuid_cls, UUIDWithString:char_uuid_ns];
+                    let char_cbuuid: *mut AnyObject = msg_send![cbuuid_cls, UUIDWithString:&*char_uuid_ns];
                     
                     // Create NSData for initial value
-                    let ns_data_cls = Class::get("NSData").ok_or_else(|| anyhow!("NSData class not found"))?;
-                    let value_data: *mut Object = msg_send![ns_data_cls, dataWithBytes:initial_value.as_ptr() length:initial_value.len()];
+                    let ns_data_cls = AnyClass::get(c"NSData").ok_or_else(|| anyhow!("NSData class not found"))?;
+                    let value_data: *mut AnyObject = msg_send![ns_data_cls, dataWithBytes:initial_value.as_ptr() length:initial_value.len()];
                     
                     // CBCharacteristicProperties: Read=0x02, Write=0x08, Notify=0x10
                     let properties: u32 = 0x02 | 0x08 | 0x10; // Read | Write | Notify
@@ -1079,8 +1098,8 @@ impl CoreBluetoothManager {
                     let permissions: u32 = 0x01 | 0x02; // Readable | Writeable
                     
                     // Create characteristic: [[CBMutableCharacteristic alloc] initWithType:UUID properties:props value:data permissions:perms]
-                    let characteristic: *mut Object = msg_send![mutable_char_cls, alloc];
-                    let characteristic: *mut Object = msg_send![
+                    let characteristic: *mut AnyObject = msg_send![mutable_char_cls, alloc];
+                    let characteristic: *mut AnyObject = msg_send![
                         characteristic,
                         initWithType:char_cbuuid
                         properties:properties
@@ -1092,8 +1111,8 @@ impl CoreBluetoothManager {
                 }
                 
                 // Set characteristics on service
-                let array_cls = Class::get("NSArray").ok_or_else(|| anyhow!("NSArray class not found"))?;
-                let char_array: *mut Object = msg_send![array_cls, arrayWithObjects:char_objects.as_ptr() count:char_objects.len()];
+                let array_cls = AnyClass::get(c"NSArray").ok_or_else(|| anyhow!("NSArray class not found"))?;
+                let char_array: *mut AnyObject = msg_send![array_cls, arrayWithObjects:char_objects.as_ptr() count:char_objects.len()];
                 let _: () = msg_send![service, setCharacteristics:char_array];
             }
             
@@ -1102,14 +1121,14 @@ impl CoreBluetoothManager {
             
             // Start advertising
             // Create advertisement dictionary
-            let dict_cls = Class::get("NSDictionary").ok_or_else(|| anyhow!("NSDictionary class not found"))?;
+            let dict_cls = AnyClass::get(c"NSDictionary").ok_or_else(|| anyhow!("NSDictionary class not found"))?;
             let service_uuid_key = NSString::from_str("kCBAdvDataServiceUUIDs");
-            let array_cls = Class::get("NSArray").ok_or_else(|| anyhow!("NSArray class not found"))?;
-            let service_array: *mut Object = msg_send![array_cls, arrayWithObjects:&service_cbuuid count:1];
+            let array_cls = AnyClass::get(c"NSArray").ok_or_else(|| anyhow!("NSArray class not found"))?;
+            let service_array: *mut AnyObject = msg_send![array_cls, arrayWithObjects:&service_cbuuid count:1];
             
-            let ad_data: *mut Object = msg_send![dict_cls, 
+            let ad_data: *mut AnyObject = msg_send![dict_cls, 
                 dictionaryWithObjects:&service_array 
-                forKeys:&service_uuid_key 
+                forKeys:&&*service_uuid_key 
                 count:1
             ];
             
@@ -1130,35 +1149,35 @@ impl CoreBluetoothManager {
         if let Some(ref manager) = *manager_guard {
             unsafe {
                 // Create advertisement data dictionary
-                let dict_cls = Class::get("NSMutableDictionary").ok_or_else(|| {
+                let dict_cls = AnyClass::get(c"NSMutableDictionary").ok_or_else(|| {
                     anyhow!("NSMutableDictionary class not found")
                 })?;
-                let ad_dict: *mut Object = msg_send![dict_cls, dictionary];
+                let ad_dict: *mut AnyObject = msg_send![dict_cls, dictionary];
                 
                 // Add local name: "ZHTP-MESH"
                 let local_name_key = NSString::from_str("kCBAdvDataLocalName");
                 let local_name_value = NSString::from_str("ZHTP-MESH");
-                let _: () = msg_send![ad_dict, setObject:local_name_value forKey:local_name_key];
+                let _: () = msg_send![ad_dict, setObject:&*local_name_value forKey:&*local_name_key];
                 
                 // Add service UUID: 6ba7b810-9dad-11d1-80b4-00c04fd430c8
-                let cbuuid_cls = Class::get("CBUUID").ok_or_else(|| anyhow!("CBUUID class not found"))?;
+                let cbuuid_cls = AnyClass::get(c"CBUUID").ok_or_else(|| anyhow!("CBUUID class not found"))?;
                 let service_uuid_str = "6BA7B810-9DAD-11D1-80B4-00C04FD430C8";
                 let service_uuid_ns = NSString::from_str(service_uuid_str);
-                let service_uuid: *mut Object = msg_send![cbuuid_cls, UUIDWithString:service_uuid_ns];
+                let service_uuid: *mut AnyObject = msg_send![cbuuid_cls, UUIDWithString:&*service_uuid_ns];
                 
-                let array_cls = Class::get("NSArray").ok_or_else(|| anyhow!("NSArray class not found"))?;
-                let uuid_array: *mut Object = msg_send![array_cls, arrayWithObject:service_uuid];
+                let array_cls = AnyClass::get(c"NSArray").ok_or_else(|| anyhow!("NSArray class not found"))?;
+                let uuid_array: *mut AnyObject = msg_send![array_cls, arrayWithObject:service_uuid];
                 
                 let services_key = NSString::from_str("kCBAdvDataServiceUUIDs");
-                let _: () = msg_send![ad_dict, setObject:uuid_array forKey:services_key];
+                let _: () = msg_send![ad_dict, setObject:&*uuid_array forKey:&*services_key];
                 
                 // Add manufacturer data (contains the ZHTP mesh info)
                 if adv_data.len() > 10 {  // Ensure we have enough data
-                    let ns_data_cls = Class::get("NSData").ok_or_else(|| anyhow!("NSData class not found"))?;
-                    let manufacturer_data: *mut Object = msg_send![ns_data_cls, dataWithBytes:adv_data.as_ptr() length:adv_data.len()];
+                    let ns_data_cls = AnyClass::get(c"NSData").ok_or_else(|| anyhow!("NSData class not found"))?;
+                    let manufacturer_data: *mut AnyObject = msg_send![ns_data_cls, dataWithBytes:adv_data.as_ptr() length:adv_data.len()];
                     
                     let manufacturer_key = NSString::from_str("kCBAdvDataManufacturerData");
-                    let _: () = msg_send![ad_dict, setObject:manufacturer_data forKey:manufacturer_key];
+                    let _: () = msg_send![ad_dict, setObject:&*manufacturer_data forKey:&*manufacturer_key];
                 }
                 
                 // Start advertising: [peripheralManager startAdvertising:adDict]
@@ -1180,22 +1199,23 @@ impl CoreBluetoothManager {
 #[cfg(target_os = "macos")]
 impl CoreBluetoothManager {
     /// Convert to tracked device format used by mesh protocol
-    pub async fn get_tracked_devices(&self) -> Result<Vec<TrackedDevice>> {
+    pub async fn get_tracked_devices(&self) -> Result<Vec<BleDevice>> {
         let peripherals = self.discovered_peripherals.read().await;
         let mut devices = Vec::new();
         
         for (id, peripheral) in peripherals.iter() {
-            let device = TrackedDevice {
+            let device = BleDevice {
                 // Use ephemeral address instead of MAC
                 ephemeral_address: format!("eph_{}", &id[0..8]),
                 secure_node_id: [0u8; 32], // Would be derived from actual node ID
                 encrypted_mac_hash: [0u8; 32], // Would be encrypted MAC hash
-                name: peripheral.name.clone(),
+                device_name: peripheral.name.clone(),
                 last_seen: chrono::Utc::now().timestamp() as u64,
                 services: peripheral.services.clone(),
                 characteristics: HashMap::new(), // Would be populated from service discovery
-                signal_strength: peripheral.rssi,
-                connection_state: "discovered".to_string(),
+                signal_strength: peripheral.rssi as i16,
+                connection_state: ConnectionState::Disconnected,
+                connection_handle: None,
             };
             
             devices.push(device);
