@@ -1099,7 +1099,7 @@ impl BluetoothClassicProtocol {
         // Try to find connection by checking authenticated peers
         let auth_peers = self.authenticated_peers.read().await;
         for (address, verification) in auth_peers.iter() {
-            if verification.peer_pubkey.key_id == peer_id.key_id {
+            if verification.peer_pubkey == peer_id.key_id {
                 if connections.contains_key(address) {
                     return Ok(address.clone());
                 }
@@ -1112,7 +1112,7 @@ impl BluetoothClassicProtocol {
     /// Get node ID as PublicKey
     pub fn get_node_id(&self) -> Result<PublicKey> {
         // Convert node_id bytes to PublicKey
-        PublicKey::from_bytes(&self.node_id)
+        Ok(PublicKey::new(self.node_id.to_vec()))
     }
     
     /// Transmit packet via RFCOMM
@@ -2227,8 +2227,8 @@ impl BluetoothClassicProtocol {
         }
         
         // Check if should forward
-        if envelope.should_drop() {
-            warn!("❌ Message TTL expired, dropping");
+        if envelope.should_drop(&my_id) {
+            warn!("❌ Message TTL expired or loop detected, dropping");
             return Ok(());
         }
         
@@ -2260,8 +2260,8 @@ impl BluetoothClassicProtocol {
                 ZhtpMeshMessage::ZhtpResponse { request_id, status, status_message, headers, body, timestamp } => {
                     handler_guard.handle_lib_response(request_id, status, status_message, headers, body, timestamp).await?;
                 }
-                ZhtpMeshMessage::BlockchainRequest { requester, request_id, from_height } => {
-                    handler_guard.handle_blockchain_request(requester, request_id, from_height).await?;
+                ZhtpMeshMessage::BlockchainRequest { requester, request_id, request_type } => {
+                    handler_guard.handle_blockchain_request(requester, request_id, request_type).await?;
                 }
                 ZhtpMeshMessage::BlockchainData { request_id, chunk_index, total_chunks, data, complete_data_hash } => {
                     handler_guard.handle_blockchain_data(request_id, chunk_index, total_chunks, data, complete_data_hash).await?;
@@ -2320,7 +2320,7 @@ impl BluetoothClassicProtocol {
                         mesh_server.read().await.record_routing_activity(
                             message_size,
                             envelope.hop_count,
-                            crate::types::network_protocol::NetworkProtocol::BluetoothClassic,
+                            crate::protocols::NetworkProtocol::BluetoothClassic,
                             50, // Estimated latency in ms
                         ).await?;
                     }

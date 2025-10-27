@@ -30,6 +30,7 @@ pub use crate::web4::{Web4Manager, DomainRegistry, ContentPublisher, initialize_
 // Core modules
 pub mod types;
 pub mod mesh;
+pub mod messaging;
 pub mod discovery;
 pub mod relays;
 

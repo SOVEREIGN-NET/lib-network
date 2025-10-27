@@ -1350,7 +1350,7 @@ impl ZhtpMeshServer {
             
             // Set node ID in handler
             let node = self.mesh_node.read().await;
-            let node_id = PublicKey::from_bytes(&node.node_id)?;
+            let node_id = PublicKey::new(node.node_id.to_vec());
             handler_guard.set_node_id(node_id);
         }
         
@@ -1358,25 +1358,30 @@ impl ZhtpMeshServer {
         {
             let mut router_guard = message_router.write().await;
             
-            if let Some(bt_protocol) = &self.bluetooth_protocol {
-                router_guard.bluetooth_handler = Some(bt_protocol.clone());
-            }
+            // TODO: Wire up protocol handlers when available
+            // Currently the BluetoothMeshProtocol doesn't match the expected BluetoothClassicProtocol type
+            // and WiFi/LoRa protocol modules don't exist yet
             
-            if let Some(wifi_protocol) = &self.wifi_direct_protocol {
-                router_guard.wifi_handler = Some(wifi_protocol.clone());
-            }
+            // if let Some(bt_protocol) = &self.bluetooth_protocol {
+            //     router_guard.bluetooth_handler = Some(bt_protocol.clone());
+            // }
             
-            if let Some(lora_protocol) = &self.lorawan_protocol {
-                router_guard.lora_handler = Some(lora_protocol.clone());
-            }
+            // if let Some(wifi_protocol) = &self.wifi_direct_protocol {
+            //     router_guard.wifi_handler = Some(wifi_protocol.clone());
+            // }
+            
+            // if let Some(lora_protocol) = &self.lorawan_protocol {
+            //     router_guard.lora_handler = Some(lora_protocol.clone());
+            // }
         }
         
         // Set router and handler in protocol instances
-        if let Some(bt_protocol) = &self.bluetooth_protocol {
-            let mut bt_guard = bt_protocol.write().await;
-            bt_guard.message_router = Some(message_router.clone());
-            bt_guard.message_handler = Some(message_handler.clone());
-        }
+        // TODO: Re-enable when protocol structure supports message_router and message_handler fields
+        // if let Some(bt_protocol) = &self.bluetooth_protocol {
+        //     let mut bt_guard = bt_protocol.write().await;
+        //     bt_guard.message_router = Some(message_router.clone());
+        //     bt_guard.message_handler = Some(message_handler.clone());
+        // }
         
         // Store in server (need to cast away const - this is during initialization)
         // We'll use unsafe here since we know initialization happens before concurrent access

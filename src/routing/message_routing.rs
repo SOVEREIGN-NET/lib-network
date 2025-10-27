@@ -31,10 +31,10 @@ pub struct MeshMessageRouter {
     pub mesh_server: Option<Arc<RwLock<crate::mesh::server::ZhtpMeshServer>>>,
     /// Bluetooth protocol handler for sending messages (Phase 2)
     pub bluetooth_handler: Option<Arc<RwLock<crate::protocols::bluetooth::classic::BluetoothClassicProtocol>>>,
-    /// WiFi Direct protocol handler (Phase 2)
-    pub wifi_handler: Option<Arc<RwLock<crate::protocols::wifi::WiFiDirectProtocol>>>,
-    /// LoRa protocol handler (Phase 2)
-    pub lora_handler: Option<Arc<RwLock<crate::protocols::lora::LoRaProtocol>>>,
+    // TODO: WiFi Direct protocol handler (Phase 2) - Implement integration
+    // pub wifi_handler: Option<Arc<RwLock<crate::protocols::wifi_direct::WiFiDirectMeshProtocol>>>,
+    // TODO: LoRa protocol handler (Phase 2) - Implement integration
+    // pub lora_handler: Option<Arc<RwLock<crate::protocols::lorawan::LoRaWANMeshProtocol>>>,
 }
 
 /// Routing table for mesh network
@@ -184,8 +184,8 @@ impl MeshMessageRouter {
             route_cache: Arc::new(RwLock::new(HashMap::new())),
             mesh_server: None, // Can be set later with set_mesh_server()
             bluetooth_handler: None,
-            wifi_handler: None,
-            lora_handler: None,
+            // wifi_handler: None,
+            // lora_handler: None,
         }
     }
     
@@ -199,15 +199,16 @@ impl MeshMessageRouter {
         self.bluetooth_handler = Some(handler);
     }
     
-    /// Set WiFi Direct protocol handler (Phase 2)
-    pub fn set_wifi_handler(&mut self, handler: Arc<RwLock<crate::protocols::wifi::WiFiDirectProtocol>>) {
-        self.wifi_handler = Some(handler);
-    }
+    // TODO: Implement WiFi Direct and LoRa integration
+    // /// Set WiFi Direct protocol handler (Phase 2)
+    // pub fn set_wifi_handler(&mut self, handler: Arc<RwLock<crate::protocols::wifi_direct::WiFiDirectMeshProtocol>>) {
+    //     self.wifi_handler = Some(handler);
+    // }
     
-    /// Set LoRa protocol handler (Phase 2)
-    pub fn set_lora_handler(&mut self, handler: Arc<RwLock<crate::protocols::lora::LoRaProtocol>>) {
-        self.lora_handler = Some(handler);
-    }
+    // /// Set LoRa protocol handler (Phase 2)
+    // pub fn set_lora_handler(&mut self, handler: Arc<RwLock<crate::protocols::lorawan::LoRaWANMeshProtocol>>) {
+    //     self.lora_handler = Some(handler);
+    // }
     
     /// Estimate message size in bytes
     fn estimate_message_size(message: &ZhtpMeshMessage) -> usize {
@@ -259,14 +260,17 @@ impl MeshMessageRouter {
                 .as_secs(),
         };
         
-        self.delivery_tracking.write().await.insert(message_id, delivery_status);
+        {
+            let mut tracking = self.delivery_tracking.write().await;
+            tracking.insert(message_id, delivery_status);
+        }
         
         // Find optimal route to destination
         let route = self.find_optimal_route(&destination, &sender).await?;
         
         // Update delivery status with route
         {
-            let mut tracking = self.delivery_tracking.write().await;
+            let mut tracking: tokio::sync::RwLockWriteGuard<HashMap<u64, DeliveryStatus>> = self.delivery_tracking.write().await;
             if let Some(status) = tracking.get_mut(&message_id) {
                 status.route = route.clone();
                 status.stage = DeliveryStage::Routing;
@@ -849,26 +853,14 @@ impl MeshMessageRouter {
                 }
             }
             NetworkProtocol::WiFiDirect => {
-                // Get WiFi Direct handler
-                if let Some(wifi_handler) = &self.wifi_handler {
-                    let handler = wifi_handler.read().await;
-                    // WiFi handler would need send_mesh_envelope method
-                    warn!("WiFi Direct sending not yet implemented");
-                    return Err(anyhow!("WiFi Direct handler not fully implemented"));
-                } else {
-                    return Err(anyhow!("WiFi Direct handler not available"));
-                }
+                // TODO: WiFi Direct protocol integration not yet implemented
+                warn!("WiFi Direct sending not yet implemented");
+                return Err(anyhow!("WiFi Direct handler not available"));
             }
             NetworkProtocol::LoRaWAN => {
-                // Get LoRa handler
-                if let Some(lora_handler) = &self.lora_handler {
-                    let handler = lora_handler.read().await;
-                    // LoRa handler would need send_mesh_envelope method
-                    warn!("LoRa sending not yet implemented");
-                    return Err(anyhow!("LoRa handler not fully implemented"));
-                } else {
-                    return Err(anyhow!("LoRa handler not available"));
-                }
+                // TODO: LoRaWAN protocol integration not yet implemented
+                warn!("LoRa sending not yet implemented");
+                return Err(anyhow!("LoRa handler not available"));
             }
             _ => {
                 return Err(anyhow!("Unsupported protocol for mesh forwarding: {:?}", connection.protocol));

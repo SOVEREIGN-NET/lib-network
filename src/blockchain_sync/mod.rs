@@ -68,13 +68,19 @@ impl BlockchainSyncManager {
         // Store pending request
         self.pending_requests.write().await.insert(request_id, requester.clone());
 
+        let request_type = if let Some(height) = from_height {
+            crate::types::mesh_message::BlockchainRequestType::BlocksAfter(height)
+        } else {
+            crate::types::mesh_message::BlockchainRequestType::FullChain
+        };
+
         let message = ZhtpMeshMessage::BlockchainRequest {
             requester,
             request_id,
-            from_height,
+            request_type,
         };
 
-        info!(" Created blockchain request (ID: {})", request_id);
+        info!("📦 Created blockchain request (ID: {})", request_id);
         Ok((request_id, message))
     }
 

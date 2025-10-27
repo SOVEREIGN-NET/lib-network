@@ -10,8 +10,8 @@ use tokio::sync::RwLock;
 use tracing::{info, warn, error};
 use lib_crypto::PublicKey;
 
-use crate::types::mesh_message::{ZhtpMeshMessage, MeshMessageEnvelope};
-use crate::types::network_protocol::NetworkProtocol;
+use crate::types::mesh_message::ZhtpMeshMessage;
+use crate::protocols::NetworkProtocol;
 use crate::mesh::connection::MeshConnection;
 
 use crate::relays::LongRangeRelay;
@@ -84,8 +84,8 @@ impl MeshMessageHandler {
             ZhtpMeshMessage::ZhtpResponse { request_id, status, status_message, headers, body, timestamp } => {
                 self.handle_lib_response(request_id, status, status_message, headers, body, timestamp).await?;
             },
-            ZhtpMeshMessage::BlockchainRequest { requester, request_id, from_height } => {
-                self.handle_blockchain_request(requester, request_id, from_height).await?;
+            ZhtpMeshMessage::BlockchainRequest { requester, request_id, request_type } => {
+                self.handle_blockchain_request(requester, request_id, request_type).await?;
             },
             ZhtpMeshMessage::BlockchainData { request_id, chunk_index, total_chunks, data, complete_data_hash } => {
                 self.handle_blockchain_data(request_id, chunk_index, total_chunks, data, complete_data_hash).await?;
@@ -96,12 +96,21 @@ impl MeshMessageHandler {
             ZhtpMeshMessage::NewTransaction { transaction, sender, tx_hash, fee } => {
                 self.handle_new_transaction(transaction, sender, tx_hash, fee).await?;
             },
+            ZhtpMeshMessage::RouteProbe { probe_id, target } => {
+                // TODO: Implement route probe handling
+                tracing::info!("Received route probe {} for target {:?}", probe_id, target);
+            },
+            ZhtpMeshMessage::RouteResponse { probe_id, route_quality, latency_ms } => {
+                // TODO: Implement route response handling
+                tracing::info!("Received route response for probe {} with quality {} and latency {}ms", 
+                    probe_id, route_quality, latency_ms);
+            },
         }
         Ok(())
     }
     
     /// Handle peer discovery message
-    async fn handle_peer_discovery(
+    pub async fn handle_peer_discovery(
         &self, 
         peer: PublicKey, 
         capabilities: Vec<crate::types::mesh_capability::MeshCapability>, 
@@ -242,12 +251,12 @@ impl MeshMessageHandler {
         Ok(())
     }
     
-    /// Handle UBI distribution
-    async fn handle_ubi_distribution(
-        &self, 
-        recipient: PublicKey, 
-        amount_tokens: u64, 
-        distribution_round: u64, 
+    /// Handle UBI distribution message
+    pub async fn handle_ubi_distribution(
+        &self,
+        recipient: PublicKey,
+        amount_tokens: u64,
+        distribution_round: u64,
         proof: Vec<u8>
     ) -> Result<()> {
         info!("UBI distribution: {} tokens to recipient (round {})", 
@@ -293,7 +302,7 @@ impl MeshMessageHandler {
     }
     
     /// Handle network health report
-    async fn handle_health_report(
+    pub async fn handle_health_report(
         &self, 
         reporter: PublicKey, 
         network_quality: f64, 
@@ -315,7 +324,7 @@ impl MeshMessageHandler {
     }
     
     /// Handle native ZHTP protocol request from browser/API clients (UPDATED - Phase 3)
-    async fn handle_lib_request(
+    pub async fn handle_lib_request(
         &self,
         requester: PublicKey,
         method: String,
@@ -446,7 +455,7 @@ impl MeshMessageHandler {
     }
     
     /// Handle native ZHTP protocol response
-    async fn handle_lib_response(
+    pub async fn handle_lib_response(
         &self,
         request_id: u64,
         status: u16,
@@ -469,78 +478,20 @@ impl MeshMessageHandler {
     }
 
     /// Handle blockchain request from peer (UPDATED - Phase 3)
-    async fn handle_blockchain_request(
+    /// TODO: This requires lib-blockchain which would create a circular dependency
+    /// For now, this is stubbed out and should be implemented at the application layer
+    pub async fn handle_blockchain_request(
         &self,
         requester: PublicKey,
         request_id: u64,
-        from_height: Option<u64>,
+        request_type: crate::types::mesh_message::BlockchainRequestType,
     ) -> Result<()> {
-        info!("📦 Blockchain request from peer {:?} (request_id: {}, from_height: {:?})", 
-              hex::encode(&requester.key_id[0..8]), request_id, from_height);
+        info!("📦 Blockchain request from peer {:?} (request_id: {}, type: {:?})", 
+              hex::encode(&requester.key_id[0..8]), request_id, request_type);
         
-        // Try to get blockchain from shared instance
-        let blockchain_result = lib_blockchain::get_shared_blockchain().await;
-        
-        if blockchain_result.is_err() {
-            warn!("⚠️ Blockchain not available, cannot export data");
-            return Ok(());
-        }
-        
-        let blockchain = blockchain_result?;
-        let blockchain_read = blockchain.read().await;
-        
-        // Export blockchain data from specified height
-        let blockchain_data = if let Some(height) = from_height {
-            // Export blocks from height onwards
-            let start_idx = height as usize;
-            let end_idx = blockchain_read.blocks.len();
-            
-            if start_idx >= end_idx {
-                warn!("⚠️ Requested height {} beyond chain length {}", height, end_idx);
-                return Ok(());
-            }
-            
-            let blocks: Vec<_> = blockchain_read.blocks[start_idx..end_idx].to_vec();
-            info!("📊 Exporting {} blocks from height {}", blocks.len(), height);
-            bincode::serialize(&blocks)?
-        } else {
-            // Export entire blockchain
-            info!("📊 Exporting entire blockchain ({} blocks)", blockchain_read.blocks.len());
-            bincode::serialize(&blockchain_read.blocks)?
-        };
-        
-        drop(blockchain_read);
-        drop(blockchain);
-        
-        info!("📦 Serialized {} bytes of blockchain data", blockchain_data.len());
-        
-        // Get protocol being used for peer to determine chunking
-        let protocol = self.get_protocol_for_peer(&requester).await.unwrap_or(NetworkProtocol::BluetoothLE);
-        
-        // Chunk data based on protocol MTU
-        let chunks = self.chunk_blockchain_data(request_id, blockchain_data, &protocol)?;
-        
-        info!("📦 Created {} chunks for transmission", chunks.len());
-        
-        // Send chunks back to requester via mesh
-        if let Some(my_id) = &self.node_id {
-            for (i, chunk_message) in chunks.into_iter().enumerate() {
-                if let Some(router) = &self.message_router {
-                    info!("📤 Sending chunk {}/{}", i + 1, "total");
-                    let router_guard = router.read().await;
-                    router_guard.route_message_with_forwarding(
-                        requester.clone(),
-                        chunk_message,
-                        my_id.clone(),
-                    ).await?;
-                }
-                
-                // Small delay to avoid overwhelming network
-                tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
-            }
-        }
-        
-        info!("✅ Blockchain data sent to requester");
+        // TODO: Implement blockchain integration at application layer
+        // This functionality requires lib-blockchain which would create a circular dependency
+        warn!("⚠️ Blockchain integration not yet implemented (circular dependency issue)");
         Ok(())
     }
     
@@ -595,7 +546,7 @@ impl MeshMessageHandler {
     }
 
     /// Handle incoming blockchain data chunks
-    async fn handle_blockchain_data(
+    pub async fn handle_blockchain_data(
         &self,
         request_id: u64,
         chunk_index: u32,
@@ -603,7 +554,7 @@ impl MeshMessageHandler {
         data: Vec<u8>,
         complete_data_hash: [u8; 32],
     ) -> Result<()> {
-        info!(" Blockchain data chunk {}/{} received ({} bytes, request_id: {})", 
+        info!("📦 Blockchain data chunk {}/{} received ({} bytes, request_id: {})", 
               chunk_index + 1, total_chunks, data.len(), request_id);
         
         // TODO: Verify chunk hash against complete_data_hash
@@ -619,6 +570,7 @@ impl MeshMessageHandler {
     }
     
     /// Handle new block announcement (NEW - Phase 3)
+    /// TODO: This requires lib-blockchain which would create a circular dependency
     pub async fn handle_new_block(
         &self,
         block: Vec<u8>,
@@ -629,43 +581,14 @@ impl MeshMessageHandler {
         info!("📦 New block announcement: height {} from {:?} ({} bytes)", 
               height, hex::encode(&sender.key_id[0..4]), block.len());
         
-        // Try to get blockchain from shared instance
-        let blockchain_result = lib_blockchain::get_shared_blockchain().await;
-        
-        if blockchain_result.is_err() {
-            warn!("⚠️ Blockchain not available, cannot process block");
-            return Ok(());
-        }
-        
-        let blockchain = blockchain_result?;
-        
-        // Deserialize block
-        let deserialized_block: lib_blockchain::Block = match bincode::deserialize(&block) {
-            Ok(b) => b,
-            Err(e) => {
-                warn!("❌ Failed to deserialize block: {}", e);
-                return Err(anyhow!("Block deserialization failed: {}", e));
-            }
-        };
-        
-        info!("✅ Block deserialized successfully, adding to chain");
-        
-        // Add block to blockchain
-        let mut blockchain_write = blockchain.write().await;
-        match blockchain_write.add_block(deserialized_block) {
-            Ok(_) => {
-                info!("✅ Block {} added to blockchain", height);
-            }
-            Err(e) => {
-                warn!("❌ Failed to add block: {}", e);
-                return Err(anyhow!("Block addition failed: {}", e));
-            }
-        }
+        // TODO: Implement blockchain integration at application layer
+        warn!("⚠️ Blockchain integration not yet implemented (circular dependency issue)");
         
         Ok(())
     }
     
     /// Handle new transaction announcement (NEW - Phase 3)
+    /// TODO: This requires lib-blockchain which would create a circular dependency
     pub async fn handle_new_transaction(
         &self,
         transaction: Vec<u8>,
@@ -678,32 +601,8 @@ impl MeshMessageHandler {
               hex::encode(&tx_hash[0..8]),
               fee);
         
-        // Try to get blockchain from shared instance
-        let blockchain_result = lib_blockchain::get_shared_blockchain().await;
-        
-        if blockchain_result.is_err() {
-            warn!("⚠️ Blockchain not available, cannot process transaction");
-            return Ok(());
-        }
-        
-        let blockchain = blockchain_result?;
-        
-        // Deserialize transaction
-        let deserialized_tx: lib_blockchain::Transaction = match bincode::deserialize(&transaction) {
-            Ok(tx) => tx,
-            Err(e) => {
-                warn!("❌ Failed to deserialize transaction: {}", e);
-                return Err(anyhow!("Transaction deserialization failed: {}", e));
-            }
-        };
-        
-        info!("✅ Transaction deserialized successfully, adding to mempool");
-        
-        // Add transaction to pending transactions (mempool)
-        let mut blockchain_write = blockchain.write().await;
-        blockchain_write.add_pending_transaction(deserialized_tx);
-        
-        info!("✅ Transaction added to mempool");
+        // TODO: Implement blockchain integration at application layer
+        warn!("⚠️ Blockchain integration not yet implemented (circular dependency issue)");
         
         Ok(())
     }
