@@ -31,10 +31,10 @@ pub struct MeshMessageRouter {
     pub mesh_server: Option<Arc<RwLock<crate::mesh::server::ZhtpMeshServer>>>,
     /// Bluetooth protocol handler for sending messages (Phase 2)
     pub bluetooth_handler: Option<Arc<RwLock<crate::protocols::bluetooth::classic::BluetoothClassicProtocol>>>,
-    // TODO: WiFi Direct protocol handler (Phase 2) - Implement integration
-    // pub wifi_handler: Option<Arc<RwLock<crate::protocols::wifi_direct::WiFiDirectMeshProtocol>>>,
-    // TODO: LoRa protocol handler (Phase 2) - Implement integration
-    // pub lora_handler: Option<Arc<RwLock<crate::protocols::lorawan::LoRaWANMeshProtocol>>>,
+    /// WiFi Direct protocol handler (Phase 2)
+    pub wifi_handler: Option<Arc<RwLock<crate::protocols::wifi_direct::WiFiDirectMeshProtocol>>>,
+    /// LoRa protocol handler (Phase 2)
+    pub lora_handler: Option<Arc<RwLock<crate::protocols::lorawan::LoRaWANMeshProtocol>>>,
 }
 
 /// Routing table for mesh network
@@ -184,8 +184,8 @@ impl MeshMessageRouter {
             route_cache: Arc::new(RwLock::new(HashMap::new())),
             mesh_server: None, // Can be set later with set_mesh_server()
             bluetooth_handler: None,
-            // wifi_handler: None,
-            // lora_handler: None,
+            wifi_handler: None,
+            lora_handler: None,
         }
     }
     
@@ -199,16 +199,15 @@ impl MeshMessageRouter {
         self.bluetooth_handler = Some(handler);
     }
     
-    // TODO: Implement WiFi Direct and LoRa integration
-    // /// Set WiFi Direct protocol handler (Phase 2)
-    // pub fn set_wifi_handler(&mut self, handler: Arc<RwLock<crate::protocols::wifi_direct::WiFiDirectMeshProtocol>>) {
-    //     self.wifi_handler = Some(handler);
-    // }
+    /// Set WiFi Direct protocol handler (Phase 2)
+    pub fn set_wifi_handler(&mut self, handler: Arc<RwLock<crate::protocols::wifi_direct::WiFiDirectMeshProtocol>>) {
+        self.wifi_handler = Some(handler);
+    }
     
-    // /// Set LoRa protocol handler (Phase 2)
-    // pub fn set_lora_handler(&mut self, handler: Arc<RwLock<crate::protocols::lorawan::LoRaWANMeshProtocol>>) {
-    //     self.lora_handler = Some(handler);
-    // }
+    /// Set LoRa protocol handler (Phase 2)
+    pub fn set_lora_handler(&mut self, handler: Arc<RwLock<crate::protocols::lorawan::LoRaWANMeshProtocol>>) {
+        self.lora_handler = Some(handler);
+    }
     
     /// Estimate message size in bytes
     fn estimate_message_size(message: &ZhtpMeshMessage) -> usize {
@@ -853,14 +852,24 @@ impl MeshMessageRouter {
                 }
             }
             NetworkProtocol::WiFiDirect => {
-                // TODO: WiFi Direct protocol integration not yet implemented
-                warn!("WiFi Direct sending not yet implemented");
-                return Err(anyhow!("WiFi Direct handler not available"));
+                // Get WiFi Direct handler
+                if let Some(ref wifi_handler) = self.wifi_handler {
+                    let handler = wifi_handler.read().await;
+                    handler.send_mesh_envelope(peer_id, envelope).await?;
+                    info!("📡 Sent via WiFi Direct");
+                } else {
+                    return Err(anyhow!("WiFi Direct handler not configured"));
+                }
             }
             NetworkProtocol::LoRaWAN => {
-                // TODO: LoRaWAN protocol integration not yet implemented
-                warn!("LoRa sending not yet implemented");
-                return Err(anyhow!("LoRa handler not available"));
+                // Get LoRa handler
+                if let Some(ref lora_handler) = self.lora_handler {
+                    let handler = lora_handler.read().await;
+                    handler.send_mesh_envelope(peer_id, envelope).await?;
+                    info!("📡 Sent via LoRaWAN");
+                } else {
+                    return Err(anyhow!("LoRa handler not configured"));
+                }
             }
             _ => {
                 return Err(anyhow!("Unsupported protocol for mesh forwarding: {:?}", connection.protocol));

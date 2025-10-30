@@ -376,6 +376,56 @@ impl LoRaWANMeshProtocol {
         Ok(())
     }
     
+    /// Send mesh envelope to peer (used by mesh router)
+    pub async fn send_mesh_envelope(
+        &self,
+        peer_id: &lib_crypto::PublicKey,
+        envelope: &crate::types::mesh_message::MeshMessageEnvelope,
+    ) -> Result<()> {
+        use tracing::info;
+        
+        info!("📤 Sending mesh envelope {} via LoRaWAN to {:?}", 
+              envelope.message_id, 
+              hex::encode(&peer_id.key_id[0..4]));
+        
+        // Serialize envelope to bytes
+        let bytes = envelope.to_bytes()?;
+        
+        info!("Serialized envelope: {} bytes", bytes.len());
+        
+        // For LoRaWAN, we need to convert peer_id to LoRaWAN address
+        // In a full implementation, this would use DevEUI or DevAddr
+        let target_address = self.get_address_for_peer(peer_id).await?;
+        
+        // Send via existing send_mesh_message (handles fragmentation if needed)
+        self.send_mesh_message(&target_address, &bytes).await?;
+        
+        info!("✅ LoRaWAN mesh envelope sent successfully");
+        
+        Ok(())
+    }
+    
+    /// Get LoRaWAN address for a peer PublicKey
+    async fn get_address_for_peer(&self, peer_id: &lib_crypto::PublicKey) -> Result<String> {
+        // For LoRaWAN, we derive a DevAddr from the peer's public key
+        // DevAddr is 32-bit (4 bytes) in LoRaWAN 1.0.x/1.1
+        // Format: 7 bits NwkID + 25 bits NwkAddr
+        
+        // Use first 4 bytes of peer's key_id as DevAddr
+        let dev_addr = u32::from_be_bytes([
+            peer_id.key_id[0],
+            peer_id.key_id[1],
+            peer_id.key_id[2],
+            peer_id.key_id[3],
+        ]);
+        
+        let address = format!("{:08X}", dev_addr);
+        info!("Mapped peer {:?} to LoRaWAN DevAddr: {}", 
+              hex::encode(&peer_id.key_id[0..4]), address);
+        
+        Ok(address)
+    }
+    
     /// Send mesh message via LoRaWAN
     pub async fn send_mesh_message(&self, target_address: &str, message: &[u8]) -> Result<()> {
         info!(" Sending LoRaWAN mesh message to {}: {} bytes", target_address, message.len());

@@ -2190,6 +2190,57 @@ impl WiFiDirectMeshProtocol {
         }
     }
     
+    /// Send mesh envelope to peer (used by mesh router)
+    pub async fn send_mesh_envelope(
+        &self,
+        peer_id: &lib_crypto::PublicKey,
+        envelope: &crate::types::mesh_message::MeshMessageEnvelope,
+    ) -> Result<()> {
+        use tracing::info;
+        
+        info!("📤 Sending mesh envelope {} via WiFi Direct to {:?}", 
+              envelope.message_id, 
+              hex::encode(&peer_id.key_id[0..4]));
+        
+        // Serialize envelope to bytes
+        let bytes = envelope.to_bytes()?;
+        
+        info!("Serialized envelope: {} bytes", bytes.len());
+        
+        // Look up peer address by matching connected devices
+        // For WiFi Direct, we use MAC address as the key
+        let target_address = self.get_address_for_peer(peer_id).await?;
+        
+        // Send via existing send_mesh_message
+        self.send_mesh_message(&target_address, &bytes).await?;
+        
+        info!("✅ WiFi Direct mesh envelope sent successfully");
+        
+        Ok(())
+    }
+    
+    /// Get WiFi Direct address (MAC) for a peer PublicKey
+    async fn get_address_for_peer(&self, peer_id: &lib_crypto::PublicKey) -> Result<String> {
+        let devices = self.connected_devices.read().await;
+        
+        // In a full implementation, we'd maintain a mapping of PublicKey -> MAC address
+        // For now, we check if there's a single connected device or use the first one
+        // This should be enhanced with proper peer tracking
+        
+        if devices.is_empty() {
+            return Err(anyhow::anyhow!("No WiFi Direct devices connected"));
+        }
+        
+        // Try to find the device - for now use first available
+        // TODO: Maintain proper PublicKey -> MAC address mapping
+        if let Some((address, _device)) = devices.iter().next() {
+            info!("Using WiFi Direct device: {} for peer {:?}", address, hex::encode(&peer_id.key_id[0..4]));
+            return Ok(address.clone());
+        }
+        
+        Err(anyhow::anyhow!("No active WiFi Direct connection to peer {:?}", hex::encode(&peer_id.key_id[0..8])))
+    }
+    
     /// Send mesh message via WiFi Direct
     pub async fn send_mesh_message(&self, target_address: &str, message: &[u8]) -> Result<()> {
         info!(" Sending WiFi Direct mesh message to {}: {} bytes", target_address, message.len());
