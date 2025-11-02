@@ -2426,60 +2426,61 @@ impl WiFiDirectMeshProtocol {
                                             prop.key() == "device_type" && prop.val_str() == "router"
                                         });
                                     
+                                    let hostname = info.get_hostname().to_string();
+                                    let port = info.get_port();
+                                    
+                                    // Get all addresses for this service
+                                    let addresses: Vec<String> = info.get_addresses()
+                                        .iter()
+                                        .map(|ip| ip.to_string())
+                                        .collect();
+                                    
                                     if is_router {
-                                        let hostname = info.get_hostname().to_string();
-                                        let port = info.get_port();
-                                        
-                                        // Get all addresses for this service
-                                        let addresses: Vec<String> = info.get_addresses()
-                                            .iter()
-                                            .map(|ip| ip.to_string())
-                                            .collect();
-                                        
                                         info!("🔀 Discovered ZHTP router: {}", hostname);
-                                        info!("   Port: {}, IPs: {:?}", port, addresses);
-                                        
-                                        // Try all addresses
-                                        for addr in addresses {
-                                            let router_addr = format!("{}:{}", addr, port);
-                                            
-                                            // Add to discovered peers (use default P2P negotiation params)
-                                            let mut peers = discovered_peers.write().await;
-                                            if !peers.contains_key(&router_addr) {
-                                                // Create basic negotiation params for router peer
-                                                let router_negotiation = P2PGoNegotiation {
-                                                    go_intent: 7,
-                                                    tie_breaker: false,
-                                                    device_capability: DeviceCapability {
-                                                        service_discovery: true,
-                                                        p2p_client_discoverability: true,
-                                                        concurrent_operation: true,
-                                                        p2p_infrastructure_managed: false,
-                                                        p2p_device_limit: false,
-                                                        p2p_invitation_procedure: true,
-                                                    },
-                                                    group_capability: GroupCapability {
-                                                        p2p_group_owner: true, // It's a router
-                                                        persistent_p2p_group: false,
-                                                        group_limit: false,
-                                                        intra_bss_distribution: true,
-                                                        cross_connection: true,
-                                                        persistent_reconnect: true,
-                                                        group_formation: true,
-                                                        ip_address_allocation: true,
-                                                    },
-                                                    channel_list: vec![1, 6, 11],
-                                                    config_timeout: 100,
-                                                };
-                                                
-                                                peers.insert(router_addr.clone(), router_negotiation);
-                                                info!("✅ Added router {} to discovered peers", router_addr);
-                                            }
-                                            
-                                            // TODO: Automatically connect to this router for mesh forwarding
-                                        }
                                     } else {
-                                        info!("ℹ️  Discovered non-router ZHTP service (device_type != router)");
+                                        info!("🔀 Discovered ZHTP node: {}", hostname);
+                                    }
+                                    info!("   Port: {}, IPs: {:?}", port, addresses);
+                                    
+                                    // Add ALL ZHTP services to discovered peers (not just routers)
+                                    // Try all addresses
+                                    for addr in addresses {
+                                        let peer_addr = format!("{}:{}", addr, port);
+                                        
+                                        // Add to discovered peers (use default P2P negotiation params)
+                                        let mut peers = discovered_peers.write().await;
+                                        if !peers.contains_key(&peer_addr) {
+                                            // Create basic negotiation params for peer
+                                            let peer_negotiation = P2PGoNegotiation {
+                                                go_intent: if is_router { 7 } else { 5 },
+                                                tie_breaker: false,
+                                                device_capability: DeviceCapability {
+                                                    service_discovery: true,
+                                                    p2p_client_discoverability: true,
+                                                    concurrent_operation: true,
+                                                    p2p_infrastructure_managed: false,
+                                                    p2p_device_limit: false,
+                                                    p2p_invitation_procedure: true,
+                                                },
+                                                group_capability: GroupCapability {
+                                                    p2p_group_owner: is_router,
+                                                    persistent_p2p_group: false,
+                                                    group_limit: false,
+                                                    intra_bss_distribution: true,
+                                                    cross_connection: true,
+                                                    persistent_reconnect: true,
+                                                    group_formation: true,
+                                                    ip_address_allocation: true,
+                                                },
+                                                channel_list: vec![1, 6, 11],
+                                                config_timeout: 100,
+                                            };
+                                            
+                                            peers.insert(peer_addr.clone(), peer_negotiation);
+                                            info!("✅ Added ZHTP peer {} to discovered peers", peer_addr);
+                                        }
+                                        
+                                        // TODO: Automatically connect to this peer for mesh forwarding
                                     }
                                 },
                                 mdns_sd::ServiceEvent::ServiceFound(ty, fullname) => {
