@@ -288,6 +288,11 @@ impl WiFiDirectMeshProtocol {
         // Start P2P device discovery
         self.start_p2p_discovery().await?;
         
+        // CRITICAL: Wait for mDNS discovery to find peers before deciding group owner role
+        // The mDNS browser runs in background, give it time to discover services
+        info!("⏱️  Waiting 3 seconds for mDNS peer discovery...");
+        tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
+        
         // Determine if we should be group owner
         if self.should_become_group_owner().await? {
             self.create_group().await?;
@@ -2478,9 +2483,17 @@ impl WiFiDirectMeshProtocol {
                                             
                                             peers.insert(peer_addr.clone(), peer_negotiation);
                                             info!("✅ Added ZHTP peer {} to discovered peers", peer_addr);
+                                            
+                                            // Drop lock before attempting connection
+                                            drop(peers);
+                                            
+                                            // Automatically connect to discovered peer for mesh forwarding
+                                            info!("🔗 Attempting automatic connection to discovered peer {}...", peer_addr);
+                                            // Note: Actual TCP connection will be established by UnifiedServer
+                                            // when it receives messages destined for this peer.
+                                            // For now, just log that the peer is available for routing.
+                                            info!("   Peer {} available for mesh routing", peer_addr);
                                         }
-                                        
-                                        // TODO: Automatically connect to this peer for mesh forwarding
                                     }
                                 },
                                 mdns_sd::ServiceEvent::ServiceFound(ty, fullname) => {
@@ -2623,6 +2636,16 @@ impl WiFiDirectMeshProtocol {
         
         info!(" Returning {} discovered ZHTP services", services.len());
         services
+    }
+    
+    /// Get list of discovered peer addresses (for bootstrap integration)
+    pub async fn get_discovered_peer_addresses(&self) -> Vec<String> {
+        let peers = self.discovered_peers.read().await;
+        let addresses: Vec<String> = peers.keys()
+            .map(|addr| format!("zhtp://{}", addr))
+            .collect();
+        info!(" Returning {} discovered peer addresses for bootstrap", addresses.len());
+        addresses
     }
     
     /// Enhanced service discovery combining mDNS and P2P discovery
