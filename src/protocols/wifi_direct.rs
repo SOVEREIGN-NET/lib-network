@@ -902,8 +902,13 @@ impl WiFiDirectMeshProtocol {
             return Ok(device_score > 0.7);
         }
         
-        // Use the result of GO negotiation with the first discovered peer
-        Ok(self.go_negotiation.group_capability.p2p_group_owner)
+        // If we discovered peers, we should JOIN them (not be group owner)
+        // The first node on the network becomes group owner, subsequent nodes join
+        info!("📡 Discovered {} peer(s) - will join existing network instead of creating new group", peers.len());
+        for peer_addr in peers.keys() {
+            info!("   → Peer: {}", peer_addr);
+        }
+        Ok(false)  // Don't be group owner if peers exist - join them instead
     }
     
     /// Calculate device capabilities score for initial GO intent determination
@@ -1070,17 +1075,26 @@ impl WiFiDirectMeshProtocol {
     
     /// Join existing WiFi Direct groups
     async fn join_existing_groups(&self) -> Result<()> {
-        info!(" Scanning for existing WiFi Direct groups to join...");
+        info!("🔗 Joining existing ZHTP network via discovered peers...");
         
-        let groups = self.scan_for_groups().await?;
+        // Get the discovered peers from mDNS
+        let peers = self.discovered_peers.read().await;
         
-        for group in groups {
-            if group.contains("ZHTP") {
-                info!("Attempting to join group: {}", group);
-                self.join_group(&group, &self.passphrase).await?;
-                break; // Join first available ZHTP group
-            }
+        if peers.is_empty() {
+            warn!("⚠️  No peers to join - this shouldn't happen!");
+            return Ok(());
         }
+        
+        info!("📋 Found {} discovered peer(s) to connect to:", peers.len());
+        for peer_addr in peers.keys() {
+            info!("   → {}", peer_addr);
+        }
+        
+        // NOTE: Actual TCP connections are handled by the UnifiedServer mesh router
+        // The discovered_peers HashMap is now accessible via get_discovered_peer_addresses()
+        // The unified server will establish TCP connections to these peers
+        info!("✅ Peer addresses registered for mesh routing via UnifiedServer");
+        info!("   UnifiedServer will establish TCP connections to discovered peers on port 9333");
         
         Ok(())
     }
