@@ -138,12 +138,20 @@ async fn listen_for_announcements(our_node_id: Uuid) -> Result<()> {
     
     let mut buf = [0; 1024];
     let mut discovery_count = 0;
+    let mut packet_count = 0;
     
     loop {
         match socket.recv_from(&mut buf).await {
             Ok((len, addr)) => {
+                packet_count += 1;
+                
+                // Log every packet received for debugging
+                if packet_count == 1 || packet_count % 10 == 0 {
+                    debug!("📦 Received multicast packet #{} from {} ({} bytes)", packet_count, addr, len);
+                }
+                
                 let announcement_str = String::from_utf8_lossy(&buf[..len]);
-                debug!("Received announcement from {}: {}", addr, announcement_str);
+                debug!("Packet content: {}", announcement_str);
                 
                 match serde_json::from_str::<NodeAnnouncement>(&announcement_str) {
                     Ok(announcement) => {

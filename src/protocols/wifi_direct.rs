@@ -2408,21 +2408,17 @@ impl WiFiDirectMeshProtocol {
             
             tokio::spawn(async move {
                 loop {
-                    tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
-                    
-                    // Only routers (Group Owners) should discover other routers
-                    if !is_group_owner {
-                        continue;
-                    }
-                    
-                    // Check for new mDNS events
+                    // Continuously check for mDNS events - no sleep between checks
+                    // This ensures we don't miss any service discoveries
                     match tokio::time::timeout(
-                        tokio::time::Duration::from_millis(100),
+                        tokio::time::Duration::from_secs(2), // Longer timeout to catch events
                         browser.recv_async()
                     ).await {
                         Ok(Ok(event)) => {
                             match event {
                                 mdns_sd::ServiceEvent::ServiceResolved(info) => {
+                                    info!("🔍 mDNS service discovered: {}", info.get_fullname());
+                                    
                                     // Check if this is a ZHTP router (not a client)
                                     let is_router = info.get_properties()
                                         .iter()
@@ -2433,52 +2429,77 @@ impl WiFiDirectMeshProtocol {
                                     if is_router {
                                         let hostname = info.get_hostname().to_string();
                                         let port = info.get_port();
-                                        let router_addr = format!("{}:{}", hostname, port);
                                         
-                                        info!("🔀 Discovered ZHTP router: {}", router_addr);
+                                        // Get all addresses for this service
+                                        let addresses: Vec<String> = info.get_addresses()
+                                            .iter()
+                                            .map(|ip| ip.to_string())
+                                            .collect();
                                         
-                                        // Add to discovered peers (use default P2P negotiation params)
-                                        let mut peers = discovered_peers.write().await;
-                                        if !peers.contains_key(&router_addr) {
-                                            // Create basic negotiation params for router peer
-                                            let router_negotiation = P2PGoNegotiation {
-                                                go_intent: 7,
-                                                tie_breaker: false,
-                                                device_capability: DeviceCapability {
-                                                    service_discovery: true,
-                                                    p2p_client_discoverability: true,
-                                                    concurrent_operation: true,
-                                                    p2p_infrastructure_managed: false,
-                                                    p2p_device_limit: false,
-                                                    p2p_invitation_procedure: true,
-                                                },
-                                                group_capability: GroupCapability {
-                                                    p2p_group_owner: true, // It's a router
-                                                    persistent_p2p_group: false,
-                                                    group_limit: false,
-                                                    intra_bss_distribution: true,
-                                                    cross_connection: true,
-                                                    persistent_reconnect: true,
-                                                    group_formation: true,
-                                                    ip_address_allocation: true,
-                                                },
-                                                channel_list: vec![1, 6, 11],
-                                                config_timeout: 100,
-                                            };
+                                        info!("🔀 Discovered ZHTP router: {}", hostname);
+                                        info!("   Port: {}, IPs: {:?}", port, addresses);
+                                        
+                                        // Try all addresses
+                                        for addr in addresses {
+                                            let router_addr = format!("{}:{}", addr, port);
                                             
-                                            peers.insert(router_addr.clone(), router_negotiation);
-                                            info!("✅ Added router {} to mesh backbone", router_addr);
+                                            // Add to discovered peers (use default P2P negotiation params)
+                                            let mut peers = discovered_peers.write().await;
+                                            if !peers.contains_key(&router_addr) {
+                                                // Create basic negotiation params for router peer
+                                                let router_negotiation = P2PGoNegotiation {
+                                                    go_intent: 7,
+                                                    tie_breaker: false,
+                                                    device_capability: DeviceCapability {
+                                                        service_discovery: true,
+                                                        p2p_client_discoverability: true,
+                                                        concurrent_operation: true,
+                                                        p2p_infrastructure_managed: false,
+                                                        p2p_device_limit: false,
+                                                        p2p_invitation_procedure: true,
+                                                    },
+                                                    group_capability: GroupCapability {
+                                                        p2p_group_owner: true, // It's a router
+                                                        persistent_p2p_group: false,
+                                                        group_limit: false,
+                                                        intra_bss_distribution: true,
+                                                        cross_connection: true,
+                                                        persistent_reconnect: true,
+                                                        group_formation: true,
+                                                        ip_address_allocation: true,
+                                                    },
+                                                    channel_list: vec![1, 6, 11],
+                                                    config_timeout: 100,
+                                                };
+                                                
+                                                peers.insert(router_addr.clone(), router_negotiation);
+                                                info!("✅ Added router {} to discovered peers", router_addr);
+                                            }
+                                            
+                                            // TODO: Automatically connect to this router for mesh forwarding
                                         }
-                                        
-                                        // TODO: Automatically connect to this router for mesh forwarding
                                     } else {
-                                        debug!("Skipping non-router ZHTP service");
+                                        info!("ℹ️  Discovered non-router ZHTP service (device_type != router)");
                                     }
                                 },
-                                _ => {}
+                                mdns_sd::ServiceEvent::ServiceFound(ty, fullname) => {
+                                    info!("🔍 mDNS ServiceFound event: {} (type: {})", fullname, ty);
+                                },
+                                mdns_sd::ServiceEvent::SearchStarted(ty) => {
+                                    info!("🔍 mDNS search started for: {}", ty);
+                                },
+                                _ => {
+                                    debug!("Other mDNS event: {:?}", event);
+                                }
                             }
                         },
-                        _ => {} // Timeout or error - continue
+                        Ok(Err(e)) => {
+                            warn!("mDNS browser error: {}", e);
+                        },
+                        Err(_) => {
+                            // Timeout - no events received, continue listening
+                            debug!("mDNS browser timeout, continuing...");
+                        }
                     }
                 }
             });
