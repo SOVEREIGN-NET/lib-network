@@ -2461,9 +2461,21 @@ impl WiFiDirectMeshProtocol {
                                     }
                                     info!("   Port: {}, IPs: {:?}", port, addresses);
                                     
+                                    // Get our own IP to filter out self-discovery
+                                    let own_ip = match get_local_ip_for_mdns().await {
+                                        Ok(ip) => ip,
+                                        Err(_) => String::new()
+                                    };
+                                    
                                     // Add ALL ZHTP services to discovered peers (not just routers)
-                                    // Try all addresses
+                                    // Try all addresses (but skip our own IP)
                                     for addr in addresses {
+                                        // Skip if this is our own IP address (self-discovery)
+                                        if addr == own_ip {
+                                            info!("⏭️  Skipping self-discovery: {} is our own IP", addr);
+                                            continue;
+                                        }
+                                        
                                         let peer_addr = format!("{}:{}", addr, port);
                                         
                                         // Add to discovered peers (use default P2P negotiation params)
