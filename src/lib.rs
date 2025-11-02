@@ -45,6 +45,10 @@ pub mod dht; // Native binary DHT protocol with lib-storage backend
 pub mod web4; // Web4 domain registry and content publishing
 pub mod blockchain_sync; // Blockchain synchronization over mesh protocols
 
+// Mobile FFI bindings for Android (JNI) and iOS (C FFI)
+// Available for all platforms to allow compilation, but only functional on mobile
+pub mod mobile;
+
 // External dependencies for economics, API, and storage
 pub use lib_economy as economics;
 pub use lib_protocols as api;

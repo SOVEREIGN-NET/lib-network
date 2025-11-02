@@ -26,6 +26,30 @@ struct ZhtpServiceInfo {
     txt_properties: std::collections::HashMap<String, String>,
 }
 
+impl ZhtpServiceInfo {
+    /// Check if this service is a router (Group Owner)
+    fn is_router(&self) -> bool {
+        self.txt_properties.get("device_type")
+            .map(|t| t == "router")
+            .unwrap_or_else(|| {
+                // Fallback: check group_owner flag
+                self.txt_properties.get("group_owner")
+                    .and_then(|v| v.parse::<bool>().ok())
+                    .unwrap_or(false)
+            })
+    }
+    
+    /// Check if this service is a client
+    fn is_client(&self) -> bool {
+        !self.is_router()
+    }
+    
+    /// Get node ID if available
+    fn node_id(&self) -> Option<String> {
+        self.txt_properties.get("node_id").cloned()
+    }
+}
+
 /// DHT-specific bootstrap enhancements configuration
 #[derive(Debug, Clone)]
 pub struct DHTBootstrapEnhancements {
@@ -111,7 +135,7 @@ impl DHTBootstrap {
         let timeout = tokio::time::timeout(self.enhancements.mdns_timeout, async {
             info!("Starting comprehensive ZHTP peer discovery...");
             
-            // Phase 1: mDNS service discovery for _zhtp._udp.local
+            // Phase 1: mDNS service discovery for _zhtp._tcp.local
             if let Ok(mdns_peers) = self.discover_mdns_services().await {
                 for peer in mdns_peers {
                     if let Ok(true) = self.ping_peer(&peer).await {
@@ -130,7 +154,7 @@ impl DHTBootstrap {
             
             // ZHTP protocol discovery complete
             // Future enhancement: Add multicast DNS for:
-            // - Service registration (_zhtp._udp.local)
+            // - Service registration (_zhtp._tcp.local)
             // - Network-wide peer announcements
             // - Automatic peer discovery across subnets
             
@@ -265,7 +289,7 @@ impl DHTBootstrap {
 
     /// Discover ZHTP services via multicast DNS
     async fn discover_mdns_services(&self) -> Result<Vec<String>> {
-        info!("mDNS: Browsing for _zhtp._udp.local services...");
+        info!("mDNS: Browsing for _zhtp._tcp.local services...");
         
         let mut discovered_peers = Vec::new();
         
@@ -309,7 +333,7 @@ impl DHTBootstrap {
         let mut services = Vec::new();
         
         // Create a receiver for discovered services
-        let browser = mdns.browse("_zhtp._udp.local.")?;
+        let browser = mdns.browse("_zhtp._tcp.local.")?;
         
         // Collect services for a short period
         let mut service_map = HashMap::new();
@@ -332,13 +356,70 @@ impl DHTBootstrap {
             }
         }
         
+        // Stop browsing explicitly before daemon cleanup
+        drop(browser);
+        
+        // Give mdns-sd time to clean up browser's internal channels
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        
         services.extend(service_map.into_values());
+        
+        // Log discovered routers and clients separately
+        let routers: Vec<_> = services.iter().filter(|s| s.is_router()).collect();
+        let clients: Vec<_> = services.iter().filter(|s| s.is_client()).collect();
+        
+        if !routers.is_empty() {
+            info!("📡 Found {} ZHTP routers:", routers.len());
+            for router in &routers {
+                info!("   🔀 Router: {} ({}:{})", 
+                    router.node_id().unwrap_or_else(|| router.name.clone()),
+                    router.host, router.port);
+            }
+        }
+        
+        if !clients.is_empty() {
+            info!("📱 Found {} ZHTP clients:", clients.len());
+            for client in &clients {
+                info!("   📲 Client: {} ({}:{})",
+                    client.node_id().unwrap_or_else(|| client.name.clone()),
+                    client.host, client.port);
+            }
+        }
+        
         Ok(services)
     }
 
     /// Get discovered peers from enhanced bootstrap
     pub fn get_discovered_peers(&self) -> &[String] {
         &self.discovered_peers
+    }
+    
+    /// Get only router peers (Group Owners) for mesh backbone routing
+    pub async fn discover_routers_only(&self) -> Result<Vec<String>> {
+        let mdns = mdns_sd::ServiceDaemon::new()?;
+        let services = self.browse_zhtp_services(&mdns).await?;
+        
+        let routers: Vec<String> = services.iter()
+            .filter(|s| s.is_router())
+            .map(|s| format!("{}:{}", s.host, s.port))
+            .collect();
+        
+        info!("🔀 Discovered {} router nodes for mesh backbone", routers.len());
+        Ok(routers)
+    }
+    
+    /// Get only client peers for leaf node connections
+    pub async fn discover_clients_only(&self) -> Result<Vec<String>> {
+        let mdns = mdns_sd::ServiceDaemon::new()?;
+        let services = self.browse_zhtp_services(&mdns).await?;
+        
+        let clients: Vec<String> = services.iter()
+            .filter(|s| s.is_client())
+            .map(|s| format!("{}:{}", s.host, s.port))
+            .collect();
+        
+        info!("📱 Discovered {} client nodes", clients.len());
+        Ok(clients)
     }
 
     /// Check if enhanced discovery needs refresh

@@ -63,13 +63,17 @@ pub struct BluetoothClassicProtocol {
     pub auth_manager: Arc<RwLock<Option<ZhtpAuthManager>>>,
     /// Authenticated peers (address -> verification)
     pub authenticated_peers: Arc<RwLock<HashMap<String, ZhtpAuthVerification>>>,
-    /// Platform-specific RFCOMM service handle
-    #[cfg(all(target_os = "windows", feature = "windows-gatt"))]
+    /// Platform-specific RFCOMM service handle (Windows only - always available on Windows)
+    #[cfg(target_os = "windows")]
     pub service_provider: Arc<RwLock<Option<Box<dyn std::any::Any + Send + Sync>>>>,
     /// Message router for forwarding (will be set during initialization)
     pub message_router: Option<Arc<RwLock<crate::routing::message_routing::MeshMessageRouter>>>,
     /// Message handler for local processing (will be set during initialization)
     pub message_handler: Option<Arc<RwLock<crate::messaging::message_handler::MeshMessageHandler>>>,
+    /// Whether Bluetooth Classic is enabled (disabled by default with windows-gatt feature)
+    pub enabled: Arc<std::sync::atomic::AtomicBool>,
+    /// Whether discovery is currently active
+    pub discovery_active: Arc<std::sync::atomic::AtomicBool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -506,7 +510,7 @@ impl RfcommStream {
 }
 
 impl BluetoothClassicProtocol {
-    /// Create new Bluetooth Classic RFCOMM protocol
+    /// Create new Bluetooth Classic RFCOMM protocol (disabled by default)
     pub fn new(node_id: [u8; 32]) -> Result<Self> {
         let device_id = get_system_bluetooth_mac()?;
         
@@ -518,11 +522,48 @@ impl BluetoothClassicProtocol {
             active_streams: Arc::new(RwLock::new(HashMap::new())),
             auth_manager: Arc::new(RwLock::new(None)),
             authenticated_peers: Arc::new(RwLock::new(HashMap::new())),
-            #[cfg(all(target_os = "windows", feature = "windows-gatt"))]
+            #[cfg(target_os = "windows")]
             service_provider: Arc::new(RwLock::new(None)),
             message_router: None,
             message_handler: None,
+            enabled: Arc::new(std::sync::atomic::AtomicBool::new(false)), // Disabled by default
+            discovery_active: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         })
+    }
+    
+    /// Enable Bluetooth Classic (can be called from config/API)
+    pub fn enable(&self) {
+        self.enabled.store(true, std::sync::atomic::Ordering::SeqCst);
+        info!("✅ Bluetooth Classic RFCOMM enabled");
+    }
+    
+    /// Disable Bluetooth Classic (can be called from config/API)
+    pub async fn disable(&self) -> Result<()> {
+        self.enabled.store(false, std::sync::atomic::Ordering::SeqCst);
+        
+        // Mark discovery as inactive
+        self.discovery_active.store(false, std::sync::atomic::Ordering::SeqCst);
+        
+        // Close all active connections
+        let connections: Vec<String> = self.active_connections.read().await.keys().cloned().collect();
+        for peer_id in connections {
+            if let Err(e) = self.disconnect_peer(&peer_id).await {
+                warn!("Failed to disconnect peer {} during disable: {}", peer_id, e);
+            }
+        }
+        
+        info!("❌ Bluetooth Classic RFCOMM disabled");
+        Ok(())
+    }
+    
+    /// Check if Bluetooth Classic is enabled
+    pub fn is_enabled(&self) -> bool {
+        self.enabled.load(std::sync::atomic::Ordering::SeqCst)
+    }
+    
+    /// Check if discovery is active
+    pub fn is_discovery_active(&self) -> bool {
+        self.discovery_active.load(std::sync::atomic::Ordering::SeqCst)
     }
     
     /// Initialize ZHTP authentication for this node
@@ -553,6 +594,10 @@ impl BluetoothClassicProtocol {
     
     /// Start RFCOMM service advertising
     pub async fn start_advertising(&self) -> Result<()> {
+        if !self.is_enabled() {
+            return Err(anyhow!("Bluetooth Classic is disabled. Call enable() first."));
+        }
+        
         info!(" Starting Bluetooth Classic RFCOMM service advertising");
         
         #[cfg(target_os = "windows")]
@@ -600,34 +645,32 @@ impl BluetoothClassicProtocol {
     /// Register RFCOMM service on Windows
     #[cfg(target_os = "windows")]
     async fn windows_register_rfcomm_service(&self) -> Result<()> {
-        #[cfg(feature = "windows-gatt")]
-        {
-            use windows::{
-                Devices::Bluetooth::Rfcomm::*,
-                Networking::Sockets::*,
-                Foundation::TypedEventHandler,
-                Storage::Streams::*,
-            };
-            
-            info!("🪟 Windows: Registering RFCOMM service provider...");
-            
-            // Create RFCOMM service provider for ZHTP Mesh
-            let service_id = RfcommServiceId::FromUuid(self.parse_service_uuid_to_guid()?)
-                .map_err(|e| anyhow!("Failed to create service ID: {:?}", e))?;
-            
-            // Create service provider
-            let provider_result = RfcommServiceProvider::CreateAsync(&service_id)?
-                .get()
-                .map_err(|e| anyhow!("Failed to create RFCOMM provider: {:?}", e))?;
-            
-            let provider = provider_result;
-            
-            // Create StreamSocketListener for incoming connections
-            let listener = StreamSocketListener::new()
-                .map_err(|e| anyhow!("Failed to create StreamSocketListener: {:?}", e))?;
-            
-            // Bind listener to RFCOMM provider's local service name
-            listener.BindServiceNameAsync(&provider.ServiceId()?.AsString()?)
+        use windows::{
+            Devices::Bluetooth::Rfcomm::*,
+            Networking::Sockets::*,
+            Foundation::TypedEventHandler,
+            Storage::Streams::*,
+        };
+        
+        info!("🪟 Windows: Registering RFCOMM service provider...");
+        
+        // Create RFCOMM service provider for ZHTP Mesh
+        let service_id = RfcommServiceId::FromUuid(self.parse_service_uuid_to_guid()?)
+            .map_err(|e| anyhow!("Failed to create service ID: {:?}", e))?;
+        
+        // Create service provider
+        let provider_result = RfcommServiceProvider::CreateAsync(&service_id)?
+            .get()
+            .map_err(|e| anyhow!("Failed to create RFCOMM provider: {:?}", e))?;
+        
+        let provider = provider_result;
+        
+        // Create StreamSocketListener for incoming connections
+        let listener = StreamSocketListener::new()
+            .map_err(|e| anyhow!("Failed to create StreamSocketListener: {:?}", e))?;
+        
+        // Bind listener to RFCOMM provider's local service name
+        listener.BindServiceNameAsync(&provider.ServiceId()?.AsString()?)
                 .map_err(|e| anyhow!("Failed to bind listener: {:?}", e))?
                 .get()
                 .map_err(|e| anyhow!("Failed to complete listener binding: {:?}", e))?;
@@ -646,19 +689,9 @@ impl BluetoothClassicProtocol {
             *self.service_provider.write().await = Some(Box::new(provider));
             
             Ok(())
-        }
-        
-        #[cfg(not(feature = "windows-gatt"))]
-        {
-            info!("🪟 Windows: RFCOMM service registration requires windows-gatt feature");
-            info!("   To enable: cargo build --features windows-gatt");
-            warn!("   Windows RFCOMM support disabled - discovery and connections will fail");
-            warn!(" Build with --features windows-gatt to enable Bluetooth Classic on Windows");
-            Ok(())
-        }
     }
     
-    #[cfg(all(target_os = "windows", feature = "windows-gatt"))]
+    #[cfg(target_os = "windows")]
     fn parse_service_uuid_to_guid(&self) -> Result<windows::core::GUID> {
         // ZHTP Mesh Service UUID: 6ba7b810-9dad-11d1-80b4-00c04fd430c8
         Ok(windows::core::GUID::from_values(
@@ -1222,8 +1255,31 @@ impl BluetoothClassicProtocol {
     // DEVICE DISCOVERY AND ACTIVE CONNECTION METHODS
     // ============================================================================
     
+    
+    /// Start discovering Bluetooth Classic devices (marks discovery as active)
+    pub async fn start_discovery(&self) -> Result<()> {
+        if !self.is_enabled() {
+            return Err(anyhow!("Bluetooth Classic is disabled. Call enable() first."));
+        }
+        
+        self.discovery_active.store(true, std::sync::atomic::Ordering::SeqCst);
+        info!("🔍 Bluetooth Classic discovery started");
+        Ok(())
+    }
+    
+    /// Stop discovering Bluetooth Classic devices
+    pub async fn stop_discovery(&self) -> Result<()> {
+        self.discovery_active.store(false, std::sync::atomic::Ordering::SeqCst);
+        info!("🛑 Bluetooth Classic discovery stopped");
+        Ok(())
+    }
+    
     /// Discover paired Bluetooth devices (cross-platform)
     pub async fn discover_paired_devices(&self) -> Result<Vec<BluetoothDevice>> {
+        if !self.is_enabled() {
+            return Err(anyhow!("Bluetooth Classic is disabled. Call enable() first."));
+        }
+        
         #[cfg(target_os = "windows")]
         {
             self.discover_paired_devices_windows().await
@@ -1270,6 +1326,10 @@ impl BluetoothClassicProtocol {
     
     /// Connect to a peer's RFCOMM service and store the stream (cross-platform)
     pub async fn connect_to_peer(&self, device_address: &str, channel: u8) -> Result<RfcommStream> {
+        if !self.is_enabled() {
+            return Err(anyhow!("Bluetooth Classic is disabled. Call enable() first."));
+        }
+        
         // Create the connection
         let stream = self.connect_to_peer_internal(device_address, channel).await?;
         

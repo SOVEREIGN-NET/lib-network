@@ -49,13 +49,16 @@ pub struct HandshakeCapabilities {
 
 /// Start local network discovery service
 pub async fn start_local_discovery(node_id: Uuid, mesh_port: u16) -> Result<()> {
-    info!("Starting local network multicast discovery...");
+    info!("🔷 Starting UDP Multicast discovery...");
+    info!("   Multicast address: {}:{}", ZHTP_MULTICAST_ADDR, ZHTP_MULTICAST_PORT);
+    info!("   Node ID: {}", node_id);
+    info!("   Mesh port: {}", mesh_port);
     
     // Start announcement broadcaster
     let announce_node_id = node_id;
     tokio::spawn(async move {
         if let Err(e) = broadcast_announcements(announce_node_id, mesh_port).await {
-            error!("Local announcement broadcaster failed: {}", e);
+            error!("❌ Local announcement broadcaster failed: {}", e);
         }
     });
     
@@ -63,11 +66,13 @@ pub async fn start_local_discovery(node_id: Uuid, mesh_port: u16) -> Result<()> 
     let listen_node_id = node_id;
     tokio::spawn(async move {
         if let Err(e) = listen_for_announcements(listen_node_id).await {
-            error!("Local discovery listener failed: {}", e);
+            error!("❌ Local discovery listener failed: {}", e);
         }
     });
     
-    info!(" Local network discovery active on {}:{}", ZHTP_MULTICAST_ADDR, ZHTP_MULTICAST_PORT);
+    info!("✅ UDP Multicast discovery active on {}:{}", ZHTP_MULTICAST_ADDR, ZHTP_MULTICAST_PORT);
+    info!("   Broadcasting announcements every 30 seconds");
+    info!("   Listening for peer announcements");
     Ok(())
 }
 
@@ -81,8 +86,11 @@ async fn broadcast_announcements(node_id: Uuid, mesh_port: u16) -> Result<()> {
     // Get local IP address
     let local_ip = get_local_ip().await.unwrap_or(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)));
     
+    info!("📢 Broadcasting from local IP: {}", local_ip);
+    
     let mut interval = interval(Duration::from_secs(30)); // Announce every 30 seconds
     
+    let mut announcement_count = 0;
     loop {
         interval.tick().await;
         
@@ -99,7 +107,13 @@ async fn broadcast_announcements(node_id: Uuid, mesh_port: u16) -> Result<()> {
         
         match serde_json::to_string(&announcement) {
             Ok(announcement_json) => {
-                debug!("Broadcasting ZHTP node announcement to {}", multicast_addr);
+                announcement_count += 1;
+                if announcement_count == 1 || announcement_count % 10 == 0 {
+                    info!("📢 Broadcasting announcement #{} to {}", announcement_count, multicast_addr);
+                } else {
+                    debug!("Broadcasting ZHTP node announcement to {}", multicast_addr);
+                }
+                
                 if let Err(e) = socket.send_to(announcement_json.as_bytes(), multicast_addr).await {
                     warn!("Failed to send multicast announcement: {}", e);
                 }
@@ -119,9 +133,11 @@ async fn listen_for_announcements(our_node_id: Uuid) -> Result<()> {
     let multicast_addr: Ipv4Addr = ZHTP_MULTICAST_ADDR.parse()?;
     socket.join_multicast_v4(multicast_addr, Ipv4Addr::UNSPECIFIED)?;
     
-    info!("Listening for ZHTP node announcements on multicast {}:{}", ZHTP_MULTICAST_ADDR, ZHTP_MULTICAST_PORT);
+    info!("👂 Listening for ZHTP node announcements on multicast {}:{}", ZHTP_MULTICAST_ADDR, ZHTP_MULTICAST_PORT);
+    info!("   Joined multicast group successfully");
     
     let mut buf = [0; 1024];
+    let mut discovery_count = 0;
     
     loop {
         match socket.recv_from(&mut buf).await {
@@ -133,11 +149,15 @@ async fn listen_for_announcements(our_node_id: Uuid) -> Result<()> {
                     Ok(announcement) => {
                         // Ignore our own announcements
                         if announcement.node_id != our_node_id {
-                            info!("Discovered local ZHTP node: {} at {}:{}", 
+                            discovery_count += 1;
+                            info!("🎉 PEER DISCOVERED #{}: Node {} at {}:{}", 
+                                discovery_count,
                                 announcement.node_id, 
                                 announcement.local_ip, 
                                 announcement.mesh_port
                             );
+                            info!("   Protocols: {:?}", announcement.protocols);
+                            info!("   Attempting connection...");
                             
                             // TODO: Add this peer to our connections
                             attempt_connect_to_discovered_peer(&announcement).await;
@@ -183,6 +203,34 @@ async fn attempt_connect_to_discovered_peer(announcement: &NodeAnnouncement) {
                         Ok(_) => {
                             info!(" Binary mesh handshake sent to {} ({} bytes)", 
                                 peer_addr, handshake_bytes.len());
+                            
+                            // Wait for acknowledgment from server
+                            use tokio::io::AsyncReadExt;
+                            let mut ack_buf = vec![0u8; 8];
+                            
+                            match tokio::time::timeout(
+                                std::time::Duration::from_secs(5),
+                                stream.read(&mut ack_buf)
+                            ).await {
+                                Ok(Ok(n)) if n > 0 => {
+                                    info!(" Received acknowledgment from peer ({} bytes)", n);
+                                    info!(" Initial handshake complete - peer will initiate full auth on their end");
+                                }
+                                Ok(Ok(_)) => {
+                                    warn!(" Peer closed connection immediately after handshake");
+                                }
+                                Ok(Err(e)) => {
+                                    warn!(" Error reading ack from peer: {}", e);
+                                }
+                                Err(_) => {
+                                    warn!(" Timeout waiting for ack from peer");
+                                }
+                            }
+                            
+                            // Close the initial handshake connection
+                            // The server will now initiate a proper authenticated connection back to us
+                            // or we'll reconnect when we actually need to send data
+                            debug!(" Closing initial discovery handshake connection");
                         },
                         Err(e) => {
                             warn!("Failed to send handshake to {}: {}", peer_addr, e);

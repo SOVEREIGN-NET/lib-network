@@ -9,6 +9,7 @@ pub mod lorawan;
 pub mod satellite;
 pub mod zhtp_auth;
 pub mod zhtp_encryption;
+pub mod quic_mesh;  // QUIC transport with PQC encryption
 
 
 // Enhanced protocol implementations with platform-specific optimizations
@@ -36,4 +37,6 @@ pub enum NetworkProtocol {
     TCP,
     /// UDP for mesh networking
     UDP,
+    /// QUIC for modern mesh transport (replaces TCP/UDP split)
+    QUIC,
 }

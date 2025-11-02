@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::RwLock;
-use tracing::{info, warn, error};
+use tracing::{info, warn, debug};
 use lib_crypto::PublicKey;
 
 use crate::types::mesh_message::ZhtpMeshMessage;
@@ -29,6 +29,8 @@ pub struct MeshMessageHandler {
     pub message_router: Option<Arc<RwLock<crate::routing::message_routing::MeshMessageRouter>>>,
     /// Node ID for this handler (Phase 2)
     pub node_id: Option<PublicKey>,
+    /// Blockchain sync manager for chunk reassembly
+    pub sync_manager: Arc<crate::blockchain_sync::BlockchainSyncManager>,
 }
 
 impl MeshMessageHandler {
@@ -44,6 +46,7 @@ impl MeshMessageHandler {
             revenue_pools,
             message_router: None,
             node_id: None,
+            sync_manager: Arc::new(crate::blockchain_sync::BlockchainSyncManager::new()),
         }
     }
     
@@ -557,14 +560,26 @@ impl MeshMessageHandler {
         info!("📦 Blockchain data chunk {}/{} received ({} bytes, request_id: {})", 
               chunk_index + 1, total_chunks, data.len(), request_id);
         
-        // TODO: Verify chunk hash against complete_data_hash
-        // When all chunks received, verify complete data hash matches
-        info!("Expected complete hash: {}", hex::encode(complete_data_hash));
-        
-        // This will be implemented in the runtime layer to reassemble chunks
-        // For now, we log the receipt - the actual reassembly will be done
-        // by the unified_server/bootstrap logic
-        info!("Blockchain chunk stored for reassembly");
+        // Add chunk to sync manager for reassembly
+        match self.sync_manager.add_chunk(request_id, chunk_index, total_chunks, data, complete_data_hash).await {
+            Ok(Some(complete_data)) => {
+                info!(" All blockchain chunks received and verified! Total: {} bytes", complete_data.len());
+                info!("   Hash: {}", hex::encode(complete_data_hash));
+                
+                // TODO: Forward complete blockchain data to application layer for import
+                // This requires lib-blockchain which would create a circular dependency
+                // The unified_server handles this properly in handle_udp_mesh()
+                info!("✅ Blockchain chunks reassembled successfully");
+                info!("   Application layer should import this data via blockchain.evaluate_and_merge_chain()");
+            }
+            Ok(None) => {
+                debug!("Chunk {}/{} buffered, waiting for more chunks", chunk_index + 1, total_chunks);
+            }
+            Err(e) => {
+                warn!("Failed to process blockchain chunk: {}", e);
+                return Err(e);
+            }
+        }
         
         Ok(())
     }

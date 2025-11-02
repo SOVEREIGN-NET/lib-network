@@ -461,6 +461,7 @@ impl ZhtpMeshServer {
             NetworkProtocol::WiFiDirect => 1.5,       // 1.5x for local mesh
             NetworkProtocol::LoRaWAN => 3.0,          // 3x for rural/long-range
             NetworkProtocol::Satellite => 2.5,        // 2.5x for satellite
+            NetworkProtocol::QUIC => 1.4,             // 1.4x for modern mesh transport
             NetworkProtocol::TCP => 1.0,              // Standard internet (no bonus)
             NetworkProtocol::UDP => 1.1,              // Slight bonus for UDP mesh
         };

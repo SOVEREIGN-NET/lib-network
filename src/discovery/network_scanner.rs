@@ -105,37 +105,67 @@ pub async fn start_network_scanner(_mesh_port: u16, local_node_id: uuid::Uuid) -
     Ok(())
 }
 
-/// Get local network ranges to scan
+/// Get local network ranges to scan (automatically detects ALL local subnets)
 async fn get_local_network_ranges() -> Result<Vec<String>> {
     let mut ranges = Vec::new();
     
-    // Get local IP addresses
-    if let Ok(local_ip) = local_ip_address::local_ip() {
-        match local_ip {
-            IpAddr::V4(ipv4) => {
-                // Create /24 subnet (e.g., 192.168.1.0/24)
-                let octets = ipv4.octets();
-                let subnet = format!("{}.{}.{}", octets[0], octets[1], octets[2]);
-                info!(" Local network detected: {}.0/24", &subnet);
-                ranges.push(subnet);
+    // Get ALL network interfaces and their IP addresses
+    match local_ip_address::list_afinet_netifas() {
+        Ok(network_interfaces) => {
+            info!(" Detected {} network interfaces", network_interfaces.len());
+            
+            for (name, ip) in network_interfaces {
+                match ip {
+                    IpAddr::V4(ipv4) => {
+                        // Skip loopback interface
+                        if ipv4.is_loopback() {
+                            debug!("   Skipping loopback interface: {} ({})", name, ipv4);
+                            continue;
+                        }
+                        
+                        // Create /24 subnet (e.g., 192.168.1.0/24)
+                        let octets = ipv4.octets();
+                        let subnet = format!("{}.{}.{}", octets[0], octets[1], octets[2]);
+                        
+                        // Only add if not already present
+                        if !ranges.contains(&subnet) {
+                            info!("   {} {} → scanning {}.0/24", name, ipv4, subnet);
+                            ranges.push(subnet);
+                        }
+                    }
+                    IpAddr::V6(_ipv6) => {
+                        // IPv6 not yet supported for scanning
+                        debug!("   Skipping IPv6 interface: {} (IPv6 not yet supported)", name);
+                    }
+                }
             }
-            IpAddr::V6(_) => {
-                // IPv6 not yet supported for scanning
-                warn!("IPv6 scanning not yet implemented");
+            
+            if ranges.is_empty() {
+                warn!(" No valid network interfaces found for scanning!");
+                warn!(" Falling back to default 192.168.1.0/24");
+                ranges.push("192.168.1".to_string());
+            } else {
+                info!(" Will scan {} subnet(s) for ZHTP nodes", ranges.len());
             }
         }
-    }
-    
-    // Add common private ranges if not already included
-    let common_ranges = vec![
-        "192.168.1",  // Most common home network
-        "192.168.0",  // Second most common
-        "10.0.0",     // Common for larger networks
-    ];
-    
-    for range in common_ranges {
-        if !ranges.contains(&range.to_string()) {
-            ranges.push(range.to_string());
+        Err(e) => {
+            warn!("Failed to detect network interfaces: {}", e);
+            warn!(" Falling back to common private network ranges");
+            
+            // Fallback: try to get at least the primary local IP
+            if let Ok(local_ip) = local_ip_address::local_ip() {
+                if let IpAddr::V4(ipv4) = local_ip {
+                    let octets = ipv4.octets();
+                    let subnet = format!("{}.{}.{}", octets[0], octets[1], octets[2]);
+                    info!(" Detected primary subnet: {}.0/24", &subnet);
+                    ranges.push(subnet);
+                }
+            }
+            
+            // Add common ranges as last resort
+            if ranges.is_empty() {
+                ranges.push("192.168.1".to_string());
+            }
         }
     }
     
