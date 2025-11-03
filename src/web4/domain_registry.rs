@@ -37,6 +37,29 @@ impl DomainRegistry {
         Self::new_with_dht(None).await
     }
 
+    /// Create new domain registry with existing storage system (avoids creating duplicates)
+    pub async fn new_with_storage(storage: std::sync::Arc<tokio::sync::RwLock<lib_storage::UnifiedStorageSystem>>) -> Result<Self> {
+        Ok(Self {
+            domain_records: Arc::new(RwLock::new(HashMap::new())),
+            dht_client: Arc::new(RwLock::new(None)), // No DHT client needed when using shared storage
+            storage_system: storage,
+            content_cache: Arc::new(RwLock::new(HashMap::new())),
+            stats: Arc::new(RwLock::new(Web4Statistics {
+                total_domains: 0,
+                total_content: 0,
+                total_storage_bytes: 0,
+                active_domains: 0,
+                economic_stats: Web4EconomicStats {
+                    registration_fees: 0.0,
+                    storage_fees: 0.0,
+                    transfer_fees: 0.0,
+                    storage_capacity_gb: 1000.0, // 1TB default
+                    storage_utilization: 0.0,
+                },
+            })),
+        })
+    }
+
     /// Create new domain registry with optional existing DHT client
     pub async fn new_with_dht(dht_client: Option<DHTClient>) -> Result<Self> {
         let storage_config = lib_storage::UnifiedStorageConfig::default();
@@ -609,6 +632,18 @@ impl Web4Manager {
     /// Create new Web4 manager
     pub async fn new() -> Result<Self> {
         Self::new_with_dht(None).await
+    }
+
+    /// Create new Web4 manager with existing storage system (avoids creating duplicates)
+    pub async fn new_with_storage(storage: std::sync::Arc<tokio::sync::RwLock<lib_storage::UnifiedStorageSystem>>) -> Result<Self> {
+        let registry = DomainRegistry::new_with_storage(storage.clone()).await?;
+        let registry_arc = Arc::new(registry);
+        let content_publisher = super::content_publisher::ContentPublisher::new_with_storage(registry_arc.clone(), storage).await?;
+        
+        Ok(Self {
+            registry: registry_arc,
+            content_publisher,
+        })
     }
 
     /// Create new Web4 manager with optional existing DHT client

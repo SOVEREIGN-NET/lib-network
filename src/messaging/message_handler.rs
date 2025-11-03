@@ -66,6 +66,15 @@ impl MeshMessageHandler {
             ZhtpMeshMessage::PeerDiscovery { capabilities, location, shared_resources } => {
                 self.handle_peer_discovery(sender, capabilities, location, shared_resources).await?;
             },
+            ZhtpMeshMessage::PeerAnnouncement { sender: announced_sender, timestamp, signature } => {
+                // PeerAnnouncement is handled in unified_server.rs (UDP mesh layer)
+                // This is just a pass-through or logging placeholder
+                tracing::debug!("PeerAnnouncement from {:?} at timestamp {} (signature: {} bytes)", 
+                    hex::encode(&announced_sender.key_id[0..8.min(announced_sender.key_id.len())]),
+                    timestamp,
+                    signature.len()
+                );
+            },
             ZhtpMeshMessage::ConnectivityRequest { requester, bandwidth_needed_kbps, duration_minutes, payment_tokens } => {
                 self.handle_connectivity_request(requester, bandwidth_needed_kbps, duration_minutes, payment_tokens).await?;
             },

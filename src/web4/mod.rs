@@ -14,10 +14,19 @@ pub use types::*;
 
 use anyhow::Result;
 use crate::dht::DHTClient;
+use std::sync::Arc;
+use tokio::sync::RwLock;
 
 /// Initialize the Web4 system with DHT backend
 pub async fn initialize_web4_system() -> Result<Web4Manager> {
     initialize_web4_system_with_dht(None).await
+}
+
+/// Initialize the Web4 system with existing storage system to avoid creating duplicates
+pub async fn initialize_web4_system_with_storage(storage: Arc<RwLock<lib_storage::UnifiedStorageSystem>>) -> Result<Web4Manager> {
+    let manager = Web4Manager::new_with_storage(storage).await?;
+    tracing::info!("Web4 domain registry and content publishing system initialized with existing storage");
+    Ok(manager)
 }
 
 /// Initialize the Web4 system with optional existing DHT client to avoid creating duplicates

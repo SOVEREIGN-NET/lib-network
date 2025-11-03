@@ -58,6 +58,16 @@ impl ContentPublisher {
         })
     }
 
+    /// Create new content publisher with existing storage system (avoids creating duplicates)
+    pub async fn new_with_storage(domain_registry: Arc<DomainRegistry>, storage: std::sync::Arc<tokio::sync::RwLock<lib_storage::UnifiedStorageSystem>>) -> Result<Self> {
+        Ok(Self {
+            domain_registry,
+            dht_client: Arc::new(RwLock::new(None)), // Will use registry's DHT or be set later
+            storage_system: storage,
+            stats: Arc::new(RwLock::new(ContentPublishingStats::default())),
+        })
+    }
+
     /// Publish content to Web4 domain
     pub async fn publish_content(&self, request: ContentPublishRequest) -> Result<ContentPublishResponse> {
         info!("Publishing content to {}{}", request.domain, request.path);

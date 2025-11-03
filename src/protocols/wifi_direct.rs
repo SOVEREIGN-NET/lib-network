@@ -2492,7 +2492,9 @@ impl WiFiDirectMeshProtocol {
                                         
                                         // Add to discovered peers (use default P2P negotiation params)
                                         let mut peers = discovered_peers.write().await;
-                                        if !peers.contains_key(&peer_addr) {
+                                        let is_new_peer = !peers.contains_key(&peer_addr);
+                                        
+                                        if is_new_peer {
                                             // Create basic negotiation params for peer
                                             let peer_negotiation = P2PGoNegotiation {
                                                 go_intent: if is_router { 7 } else { 5 },
@@ -2521,20 +2523,29 @@ impl WiFiDirectMeshProtocol {
                                             
                                             peers.insert(peer_addr.clone(), peer_negotiation);
                                             info!("✅ Added ZHTP peer {} to discovered peers", peer_addr);
-                                            
-                                            // Drop lock before attempting connection
-                                            drop(peers);
-                                            
-                                            // Notify about peer discovery (for blockchain sync trigger)
-                                            if let Some(tx) = &peer_discovery_tx_clone {
-                                                if let Err(e) = tx.send(peer_addr.clone()) {
-                                                    warn!("Failed to send peer discovery notification: {}", e);
+                                        } else {
+                                            info!("🔄 Rediscovered existing ZHTP peer {}", peer_addr);
+                                        }
+                                        
+                                        // Drop lock before sending notifications
+                                        drop(peers);
+                                        
+                                        // ALWAYS notify about peer discovery (even for rediscovery)
+                                        // This ensures bidirectional blockchain sync when nodes reconnect
+                                        if let Some(tx) = &peer_discovery_tx_clone {
+                                            if let Err(e) = tx.send(peer_addr.clone()) {
+                                                warn!("Failed to send peer discovery notification: {}", e);
+                                            } else {
+                                                if is_new_peer {
+                                                    info!("🔔 Sent peer discovery notification for new peer {}", peer_addr);
                                                 } else {
-                                                    info!("🔔 Sent peer discovery notification for {}", peer_addr);
+                                                    info!("🔔 Sent peer rediscovery notification for {} (triggers sync)", peer_addr);
                                                 }
                                             }
-                                            
-                                            // Automatically connect to discovered peer for mesh forwarding
+                                        }
+                                        
+                                        // Automatically connect to discovered peer for mesh forwarding
+                                        if is_new_peer {
                                             info!("🔗 Attempting automatic connection to discovered peer {}...", peer_addr);
                                             // Note: Actual TCP connection will be established by UnifiedServer
                                             // when it receives messages destined for this peer.

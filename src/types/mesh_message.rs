@@ -125,6 +125,14 @@ pub enum ZhtpMeshMessage {
         shared_resources: SharedResources,
     },
 
+    /// Simple peer announcement for establishing UDP mesh connections
+    /// Signature proves ownership of the public key
+    PeerAnnouncement {
+        sender: PublicKey,
+        timestamp: u64,
+        signature: Vec<u8>, // Dilithium signature over (sender.key_id || timestamp)
+    },
+
     /// Request for internet connectivity
     ConnectivityRequest {
         requester: PublicKey,

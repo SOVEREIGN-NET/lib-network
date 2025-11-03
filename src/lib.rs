@@ -25,7 +25,7 @@ pub use crate::blockchain_sync::BlockchainSyncManager;
 pub use crate::dht::{DHTClient, initialize_dht_client, serve_web4_page, call_native_dht_client};
 
 // Web4 domain registry and content publishing
-pub use crate::web4::{Web4Manager, DomainRegistry, ContentPublisher, initialize_web4_system};
+pub use crate::web4::{Web4Manager, DomainRegistry, ContentPublisher, initialize_web4_system, initialize_web4_system_with_storage};
 
 // Core modules
 pub mod types;
