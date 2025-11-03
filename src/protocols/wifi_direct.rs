@@ -174,6 +174,8 @@ pub struct WiFiDirectMeshProtocol {
     pub received_invitations: Arc<RwLock<HashMap<String, P2PInvitationRequest>>>,
     /// Persistent P2P groups
     pub persistent_groups: Arc<RwLock<HashMap<String, PersistentGroup>>>,
+    /// Channel to notify when peers are discovered (for triggering blockchain sync)
+    pub peer_discovery_tx: Option<tokio::sync::mpsc::UnboundedSender<String>>,
 }
 
 /// Persistent P2P Group information
@@ -212,6 +214,14 @@ pub enum WiFiDirectDeviceType {
 impl WiFiDirectMeshProtocol {
     /// Create new WiFi Direct mesh protocol
     pub fn new(node_id: [u8; 32]) -> Result<Self> {
+        Self::new_with_peer_notification(node_id, None)
+    }
+    
+    /// Create new WiFi Direct mesh protocol with optional peer discovery notification channel
+    pub fn new_with_peer_notification(
+        node_id: [u8; 32], 
+        peer_discovery_tx: Option<tokio::sync::mpsc::UnboundedSender<String>>
+    ) -> Result<Self> {
         let ssid = format!("ZHTP-MESH-{:08X}", rand::random::<u32>());
         let passphrase = format!("zhtp{:016X}", rand::random::<u64>());
         
@@ -267,6 +277,7 @@ impl WiFiDirectMeshProtocol {
             sent_invitations: Arc::new(RwLock::new(HashMap::new())),
             received_invitations: Arc::new(RwLock::new(HashMap::new())),
             persistent_groups: Arc::new(RwLock::new(HashMap::new())),
+            peer_discovery_tx,
         })
     }
     
@@ -2424,6 +2435,7 @@ impl WiFiDirectMeshProtocol {
             let discovered_peers = self.discovered_peers.clone();
             let connected_devices = self.connected_devices.clone();
             let is_group_owner = self.group_owner;
+            let peer_discovery_tx_clone = self.peer_discovery_tx.clone();
             
             tokio::spawn(async move {
                 loop {
@@ -2512,6 +2524,15 @@ impl WiFiDirectMeshProtocol {
                                             
                                             // Drop lock before attempting connection
                                             drop(peers);
+                                            
+                                            // Notify about peer discovery (for blockchain sync trigger)
+                                            if let Some(tx) = &peer_discovery_tx_clone {
+                                                if let Err(e) = tx.send(peer_addr.clone()) {
+                                                    warn!("Failed to send peer discovery notification: {}", e);
+                                                } else {
+                                                    info!("🔔 Sent peer discovery notification for {}", peer_addr);
+                                                }
+                                            }
                                             
                                             // Automatically connect to discovered peer for mesh forwarding
                                             info!("🔗 Attempting automatic connection to discovered peer {}...", peer_addr);
