@@ -298,7 +298,7 @@ impl DHTBootstrap {
             Ok(mdns) => {
                 // Browse for ZHTP services with timeout
                 let browse_result = tokio::time::timeout(
-                    Duration::from_millis(2000), // 2 second mDNS timeout
+                    Duration::from_millis(5000), // 5 second mDNS timeout (increased for cross-subnet discovery)
                     self.browse_zhtp_services(&mdns)
                 ).await;
                 
@@ -338,7 +338,7 @@ impl DHTBootstrap {
         // Collect services for a short period
         let mut service_map = HashMap::new();
         
-        while let Ok(event) = tokio::time::timeout(Duration::from_millis(1500), browser.recv_async()).await {
+        while let Ok(event) = tokio::time::timeout(Duration::from_millis(4000), browser.recv_async()).await {
             match event {
                 Ok(mdns_sd::ServiceEvent::ServiceResolved(info)) => {
                     let service_info = ZhtpServiceInfo {
