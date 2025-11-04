@@ -128,6 +128,16 @@ impl ZhtpAuthManager {
         Ok(challenge)
     }
     
+    /// Sign arbitrary message with Dilithium2 (for PeerAnnouncement, etc.)
+    pub fn sign_message(&self, message: &[u8]) -> Result<Vec<u8>> {
+        dilithium2_sign(message, &self.node_dilithium_keypair.1)
+    }
+    
+    /// Get this node's Dilithium2 public key
+    pub fn get_dilithium_pubkey(&self) -> &[u8] {
+        &self.node_dilithium_keypair.0
+    }
+    
     /// Respond to authentication challenge
     pub fn respond_to_challenge(
         &self,
@@ -261,11 +271,6 @@ impl ZhtpAuthManager {
         score += bandwidth_score;
         
         score.min(1.0) // Cap at 1.0
-    }
-    
-    /// Get this node's Dilithium public key
-    pub fn get_dilithium_pubkey(&self) -> &[u8] {
-        &self.node_dilithium_keypair.0
     }
     
     /// Clean expired challenges (older than 5 minutes)
