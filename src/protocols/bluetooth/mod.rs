@@ -529,10 +529,13 @@ impl BluetoothMeshProtocol {
         info!("Starting Bluetooth LE mesh discovery...");
         
         // Initialize Bluetooth stack for mesh networking
+        info!("🔧 DEBUG: About to initialize_bluetooth_stack...");
         self.initialize_bluetooth_stack().await?;
+        info!("🔧 DEBUG: Bluetooth stack initialized, now setting up ZK mesh protocols...");
         
         // Setup quantum-resistant ZK mesh protocols  
         self.setup_zk_mesh_protocols().await?;
+        info!("🔧 DEBUG: ZK mesh protocols setup complete!");
         
         // Start advertising ZHTP mesh network
         self.start_real_mesh_advertising().await?;
@@ -569,6 +572,7 @@ impl BluetoothMeshProtocol {
     
     /// Setup quantum-resistant zero-knowledge mesh protocols
     async fn setup_zk_mesh_protocols(&self) -> Result<()> {
+        info!("🔧 DEBUG: setup_zk_mesh_protocols() ENTRY POINT");
         info!("Setting up quantum-resistant ZK mesh protocols...");
         
         // ZHTP Mesh Service UUID (custom for mesh networking)
@@ -586,12 +590,14 @@ impl BluetoothMeshProtocol {
         // Mesh coordination characteristic
         let mesh_coord_char = "6ba7b814-9dad-11d1-80b4-00c04fd430c8";
         
+        info!("🔧 DEBUG: About to call register_mesh_gatt_service...");
         self.register_mesh_gatt_service(lib_mesh_service, vec![
             zk_auth_char,
             quantum_routing_char,
             mesh_data_char,
             mesh_coord_char
         ]).await?;
+        info!("🔧 DEBUG: register_mesh_gatt_service completed!");
         
         info!("Quantum-resistant mesh protocols ready for peer-to-peer communication");
         Ok(())
