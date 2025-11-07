@@ -1164,7 +1164,9 @@ impl CoreBluetoothManager {
                     let properties: u64 = 0x02 | 0x04 | 0x08 | 0x10; // Read | WriteWithoutResponse | Write | Notify
                     
                     // CBAttributePermissions: Readable=0x01, Writeable=0x02
-                    let permissions: u64 = 0x01 | 0x02; // Readable | Writeable
+                    // Adding encrypted permissions to match security requirements
+                    // ReadEncryptionRequired=0x04, WriteEncryptionRequired=0x08
+                    let permissions: u64 = 0x01 | 0x02 | 0x04 | 0x08; // Readable | Writeable | ReadEncryptionRequired | WriteEncryptionRequired
                     
                     // Create characteristic: [[CBMutableCharacteristic alloc] initWithType:UUID properties:props value:nil permissions:perms]
                     let characteristic: *mut AnyObject = msg_send![mutable_char_cls, alloc];
