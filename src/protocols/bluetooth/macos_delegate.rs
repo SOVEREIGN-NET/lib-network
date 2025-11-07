@@ -397,6 +397,7 @@ unsafe fn register_peripheral_manager_delegate() {
         peripheral: *mut AnyObject,
         requests: *mut AnyObject, // NSArray of CBATTRequest objects
     ) {
+        info!("🚨 WRITE REQUEST HANDLER CALLED!");
         let this = &*this;
         
         // Get count of requests
@@ -470,7 +471,11 @@ unsafe fn register_peripheral_manager_delegate() {
     );
     
     decl.register();
-    debug!("Registered ZhtpCBPeripheralManagerDelegate class with write request handler");
+    info!("✅ Registered ZhtpCBPeripheralManagerDelegate with 4 methods:");
+    info!("   1. peripheralManagerDidUpdateState:");
+    info!("   2. peripheralManager:didAddService:error:");
+    info!("   3. peripheralManagerDidStartAdvertising:error:");
+    info!("   4. peripheralManager:didReceiveWriteRequests: 🔥");
 }
 
 /// Register ZhtpCBPeripheralDelegate class for GATT operations
