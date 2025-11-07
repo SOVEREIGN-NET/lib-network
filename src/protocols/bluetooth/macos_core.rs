@@ -1169,6 +1169,8 @@ impl CoreBluetoothManager {
                     // Mesh security is handled at application layer with ZK proofs
                     let permissions: u64 = 0x01 | 0x02; // Readable | Writeable (NO encryption required)
                     
+                    info!("🔧 Creating characteristic {} with properties=0x{:X} (Read|WriteWithoutResponse|Notify), permissions=0x{:X} (Readable|Writeable, NO encryption)", char_uuid, properties, permissions);
+                    
                     // Create characteristic: [[CBMutableCharacteristic alloc] initWithType:UUID properties:props value:nil permissions:perms]
                     let characteristic: *mut AnyObject = msg_send![mutable_char_cls, alloc];
                     let characteristic: *mut AnyObject = msg_send![
