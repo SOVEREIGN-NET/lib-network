@@ -1113,29 +1113,46 @@ impl CoreBluetoothManager {
                     char_objects.push(characteristic);
                 }
                 
-                // Set characteristics on service
+                // Set characteristics on service using NSArray
+                // Create NSArray from Vec by allocating and initializing with objects
                 let array_cls = AnyClass::get(c"NSArray").ok_or_else(|| anyhow!("NSArray class not found"))?;
-                let char_array: *mut AnyObject = msg_send![array_cls, arrayWithObjects:char_objects.as_ptr() count:char_objects.len()];
+                
+                // Use initWithObjects:count: for proper array creation
+                let char_array: *mut AnyObject = msg_send![array_cls, alloc];
+                let char_array: *mut AnyObject = msg_send![
+                    char_array,
+                    initWithObjects:char_objects.as_ptr()
+                    count:char_objects.len()
+                ];
+                
                 let _: () = msg_send![service, setCharacteristics:char_array];
             }
             
             // Add service to peripheral manager: [peripheralManager addService:service]
+            info!("🔄 Adding GATT service to peripheral manager");
             let _: () = msg_send![manager.manager_ptr, addService:service];
             
-            // Start advertising
-            // Create advertisement dictionary
-            let dict_cls = AnyClass::get(c"NSDictionary").ok_or_else(|| anyhow!("NSDictionary class not found"))?;
-            let service_uuid_key = NSString::from_str("kCBAdvDataServiceUUIDs");
-            let array_cls = AnyClass::get(c"NSArray").ok_or_else(|| anyhow!("NSArray class not found"))?;
-            let service_array: *mut AnyObject = msg_send![array_cls, arrayWithObjects:&service_cbuuid count:1];
+            // Wait a moment for service to be added
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
             
-            let ad_data: *mut AnyObject = msg_send![dict_cls, 
-                dictionaryWithObjects:&service_array 
-                forKeys:&&*service_uuid_key 
-                count:1
-            ];
+            // Start advertising
+            // Create advertisement dictionary with service UUIDs
+            let array_cls = AnyClass::get(c"NSArray").ok_or_else(|| anyhow!("NSArray class not found"))?;
+            let service_array: *mut AnyObject = msg_send![array_cls, arrayWithObject:service_cbuuid];
+            
+            let service_uuid_key = NSString::from_str("kCBAdvDataServiceUUIDs");
+            
+            let dict_cls = AnyClass::get(c"NSMutableDictionary").ok_or_else(|| anyhow!("NSMutableDictionary class not found"))?;
+            let ad_data: *mut AnyObject = msg_send![dict_cls, dictionary];
+            let _: () = msg_send![ad_data, setObject:service_array forKey:&*service_uuid_key];
+            
+            // Add local name
+            let local_name = NSString::from_str("ZHTP-MESH");
+            let name_key = NSString::from_str("kCBAdvDataLocalName");
+            let _: () = msg_send![ad_data, setObject:&*local_name forKey:&*name_key];
             
             // [peripheralManager startAdvertising:advertisementData]
+            info!("🔄 Starting BLE advertising");
             let _: () = msg_send![manager.manager_ptr, startAdvertising:ad_data];
             
             info!("✅ GATT advertising started");
