@@ -490,14 +490,15 @@ impl WindowsGattManager {
                 return Err(anyhow!("Step 3 failed - Characteristic does not support writing! Properties: {:?}", properties));
             }
             
-            // ALWAYS use WriteWithResponse so Mac's peripheralManager:didReceiveWriteRequests: delegate is called
-            // WriteWithoutResponse doesn't trigger delegate callbacks on Mac - data is silently written
-            let write_option = if can_write {
-                info!("✅ Step 3: Using WriteWithResponse (required for Mac delegate callbacks)");
-                GattWriteOption::WriteWithResponse
-            } else if can_write_no_response {
-                info!("⚠️ Step 3: Using WriteWithoutResponse (won't trigger Mac delegate - fallback only)");
+            // CRITICAL FIX: Use WriteWithoutResponse for mesh networking
+            // WriteWithResponse requires pairing/bonding which breaks peer-to-peer mesh
+            // Mac's characteristic is configured with WriteWithoutResponse permissions
+            let write_option = if can_write_no_response {
+                info!("✅ Step 3: Using WriteWithoutResponse (correct for unpaired mesh networking)");
                 GattWriteOption::WriteWithoutResponse
+            } else if can_write {
+                warn!("⚠️ Step 3: Falling back to WriteWithResponse (may require pairing)");
+                GattWriteOption::WriteWithResponse
             } else {
                 return Err(anyhow!("Step 3 failed - Characteristic does not support writing! Properties: {:?}", properties));
             };
