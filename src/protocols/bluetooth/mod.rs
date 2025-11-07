@@ -107,10 +107,10 @@ pub struct BluetoothMeshProtocol {
     /// Authenticated peers (address -> verification)
     pub authenticated_peers: Arc<RwLock<HashMap<String, ZhtpAuthVerification>>>,
     /// Windows GATT Service Provider (kept alive to maintain advertising)
-    #[cfg(all(target_os = "windows", feature = "windows-gatt"))]
+    #[cfg(target_os = "windows")]
     pub gatt_service_provider: Arc<RwLock<Option<Box<dyn std::any::Any + Send + Sync>>>>,
     /// Windows BLE Advertiser with service UUID (for peer discovery)
-    #[cfg(all(target_os = "windows", feature = "windows-gatt"))]
+    #[cfg(target_os = "windows")]
     pub ble_advertiser: Arc<RwLock<Option<Box<dyn std::any::Any + Send + Sync>>>>,
     /// Channel for forwarding GATT messages to unified server
     pub gatt_message_tx: Arc<RwLock<Option<tokio::sync::mpsc::UnboundedSender<GattMessage>>>>,
@@ -139,9 +139,9 @@ impl BluetoothMeshProtocol {
             zhtp_monitor_active: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             auth_manager: Arc::new(RwLock::new(None)),
             authenticated_peers: Arc::new(RwLock::new(HashMap::new())),
-            #[cfg(all(target_os = "windows", feature = "windows-gatt"))]
+            #[cfg(target_os = "windows")]
             gatt_service_provider: Arc::new(RwLock::new(None)),
-            #[cfg(all(target_os = "windows", feature = "windows-gatt"))]
+            #[cfg(target_os = "windows")]
             ble_advertiser: Arc::new(RwLock::new(None)),
             gatt_message_tx: Arc::new(RwLock::new(None)),
             #[cfg(target_os = "macos")]
@@ -2670,7 +2670,7 @@ Value=00
         Ok(address_u64)
     }
     
-    #[cfg(all(target_os = "windows", feature = "windows-gatt"))]
+    #[cfg(target_os = "windows")]
     fn parse_uuid_to_guid(&self, uuid_str: &str) -> Result<windows::core::GUID> {
         // Parse UUID string (e.g., "6ba7b810-9dad-11d1-80b4-00c04fd430c8") to Windows GUID
         let cleaned = uuid_str.replace("-", "").replace("{", "").replace("}", "");
