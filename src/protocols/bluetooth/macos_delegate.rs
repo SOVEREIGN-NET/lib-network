@@ -390,8 +390,82 @@ unsafe fn register_peripheral_manager_delegate() {
         peripheral_manager_did_start_advertising as unsafe extern "C" fn(*mut AnyObject, Sel, *mut AnyObject, *mut AnyObject)
     );
     
+    // Implement: - (void)peripheralManager:didReceiveWriteRequests:
+    unsafe extern "C" fn peripheral_manager_did_receive_write_requests(
+        this: *mut AnyObject,
+        _cmd: Sel,
+        peripheral: *mut AnyObject,
+        requests: *mut AnyObject, // NSArray of CBATTRequest objects
+    ) {
+        let this = &*this;
+        
+        // Get count of requests
+        let count: usize = msg_send![requests, count];
+        info!("📝 Delegate: Received {} write request(s)", count);
+        
+        // Process each write request
+        for i in 0..count {
+            let request: *mut AnyObject = msg_send![requests, objectAtIndex: i];
+            
+            // Get characteristic UUID
+            let characteristic: *mut AnyObject = msg_send![request, characteristic];
+            let char_uuid_obj: *mut AnyObject = msg_send![characteristic, UUID];
+            let uuid_string: *mut AnyObject = msg_send![char_uuid_obj, UUIDString];
+            let uuid_cstr: *const i8 = msg_send![uuid_string, UTF8String];
+            let char_uuid = std::ffi::CStr::from_ptr(uuid_cstr).to_string_lossy().to_string();
+            
+            // Get write value (NSData)
+            let value: *mut AnyObject = msg_send![request, value];
+            let length: usize = if !value.is_null() {
+                msg_send![value, length]
+            } else {
+                0
+            };
+            
+            // Get central (peer) identifier
+            let central: *mut AnyObject = msg_send![request, central];
+            let central_uuid: *mut AnyObject = msg_send![central, identifier];
+            let central_uuid_string: *mut AnyObject = msg_send![central_uuid, UUIDString];
+            let central_uuid_cstr: *const i8 = msg_send![central_uuid_string, UTF8String];
+            let peer_id = std::ffi::CStr::from_ptr(central_uuid_cstr).to_string_lossy().to_string();
+            
+            info!("📝 Write request: char={}, peer={}, bytes={}", char_uuid, peer_id, length);
+            
+            // Extract data bytes
+            let mut data = Vec::new();
+            if !value.is_null() && length > 0 {
+                let bytes_ptr: *const u8 = msg_send![value, bytes];
+                data = std::slice::from_raw_parts(bytes_ptr, length).to_vec();
+                info!("📦 Data: {} bytes: {:?}", length, &data[..std::cmp::min(20, length)]);
+            }
+            
+            // Send event to application
+            let sender_ptr: usize = *this.get_ivar::<usize>("event_sender_ptr");
+            if sender_ptr != 0 {
+                let sender = &*(sender_ptr as *const tokio::sync::mpsc::UnboundedSender<CoreBluetoothEvent>);
+                let _ = sender.send(CoreBluetoothEvent::WriteRequest {
+                    central_id: peer_id,
+                    characteristic_uuid: char_uuid,
+                    value: data,
+                });
+            }
+        }
+        
+        // Respond to all requests with success
+        // CBATTError.success = 0
+        let result_code: i64 = 0; // CBATTErrorSuccess
+        let _: () = msg_send![peripheral, respondToRequest:requests.wrapping_offset(0) withResult:result_code];
+        
+        info!("✅ Responded to write requests with success");
+    }
+    
+    decl.add_method(
+        sel!(peripheralManager:didReceiveWriteRequests:),
+        peripheral_manager_did_receive_write_requests as unsafe extern "C" fn(*mut AnyObject, Sel, *mut AnyObject, *mut AnyObject)
+    );
+    
     decl.register();
-    debug!("Registered ZhtpCBPeripheralManagerDelegate class");
+    debug!("Registered ZhtpCBPeripheralManagerDelegate class with write request handler");
 }
 
 /// Register ZhtpCBPeripheralDelegate class for GATT operations
