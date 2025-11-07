@@ -261,34 +261,11 @@ impl DomainRegistry {
 
     /// Query blockchain for Web4Contract by domain name
     async fn query_blockchain_for_domain(&self, domain: &str) -> Result<Option<DomainRecord>> {
-        // Get shared blockchain instance
-        match lib_blockchain::get_shared_blockchain().await {
-            Ok(blockchain_arc) => {
-                use std::sync::Arc;
-                use tokio::sync::RwLock;
-                
-                let blockchain_arc: Arc<RwLock<lib_blockchain::Blockchain>> = blockchain_arc;
-                let blockchain = blockchain_arc.read().await;
-                
-                // Search through all Web4 contracts to find one with matching domain
-                for (contract_id, web4_contract) in &blockchain.web4_contracts {
-                    if web4_contract.domain == domain {
-                        info!(" Found Web4Contract for domain {} (contract_id: {})", domain, hex::encode(contract_id));
-                        
-                        // Convert Web4Contract to DomainRecord
-                        let domain_record = self.convert_web4_contract_to_domain_record(web4_contract)?;
-                        return Ok(Some(domain_record));
-                    }
-                }
-                
-                info!(" No Web4Contract found for domain {} in blockchain", domain);
-                Ok(None)
-            }
-            Err(e) => {
-                warn!(" Failed to access blockchain: {}", e);
-                Err(anyhow!("Blockchain access failed: {}", e))
-            }
-        }
+        // TODO: Blockchain query temporarily disabled during blockchain provider refactor
+        // Web4 contracts are still recorded on blockchain via zhtp API, but cross-library
+        // access needs to be refactored. For now, domains are discovered via DHT.
+        warn!(" Blockchain query not available in lib-network - domains discovered via DHT only");
+        Ok(None)
     }
 
     /// Convert Web4Contract from blockchain to DomainRecord for local use
