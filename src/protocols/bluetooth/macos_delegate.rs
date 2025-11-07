@@ -141,7 +141,7 @@ unsafe fn register_central_manager_delegate() {
             }
         }
         
-        debug!("🔍 Delegate: Discovered {} ({}), RSSI: {}", 
+        info!("🔍 Delegate: Discovered {} ({}), RSSI: {}", 
                name.as_deref().unwrap_or("Unknown"), identifier, rssi_value);
         
         // Send event

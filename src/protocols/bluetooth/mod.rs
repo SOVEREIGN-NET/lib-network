@@ -677,11 +677,10 @@ impl BluetoothMeshProtocol {
         // Background peer discovery task
         tokio::spawn(async move {
             let mut scan_interval = tokio::time::interval(tokio::time::Duration::from_secs(30));
+            scan_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
             
             loop {
-                scan_interval.tick().await;
-                
-                // Scan for mesh peers
+                // Scan for mesh peers immediately, then wait for next interval
                 #[cfg(all(target_os = "macos", feature = "macos-corebluetooth"))]
                 let scan_result = Self::scan_for_mesh_peers(&core_bt).await;
                 
@@ -725,6 +724,9 @@ impl BluetoothMeshProtocol {
                         }
                     }
                 }
+                
+                // Wait for next scan interval
+                scan_interval.tick().await;
             }
         });
         

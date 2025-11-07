@@ -425,14 +425,26 @@ impl CoreBluetoothManager {
         if let Some(manager) = central.as_ref() {
             info!("🔍 Starting BLE scan with Core Bluetooth");
             
+            // Check current state
+            unsafe {
+                let state: i64 = msg_send![manager.manager_ptr, state];
+                info!("🔋 Central manager state: {} (5=PoweredOn)", state);
+            }
+            
             // Wait for central manager to be ready (powered on)
             info!("⏳ Waiting for central manager to power on...");
             tokio::time::sleep(std::time::Duration::from_millis(500)).await;
             
+            // Check state after wait
+            unsafe {
+                let state: i64 = msg_send![manager.manager_ptr, state];
+                info!("🔋 Central manager state after wait: {} (5=PoweredOn)", state);
+            }
+            
             // Call native CBCentralManager scanForPeripheralsWithServices
             self.native_start_scan(manager, service_uuids).await?;
             
-            info!("📡 BLE scan started successfully");
+            info!("📡 BLE scan started successfully - waiting for delegate callbacks...");
             Ok(())
         } else {
             Err(anyhow!("Central manager not initialized"))
