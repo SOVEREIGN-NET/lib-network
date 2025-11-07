@@ -666,6 +666,9 @@ impl BluetoothMeshProtocol {
         let device_id = self.device_id;
         let node_id = self.node_id;
         
+        #[cfg(all(target_os = "macos", feature = "macos-corebluetooth"))]
+        let core_bt = self.core_bluetooth.clone();
+        
         // Background peer discovery task
         tokio::spawn(async move {
             let mut scan_interval = tokio::time::interval(tokio::time::Duration::from_secs(30));
@@ -674,20 +677,39 @@ impl BluetoothMeshProtocol {
                 scan_interval.tick().await;
                 
                 // Scan for mesh peers
-                if let Ok(peers) = Self::scan_for_mesh_peers().await {
+                #[cfg(all(target_os = "macos", feature = "macos-corebluetooth"))]
+                let scan_result = Self::scan_for_mesh_peers(&core_bt).await;
+                
+                #[cfg(not(all(target_os = "macos", feature = "macos-corebluetooth")))]
+                let scan_result = Self::scan_for_mesh_peers().await;
+                
+                if let Ok(peers) = scan_result {
                     let mut conns = connections.write().await;
                     
                     for peer in peers {
                         if !conns.contains_key(&peer.address) {
-                            info!(" Attempting to connect to mesh peer: {}", peer.address);
+                            info!("🔗 Attempting to connect to mesh peer: {}", peer.address);
                             
-                            if let Ok(connection) = Self::connect_mesh_peer(&peer, device_id).await {
+                            #[cfg(all(target_os = "macos", feature = "macos-corebluetooth"))]
+                            let connect_result = Self::connect_mesh_peer(&peer, device_id, &core_bt).await;
+                            
+                            #[cfg(not(all(target_os = "macos", feature = "macos-corebluetooth")))]
+                            let connect_result = Self::connect_mesh_peer(&peer, device_id).await;
+                            
+                            if let Ok(connection) = connect_result {
                                 conns.insert(peer.address.clone(), connection);
                                 info!("✅ Connected to mesh peer: {}", peer.address);
                                 
                                 // Send MeshHandshake to establish mesh connection
                                 drop(conns); // Release lock before async operations
-                                if let Err(e) = Self::send_mesh_handshake_to_peer(&peer.address, node_id).await {
+                                
+                                #[cfg(all(target_os = "macos", feature = "macos-corebluetooth"))]
+                                let handshake_result = Self::send_mesh_handshake_to_peer(&peer.address, node_id, &core_bt).await;
+                                
+                                #[cfg(not(all(target_os = "macos", feature = "macos-corebluetooth")))]
+                                let handshake_result = Self::send_mesh_handshake_to_peer(&peer.address, node_id).await;
+                                
+                                if let Err(e) = handshake_result {
                                     warn!("Failed to send handshake to {}: {}", peer.address, e);
                                 } else {
                                     info!("📤 Sent MeshHandshake to {}", peer.address);
@@ -705,7 +727,61 @@ impl BluetoothMeshProtocol {
     }
     
     /// Send MeshHandshake to a connected BLE peer
-    async fn send_mesh_handshake_to_peer(peer_address: &str, node_id: [u8; 32]) -> Result<()> {
+    #[cfg(all(target_os = "macos", feature = "macos-corebluetooth"))]
+    async fn send_mesh_handshake_to_peer(
+        peer_address: &str, 
+        node_id: [u8; 32],
+        core_bt: &Arc<RwLock<Option<CoreBluetoothManager>>>
+    ) -> Result<()> {
+        use crate::discovery::local_network::{MeshHandshake, HandshakeCapabilities};
+        use uuid::Uuid;
+        
+        // Convert 32-byte node_id to 16-byte UUID (take first 16 bytes)
+        let mut uuid_bytes = [0u8; 16];
+        uuid_bytes.copy_from_slice(&node_id[..16]);
+        
+        // Create MeshHandshake
+        let handshake = MeshHandshake {
+            version: 1,
+            node_id: Uuid::from_bytes(uuid_bytes),
+            mesh_port: 9333,
+            protocols: vec![
+                "bluetooth".to_string(),
+                "zhtp".to_string(),
+                "relay".to_string(),
+            ],
+            discovered_via: 1, // 1 = bluetooth
+            capabilities: HandshakeCapabilities {
+                supports_bluetooth_classic: false,
+                supports_bluetooth_le: true,
+                supports_wifi_direct: false,
+                max_throughput: 250_000, // 250 KB/s for BLE
+                prefers_high_throughput: false,
+            },
+        };
+        
+        // Serialize handshake
+        let handshake_data = bincode::serialize(&handshake)
+            .map_err(|e| anyhow::anyhow!("Failed to serialize handshake: {}", e))?;
+        
+        info!("📝 Sending {} byte handshake to {}", handshake_data.len(), peer_address);
+        
+        // Write to mesh data characteristic (6ba7b813)
+        let mesh_data_char = "6ba7b813-9dad-11d1-80b4-00c04fd430c8";
+        
+        // Use Core Bluetooth to write handshake
+        Self::macos_write_handshake(peer_address, mesh_data_char, &handshake_data, core_bt).await?;
+        
+        info!("✅ MeshHandshake sent successfully to {}", peer_address);
+        Ok(())
+    }
+    
+    /// Send MeshHandshake to a connected BLE peer (non-macOS version)
+    #[cfg(not(all(target_os = "macos", feature = "macos-corebluetooth")))]
+    async fn send_mesh_handshake_to_peer(
+        peer_address: &str, 
+        node_id: [u8; 32]
+    ) -> Result<()> {
         use crate::discovery::local_network::{MeshHandshake, HandshakeCapabilities};
         use uuid::Uuid;
         
@@ -743,21 +819,13 @@ impl BluetoothMeshProtocol {
         let mesh_data_char = "6ba7b813-9dad-11d1-80b4-00c04fd430c8";
         
         // Platform-specific GATT write
-        #[cfg(target_os = "macos")]
-        {
-            // Use Core Bluetooth to write handshake
-            Self::macos_write_handshake(peer_address, mesh_data_char, &handshake_data).await?;
-        }
-        
         #[cfg(target_os = "windows")]
         {
-            // Use Windows GATT to write handshake
             Self::windows_write_handshake(peer_address, mesh_data_char, &handshake_data).await?;
         }
         
         #[cfg(target_os = "linux")]
         {
-            // Use BlueZ to write handshake
             Self::linux_write_handshake(peer_address, mesh_data_char, &handshake_data).await?;
         }
         
@@ -874,11 +942,24 @@ impl BluetoothMeshProtocol {
     #[cfg(target_os = "macos")]
     async fn init_corebluetooth(&self) -> Result<()> {
         info!("macOS Core Bluetooth ready for ISP bypass");
-        // macOS Core Bluetooth initialization would go here
+        
+        // Initialize Core Bluetooth manager
+        info!("🔄 Initializing Core Bluetooth managers...");
+        self.initialize_core_bluetooth().await?;
+        info!("✅ Core Bluetooth central and peripheral managers initialized");
+        
         Ok(())
     }
     
     /// Scan for ZHTP bypass peers
+    #[cfg(all(target_os = "macos", feature = "macos-corebluetooth"))]
+    async fn scan_for_mesh_peers(core_bt: &Arc<RwLock<Option<CoreBluetoothManager>>>) -> Result<Vec<MeshPeer>> {
+        let mut peers = Vec::new();
+        peers.extend(Self::macos_scan_mesh_peers(core_bt).await?);
+        Ok(peers)
+    }
+    
+    #[cfg(not(all(target_os = "macos", feature = "macos-corebluetooth")))]
     async fn scan_for_mesh_peers() -> Result<Vec<MeshPeer>> {
         let mut peers = Vec::new();
         
@@ -890,11 +971,6 @@ impl BluetoothMeshProtocol {
         #[cfg(target_os = "windows")]
         {
             peers.extend(Self::windows_scan_mesh_peers().await?);
-        }
-        
-        #[cfg(target_os = "macos")]
-        {
-            peers.extend(Self::macos_scan_mesh_peers().await?);
         }
         
         Ok(peers)
@@ -985,10 +1061,43 @@ impl BluetoothMeshProtocol {
     }
 
     #[cfg(target_os = "macos")]
-    async fn macos_scan_mesh_peers() -> Result<Vec<MeshPeer>> {
-        info!("macOS: Scanning for ZHTP bypass peers...");
-        // macOS Core Bluetooth scanning would be implemented here
-        Ok(Vec::new())
+    async fn macos_scan_mesh_peers(core_bt: &Arc<RwLock<Option<CoreBluetoothManager>>>) -> Result<Vec<MeshPeer>> {
+        info!("macOS: Scanning for ZHTP bypass peers with Core Bluetooth...");
+        
+        let manager_guard = core_bt.read().await;
+        if let Some(ref manager) = *manager_guard {
+            // Start scan for ZHTP mesh service UUID: 6ba7b810-9dad-11d1-80b4-00c04fd430c8
+            let service_uuid = "6BA7B810-9DAD-11D1-80B4-00C04FD430C8";
+            manager.start_scan(Some(&[service_uuid])).await?;
+            
+            // Give scan time to discover peers
+            tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
+            
+            // Get tracked devices and convert to MeshPeers
+            let devices = manager.get_tracked_devices().await?;
+            let mut mesh_peers = Vec::new();
+            
+            for device in devices {
+                if device.services.iter().any(|s| s.to_uppercase().contains("6BA7B810")) {
+                    mesh_peers.push(MeshPeer {
+                        peer_id: device.ephemeral_address.clone(),
+                        address: device.ephemeral_address.clone(),
+                        rssi: device.signal_strength as i32,
+                        last_seen: device.last_seen,
+                        mesh_capable: true,
+                        services: device.services.clone(),
+                        quantum_secure: true,
+                    });
+                }
+            }
+            
+            manager.stop_scan().await?;
+            info!("✅ macOS: Found {} ZHTP mesh peers", mesh_peers.len());
+            Ok(mesh_peers)
+        } else {
+            warn!("❌ macOS: Core Bluetooth manager not initialized");
+            Ok(Vec::new())
+        }
     }
 
     /// Check if advertisement data indicates ZHTP support
@@ -1036,8 +1145,25 @@ impl BluetoothMeshProtocol {
         }
     }
 
-    /// Connect to mesh peer and send handshake
-    async fn connect_mesh_peer(peer: &MeshPeer, device_id: [u8; 6]) -> Result<BluetoothConnection> {
+    /// Connect to mesh peer and send handshake (macOS with Core Bluetooth)
+    #[cfg(all(target_os = "macos", feature = "macos-corebluetooth"))]
+    async fn connect_mesh_peer(
+        peer: &MeshPeer, 
+        _device_id: [u8; 6],
+        core_bt: &Arc<RwLock<Option<CoreBluetoothManager>>>
+    ) -> Result<BluetoothConnection> {
+        info!("🔗 Establishing mesh connection to: {}", peer.address);
+        let connection = Self::macos_connect_mesh_peer(peer, core_bt).await?;
+        info!("✅ BLE connection established to {}", peer.address);
+        Ok(connection)
+    }
+    
+    /// Connect to mesh peer and send handshake (non-macOS)
+    #[cfg(not(all(target_os = "macos", feature = "macos-corebluetooth")))]
+    async fn connect_mesh_peer(
+        peer: &MeshPeer, 
+        _device_id: [u8; 6]
+    ) -> Result<BluetoothConnection> {
         info!("🔗 Establishing mesh connection to: {}", peer.address);
         
         // Step 1: Establish BLE connection
@@ -1052,23 +1178,13 @@ impl BluetoothMeshProtocol {
                 Self::windows_connect_mesh_peer(peer).await?
             }
             
-            #[cfg(target_os = "macos")]
-            {
-                Self::macos_connect_mesh_peer(peer).await?
-            }
-            
-            #[cfg(not(any(target_os = "linux", target_os = "windows", target_os = "macos")))]
+            #[cfg(not(any(target_os = "linux", target_os = "windows")))]
             {
                 return Err(anyhow::anyhow!("Platform not supported for BLE connections"));
             }
         };
         
         info!("✅ BLE connection established to {}", peer.address);
-        
-        // Step 2: Create and send MeshHandshake
-        // Note: This will be done by the caller with access to node_id
-        // The connection is returned and handshake sent separately
-        
         Ok(connection)
     }
     
@@ -1129,21 +1245,35 @@ impl BluetoothMeshProtocol {
     }
     
     #[cfg(target_os = "macos")]
-    async fn macos_connect_mesh_peer(peer: &MeshPeer) -> Result<BluetoothConnection> {
-        info!("macOS: Connecting to mesh peer {}", peer.address);
+    async fn macos_connect_mesh_peer(peer: &MeshPeer, core_bt: &Arc<RwLock<Option<CoreBluetoothManager>>>) -> Result<BluetoothConnection> {
+        info!("macOS: Connecting to mesh peer {} via Core Bluetooth", peer.address);
         
-        // macOS BLE connection via Core Bluetooth
-        Ok(BluetoothConnection {
-            peer_id: peer.peer_id.clone(),
-            connected_at: std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs(),
-            mtu: 247,
-            address: peer.address.clone(),
-            last_seen: peer.last_seen,
-            rssi: peer.rssi,
-        })
+        let manager_guard = core_bt.read().await;
+        if let Some(ref manager) = *manager_guard {
+            // Connect to the peripheral using Core Bluetooth
+            manager.connect_to_peripheral(&peer.address).await?;
+            
+            // Wait for connection to establish
+            tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+            
+            // Discover services
+            let services = manager.discover_services(&peer.address).await?;
+            info!("✅ macOS: Connected to {} with {} services", peer.address, services.len());
+            
+            Ok(BluetoothConnection {
+                peer_id: peer.peer_id.clone(),
+                connected_at: std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs(),
+                mtu: 247,
+                address: peer.address.clone(),
+                last_seen: peer.last_seen,
+                rssi: peer.rssi,
+            })
+        } else {
+            Err(anyhow::anyhow!("macOS: Core Bluetooth manager not initialized"))
+        }
     }
 
     async fn register_mesh_gatt_service(&self, service_uuid: &str, characteristics: Vec<&str>) -> Result<()> {
@@ -1747,10 +1877,24 @@ Value=00
     }
     
     #[cfg(target_os = "macos")]
-    async fn macos_register_bypass_service(&self, _service_uuid: &str, _characteristics: &[&str]) -> Result<()> {
-        // macOS GATT service registration would use Core Bluetooth framework
-        info!("🍎 macOS: GATT service registration (Core Bluetooth implementation needed)");
-        Ok(())
+    async fn macos_register_bypass_service(&self, service_uuid: &str, characteristics: &[&str]) -> Result<()> {
+        info!("🍎 macOS: Registering GATT service {} with Core Bluetooth", service_uuid);
+        
+        let manager_guard = self.core_bluetooth.read().await;
+        if let Some(ref manager) = *manager_guard {
+            // Convert characteristics to (uuid, initial_value) tuples
+            let char_data: Vec<(&str, &[u8])> = characteristics.iter()
+                .map(|uuid| (*uuid, &b""[..]))  // Empty initial value
+                .collect();
+            
+            // Start advertising with the GATT service
+            manager.start_advertising(service_uuid, &char_data).await?;
+            
+            info!("✅ macOS: GATT service registered and advertising");
+            Ok(())
+        } else {
+            Err(anyhow::anyhow!("macOS: Core Bluetooth manager not initialized"))
+        }
     }
     
     #[cfg(target_os = "linux")]
@@ -3131,14 +3275,25 @@ Value=00
     
     /// macOS: Write MeshHandshake to peer via Core Bluetooth
     #[cfg(target_os = "macos")]
-    async fn macos_write_handshake(peer_address: &str, char_uuid: &str, data: &[u8]) -> Result<()> {
-        info!("🍎 macOS: Writing handshake to {} via Core Bluetooth", peer_address);
+    async fn macos_write_handshake(
+        peer_address: &str, 
+        char_uuid: &str, 
+        data: &[u8],
+        core_bt: &Arc<RwLock<Option<CoreBluetoothManager>>>
+    ) -> Result<()> {
+        info!("🍎 macOS: Writing {} byte handshake to {} via Core Bluetooth", data.len(), peer_address);
         
-        // TODO: This needs a static CoreBluetoothManager or pass it through
-        // For now, use fallback implementation
-        warn!("macOS handshake write not yet implemented - needs Core Bluetooth instance");
-        warn!("Will be implemented in next phase");
-        Ok(())
+        let manager_guard = core_bt.read().await;
+        if let Some(ref manager) = *manager_guard {
+            // Write to the ZHTP mesh service characteristic
+            let service_uuid = "6ba7b810-9dad-11d1-80b4-00c04fd430c8";
+            manager.write_characteristic(peer_address, service_uuid, char_uuid, data).await?;
+            
+            info!("✅ macOS: Handshake written successfully");
+            Ok(())
+        } else {
+            Err(anyhow::anyhow!("macOS: Core Bluetooth manager not initialized"))
+        }
     }
     
     /// Windows: Write MeshHandshake to peer via WinRT GATT
