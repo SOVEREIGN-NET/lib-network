@@ -562,6 +562,11 @@ impl CoreBluetoothManager {
         if let Some(manager) = peripheral.as_ref() {
             info!("📢 Starting GATT server advertising");
             
+            // Wait for peripheral manager to be ready (powered on)
+            // Core Bluetooth needs time to initialize after creation
+            info!("⏳ Waiting for peripheral manager to power on...");
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+            
             self.native_start_advertising(manager, service_uuid, characteristics).await?;
             
             info!("✅ GATT advertising started with service: {}", service_uuid);
