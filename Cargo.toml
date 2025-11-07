@@ -142,6 +142,7 @@ path = "src/lib.rs"
 
 [features]
 default = []                      # All lib-* dependencies are required and enabled by default
+windows-gatt = []                 # Windows GATT Server (BLE advertising) - always available on Windows with WinRT
 macos-corebluetooth = []          # macOS Core Bluetooth support
 linux-dbus = ["dbus", "dbus-tokio"] # Direct D-Bus BlueZ integration
 enhanced-bluetooth = ["linux-dbus"] # Enhanced Bluetooth functionality (WinRT always available on Windows)

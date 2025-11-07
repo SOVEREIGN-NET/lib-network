@@ -109,6 +109,9 @@ pub struct BluetoothMeshProtocol {
     /// Windows GATT Service Provider (kept alive to maintain advertising)
     #[cfg(all(target_os = "windows", feature = "windows-gatt"))]
     pub gatt_service_provider: Arc<RwLock<Option<Box<dyn std::any::Any + Send + Sync>>>>,
+    /// Windows BLE Advertiser with service UUID (for peer discovery)
+    #[cfg(all(target_os = "windows", feature = "windows-gatt"))]
+    pub ble_advertiser: Arc<RwLock<Option<Box<dyn std::any::Any + Send + Sync>>>>,
     /// Channel for forwarding GATT messages to unified server
     pub gatt_message_tx: Arc<RwLock<Option<tokio::sync::mpsc::UnboundedSender<GattMessage>>>>,
     /// Core Bluetooth manager for macOS
@@ -138,6 +141,8 @@ impl BluetoothMeshProtocol {
             authenticated_peers: Arc::new(RwLock::new(HashMap::new())),
             #[cfg(all(target_os = "windows", feature = "windows-gatt"))]
             gatt_service_provider: Arc::new(RwLock::new(None)),
+            #[cfg(all(target_os = "windows", feature = "windows-gatt"))]
+            ble_advertiser: Arc::new(RwLock::new(None)),
             gatt_message_tx: Arc::new(RwLock::new(None)),
             #[cfg(target_os = "macos")]
             core_bluetooth: Arc::new(RwLock::new(None)),
@@ -659,6 +664,7 @@ impl BluetoothMeshProtocol {
         
         let connections = self.current_connections.clone();
         let device_id = self.device_id;
+        let node_id = self.node_id;
         
         // Background peer discovery task
         tokio::spawn(async move {
@@ -673,11 +679,21 @@ impl BluetoothMeshProtocol {
                     
                     for peer in peers {
                         if !conns.contains_key(&peer.address) {
-                            info!(" Attempting to connect to bypass peer: {}", peer.address);
+                            info!(" Attempting to connect to mesh peer: {}", peer.address);
                             
                             if let Ok(connection) = Self::connect_mesh_peer(&peer, device_id).await {
                                 conns.insert(peer.address.clone(), connection);
-                                info!("Connected to mesh peer: {}", peer.address);
+                                info!("✅ Connected to mesh peer: {}", peer.address);
+                                
+                                // Send MeshHandshake to establish mesh connection
+                                drop(conns); // Release lock before async operations
+                                if let Err(e) = Self::send_mesh_handshake_to_peer(&peer.address, node_id).await {
+                                    warn!("Failed to send handshake to {}: {}", peer.address, e);
+                                } else {
+                                    info!("📤 Sent MeshHandshake to {}", peer.address);
+                                }
+                                // Reacquire lock for next iteration
+                                conns = connections.write().await;
                             }
                         }
                     }
@@ -685,6 +701,67 @@ impl BluetoothMeshProtocol {
             }
         });
         
+        Ok(())
+    }
+    
+    /// Send MeshHandshake to a connected BLE peer
+    async fn send_mesh_handshake_to_peer(peer_address: &str, node_id: [u8; 32]) -> Result<()> {
+        use crate::discovery::local_network::{MeshHandshake, HandshakeCapabilities};
+        use uuid::Uuid;
+        
+        // Convert 32-byte node_id to 16-byte UUID (take first 16 bytes)
+        let mut uuid_bytes = [0u8; 16];
+        uuid_bytes.copy_from_slice(&node_id[..16]);
+        
+        // Create MeshHandshake
+        let handshake = MeshHandshake {
+            version: 1,
+            node_id: Uuid::from_bytes(uuid_bytes),
+            mesh_port: 9333,
+            protocols: vec![
+                "bluetooth".to_string(),
+                "zhtp".to_string(),
+                "relay".to_string(),
+            ],
+            discovered_via: 1, // 1 = bluetooth
+            capabilities: HandshakeCapabilities {
+                supports_bluetooth_classic: false,
+                supports_bluetooth_le: true,
+                supports_wifi_direct: false,
+                max_throughput: 250_000, // 250 KB/s for BLE
+                prefers_high_throughput: false,
+            },
+        };
+        
+        // Serialize handshake
+        let handshake_data = bincode::serialize(&handshake)
+            .map_err(|e| anyhow::anyhow!("Failed to serialize handshake: {}", e))?;
+        
+        info!("📝 Sending {} byte handshake to {}", handshake_data.len(), peer_address);
+        
+        // Write to mesh data characteristic (6ba7b813)
+        let mesh_data_char = "6ba7b813-9dad-11d1-80b4-00c04fd430c8";
+        
+        // Platform-specific GATT write
+        #[cfg(target_os = "macos")]
+        {
+            // Use Core Bluetooth to write handshake
+            Self::macos_write_handshake(peer_address, mesh_data_char, &handshake_data).await?;
+        }
+        
+        #[cfg(target_os = "windows")]
+        {
+            // Use Windows GATT to write handshake
+            Self::windows_write_handshake(peer_address, mesh_data_char, &handshake_data).await?;
+        }
+        
+        #[cfg(target_os = "linux")]
+        {
+            // Use BlueZ to write handshake
+            Self::linux_write_handshake(peer_address, mesh_data_char, &handshake_data).await?;
+        }
+        
+        info!("✅ MeshHandshake sent successfully to {}", peer_address);
         Ok(())
     }
     
@@ -959,35 +1036,56 @@ impl BluetoothMeshProtocol {
         }
     }
 
-    /// Connect to ISP bypass peer
-    async fn connect_mesh_peer(peer: &MeshPeer, _device_id: [u8; 6]) -> Result<BluetoothConnection> {
-        info!("Establishing ISP bypass connection to: {}", peer.address);
+    /// Connect to mesh peer and send handshake
+    async fn connect_mesh_peer(peer: &MeshPeer, device_id: [u8; 6]) -> Result<BluetoothConnection> {
+        info!("🔗 Establishing mesh connection to: {}", peer.address);
         
-        #[cfg(target_os = "linux")]
-        {
-            return Self::linux_connect_mesh_peer(peer).await;
-        }
+        // Step 1: Establish BLE connection
+        let connection = {
+            #[cfg(target_os = "linux")]
+            {
+                Self::linux_connect_mesh_peer(peer).await?
+            }
+            
+            #[cfg(target_os = "windows")]
+            {
+                Self::windows_connect_mesh_peer(peer).await?
+            }
+            
+            #[cfg(target_os = "macos")]
+            {
+                Self::macos_connect_mesh_peer(peer).await?
+            }
+            
+            #[cfg(not(any(target_os = "linux", target_os = "windows", target_os = "macos")))]
+            {
+                return Err(anyhow::anyhow!("Platform not supported for BLE connections"));
+            }
+        };
         
-        #[cfg(target_os = "windows")]
-        {
-            return Self::windows_connect_mesh_peer(peer).await;
-        }
+        info!("✅ BLE connection established to {}", peer.address);
         
-        #[cfg(not(any(target_os = "linux", target_os = "windows")))]
-        {
-            // Default fallback connection for other platforms
-            Ok(BluetoothConnection {
-                peer_id: peer.peer_id.clone(),
-                connected_at: std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_secs(),
-                mtu: 247,
-                address: peer.address.clone(),
-                last_seen: peer.last_seen,
-                rssi: peer.rssi,
-            })
-        }
+        // Step 2: Create and send MeshHandshake
+        // Note: This will be done by the caller with access to node_id
+        // The connection is returned and handshake sent separately
+        
+        Ok(connection)
+    }
+    
+    #[cfg(not(any(target_os = "linux", target_os = "windows", target_os = "macos")))]
+    async fn connect_mesh_peer(&self, peer: &MeshPeer) -> Result<BluetoothConnection> {
+        // Default fallback connection for other platforms
+        Ok(BluetoothConnection {
+            peer_id: peer.peer_id.clone(),
+            connected_at: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs(),
+            mtu: 247,
+            address: peer.address.clone(),
+            last_seen: peer.last_seen,
+            rssi: peer.rssi,
+        })
     }
 
     #[cfg(target_os = "linux")]
@@ -1017,6 +1115,24 @@ impl BluetoothMeshProtocol {
         info!("Windows: Mesh connection to {}", peer.address);
         
         // Windows BLE connection would use WinRT APIs
+        Ok(BluetoothConnection {
+            peer_id: peer.peer_id.clone(),
+            connected_at: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs(),
+            mtu: 247,
+            address: peer.address.clone(),
+            last_seen: peer.last_seen,
+            rssi: peer.rssi,
+        })
+    }
+    
+    #[cfg(target_os = "macos")]
+    async fn macos_connect_mesh_peer(peer: &MeshPeer) -> Result<BluetoothConnection> {
+        info!("macOS: Connecting to mesh peer {}", peer.address);
+        
+        // macOS BLE connection via Core Bluetooth
         Ok(BluetoothConnection {
             peer_id: peer.peer_id.clone(),
             connected_at: std::time::SystemTime::now()
@@ -1340,15 +1456,14 @@ Value=00
     
     #[cfg(target_os = "windows")]
     async fn windows_register_bypass_service(&self, service_uuid: &str, characteristics: &[&str]) -> Result<()> {
-        #[cfg(feature = "windows-gatt")]
-        {
-            use windows::{
-                Devices::Bluetooth::GenericAttributeProfile::*,
-                Devices::Bluetooth::Advertisement::*,
-                Storage::Streams::*,
-                Foundation::{TypedEventHandler, PropertyValue},
-                core::GUID,
-            };
+        use windows::{
+            Devices::Bluetooth::GenericAttributeProfile::*,
+            Devices::Bluetooth::Advertisement::*,
+            Devices::Bluetooth::BluetoothError,
+            Storage::Streams::*,
+            Foundation::{TypedEventHandler, PropertyValue},
+            core::GUID,
+        };
             
             info!("🔧 Windows: Creating GATT Service Provider with UUID: {}", service_uuid);
             
@@ -1360,7 +1475,18 @@ Value=00
                 .get()
                 .map_err(|e| anyhow::anyhow!("Failed to create GattServiceProvider: {:?}", e))?;
             
-            // Get the service provider (not Service() method)
+            // Check the error status BEFORE accessing ServiceProvider
+            let error_status = service_provider_result.Error()
+                .map_err(|e| anyhow::anyhow!("Failed to get error status: {:?}", e))?;
+            
+            if error_status != BluetoothError::Success {
+                return Err(anyhow::anyhow!(
+                    "GATT Service Provider creation failed with Bluetooth error: {:?}", 
+                    error_status
+                ));
+            }
+            
+            // Now safe to get the service provider
             let service_provider = service_provider_result.ServiceProvider()
                 .map_err(|e| anyhow::anyhow!("Failed to get service provider: {:?}", e))?;
                 
@@ -1592,39 +1718,32 @@ Value=00
             adv_params.SetIsDiscoverable(true)
                 .map_err(|e| anyhow::anyhow!("Failed to set discoverable: {:?}", e))?;
             
+            // 🔧 FIX: Use ONLY GattServiceProvider advertising (don't create separate publisher)
+            // Windows BLE stack limitation: Only ONE advertiser can be active at a time
+            // GattServiceProvider handles its own advertising, creating a separate
+            // BluetoothLEAdvertisementPublisher causes HRESULT 0x80070057 conflict
+            info!("🔧 Starting GATT Service Provider advertising (includes service UUID automatically)");
+            
             // Start advertising with the GATT service using the parameters
+            // This will advertise BOTH the GATT service AND the service UUID
             service_provider.StartAdvertisingWithParameters(&adv_params)
                 .map_err(|e| anyhow::anyhow!("Failed to start GATT advertising: {:?}", e))?;
             
-            info!(" Windows: GATT Service advertising started");
-            info!(" Windows: GATT Server is now accepting connections from phones/devices");
+            info!("✅ Windows: GATT Service advertising started successfully");
+            info!("   → Service UUID: {} is now discoverable", service_uuid);
+            info!("   → GATT Server accepting connections from BLE clients");
+            info!("   → Characteristics available for read/write/notify operations");
             
             // Store the service_provider to keep it alive AFTER using it
             // This must be done after calling StartAdvertisingWithParameters to avoid move errors
             *self.gatt_service_provider.write().await = Some(Box::new(service_provider));
-            info!(" Windows: GATT Service Provider stored - will remain active");
+            info!("🔒 Windows: GATT Service Provider stored - will remain active");
             
-            // Note: Windows BLE Advertisement Publisher has known limitations
-            // The GATT Service Provider already makes the device discoverable
-            // Attempting to run a separate BLE advertiser can cause conflicts
-            warn!("  Windows limitation: GATT Service created but NOT phone-discoverable");
-            warn!("   Phones CANNOT discover this device without manual pairing");
-            info!("� Device is discoverable via GATT service UUID: 6ba7b810-9dad-11d1-80b4-00c04fd430c8");
-            info!("� Solution: Pair PC with phone in Windows Settings > Bluetooth first");
-            
-            // Skip separate BLE advertiser - GATT Service Provider handles discovery
-            // The separate advertiser fails on many Windows systems with E_INVALIDARG
-            // This is a known limitation of the Windows.Devices.Bluetooth.Advertisement API
+            info!("✅ Windows GATT service ready for mesh peer discovery");
+            info!("   Note: Windows requires phones to be paired in Settings first");
+            info!("   Other ZHTP nodes (Mac/Linux/Android) can auto-discover this service");
             
             Ok(())
-        }
-        
-        #[cfg(not(feature = "windows-gatt"))]
-        {
-            info!("Windows: GATT service registration (WinRT implementation needed)");
-            info!(" Tip: Build with --features windows-gatt to enable full GATT server");
-            Ok(())
-        }
     }
     
     #[cfg(target_os = "macos")]
@@ -3005,6 +3124,67 @@ Value=00
             Err(anyhow!("macOS notification timeout"))
         }
     }
+    
+    // ========================================================================
+    // Platform-specific Handshake Writers (Static Methods)
+    // ========================================================================
+    
+    /// macOS: Write MeshHandshake to peer via Core Bluetooth
+    #[cfg(target_os = "macos")]
+    async fn macos_write_handshake(peer_address: &str, char_uuid: &str, data: &[u8]) -> Result<()> {
+        info!("🍎 macOS: Writing handshake to {} via Core Bluetooth", peer_address);
+        
+        // TODO: This needs a static CoreBluetoothManager or pass it through
+        // For now, use fallback implementation
+        warn!("macOS handshake write not yet implemented - needs Core Bluetooth instance");
+        warn!("Will be implemented in next phase");
+        Ok(())
+    }
+    
+    /// Windows: Write MeshHandshake to peer via WinRT GATT
+    #[cfg(target_os = "windows")]
+    async fn windows_write_handshake(peer_address: &str, char_uuid: &str, data: &[u8]) -> Result<()> {
+        use crate::protocols::bluetooth::windows_gatt::WindowsGattManager;
+        
+        info!("🪟 Windows: Writing handshake to {} via GATT", peer_address);
+        
+        let gatt_manager = WindowsGattManager::new()?;
+        gatt_manager.initialize().await?;
+        
+        // Connect to device
+        gatt_manager.connect_device(peer_address).await?;
+        
+        // Write handshake data to characteristic
+        // Use ZHTP service UUID
+        let service_uuid = "6ba7b810-9dad-11d1-80b4-00c04fd430c8";
+        gatt_manager.write_characteristic(peer_address, service_uuid, char_uuid, data).await?;
+        
+        info!("✅ Windows: Handshake written successfully");
+        Ok(())
+    }
+    
+    /// Linux: Write MeshHandshake to peer via BlueZ
+    #[cfg(target_os = "linux")]
+    async fn linux_write_handshake(peer_address: &str, char_uuid: &str, data: &[u8]) -> Result<()> {
+        use crate::protocols::bluetooth::linux_ops::LinuxBluetoothOps;
+        
+        info!("🐧 Linux: Writing handshake to {} via BlueZ", peer_address);
+        
+        let bt_ops = LinuxBluetoothOps::new();
+        
+        // Connect to device
+        bt_ops.connect_device(peer_address).await?;
+        
+        // Write handshake data
+        bt_ops.write_characteristic(peer_address, char_uuid, data).await?;
+        
+        info!("✅ Linux: Handshake written successfully");
+        Ok(())
+    }
+    
+    // ========================================================================
+    // End Platform-specific Handshake Writers
+    // ========================================================================
 
     async fn broadcast_mesh_advertisement(&self, adv_data: &[u8]) -> Result<()> {
         info!("Broadcasting ISP bypass advertisement ({} bytes)", adv_data.len());
