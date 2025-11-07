@@ -6,7 +6,7 @@ use anyhow::{Result, anyhow};
 #[cfg(target_os = "windows")]
 use tracing::{info, warn, error};
 #[cfg(target_os = "windows")]
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 #[cfg(target_os = "windows")]
 use std::sync::Arc;
 #[cfg(target_os = "windows")]
@@ -77,6 +77,9 @@ pub struct WindowsGattManager {
     
     /// Event channel for notifications
     event_tx: Arc<Mutex<Option<mpsc::UnboundedSender<GattEvent>>>>,
+    
+    /// Track discovered devices to prevent duplicates
+    discovered_devices: Arc<RwLock<HashSet<String>>>,
 }
 
 /// GATT events for cross-thread communication
@@ -145,6 +148,7 @@ impl WindowsGattManager {
             gatt_service_provider: Arc::new(Mutex::new(None)),
             local_services: Arc::new(RwLock::new(HashMap::new())),
             event_tx: Arc::new(Mutex::new(None)),
+            discovered_devices: Arc::new(RwLock::new(HashSet::new())),
         })
     }
     
@@ -196,8 +200,10 @@ impl WindowsGattManager {
             
             // Set up event handlers
             let event_tx = self.event_tx.clone();
+            let discovered_devices = self.discovered_devices.clone();
             let received_handler = TypedEventHandler::new({
                 let event_tx = event_tx.clone();
+                let discovered_devices = discovered_devices.clone();
                 move |_sender: &Option<BluetoothLEAdvertisementWatcher>, args: &Option<BluetoothLEAdvertisementReceivedEventArgs>| {
                     if let Some(args) = args {
                         if let Ok(tx_lock) = event_tx.try_lock() {
@@ -226,8 +232,6 @@ impl WindowsGattManager {
                                                 
                                                 if clean_uuid.contains(zhtp_uuid_clean) {
                                                     has_zhtp_service = true;
-                                                    info!("🔍 Windows: Discovered ZHTP device {} RSSI: {}", 
-                                                        name.as_deref().unwrap_or(&address), rssi);
                                                     break;
                                                 }
                                             }
@@ -235,18 +239,28 @@ impl WindowsGattManager {
                                     }
                                 }
                                 
-                                // Only send event if this is a ZHTP device
+                                // Only send event if this is a ZHTP device AND we haven't seen it before
                                 if has_zhtp_service {
-                                    // Create advertisement data marker for ZHTP
-                                    let ad_data = vec![0x02, 0x01, 0x06, 0xFF, 0xFF]; // Flags + ZHTP marker
-                                    
-                                    if let Err(_) = tx.send(GattEvent::DeviceDiscovered {
-                                        address,
-                                        name,
-                                        rssi,
-                                        advertisement_data: ad_data,
-                                    }) {
-                                        // Handle send error if needed
+                                    // Check if we've already discovered this device
+                                    if let Ok(mut discovered) = discovered_devices.try_write() {
+                                        if discovered.insert(address.clone()) {
+                                            // First time seeing this device - log and send event
+                                            info!("🔍 Windows: Discovered ZHTP device {} RSSI: {}", 
+                                                name.as_deref().unwrap_or(&address), rssi);
+                                            
+                                            // Create advertisement data marker for ZHTP
+                                            let ad_data = vec![0x02, 0x01, 0x06, 0xFF, 0xFF]; // Flags + ZHTP marker
+                                            
+                                            if let Err(_) = tx.send(GattEvent::DeviceDiscovered {
+                                                address,
+                                                name,
+                                                rssi,
+                                                advertisement_data: ad_data,
+                                            }) {
+                                                // Handle send error if needed
+                                            }
+                                        }
+                                        // If insert returned false, we've already seen this device - skip event
                                     }
                                 }
                             }
@@ -279,12 +293,16 @@ impl WindowsGattManager {
                 watcher.Stop()?;
                 info!("✅ Windows BLE discovery stopped");
             }
+            
+            // Clear discovered devices set for next scan
+            self.discovered_devices.write().await.clear();
         }
         
         #[cfg(not(all(target_os = "windows", feature = "windows-gatt")))]
         {
             let mut watcher_lock = self.advertisement_watcher.lock().await;
             *watcher_lock = None;
+            self.discovered_devices.write().await.clear();
             info!("✅ Fallback BLE discovery stopped");
         }
         
@@ -440,29 +458,67 @@ impl WindowsGattManager {
         
         #[cfg(feature = "windows-gatt")]
         {
-            let characteristic = self.find_characteristic(address, service_uuid, char_uuid).await?;
+            info!("🔍 Step 1: Finding characteristic...");
+            let characteristic = match self.find_characteristic(address, service_uuid, char_uuid).await {
+                Ok(c) => {
+                    info!("✅ Step 1: Characteristic found");
+                    c
+                }
+                Err(e) => {
+                    return Err(anyhow!("Step 1 failed - Cannot find characteristic {}/{} on {}: {}", service_uuid, char_uuid, address, e));
+                }
+            };
             
-            // Create data buffer
-            let data_writer = DataWriter::new()?;
-            data_writer.WriteBytes(data)?;
-            let buffer = data_writer.DetachBuffer()?;
+            info!("📝 Step 2: Creating data buffer...");
+            let data_writer = DataWriter::new().map_err(|e| anyhow!("Step 2 failed - DataWriter creation: {}", e))?;
+            data_writer.WriteBytes(data).map_err(|e| anyhow!("Step 2 failed - WriteBytes: {}", e))?;
+            let buffer = data_writer.DetachBuffer().map_err(|e| anyhow!("Step 2 failed - DetachBuffer: {}", e))?;
+            info!("✅ Step 2: Buffer created with {} bytes", data.len());
             
             // Check characteristic properties for write type
-            let properties = characteristic.CharacteristicProperties()?;
-            let write_option = if (properties & GattCharacteristicProperties::Write).0 != 0 {
+            info!("🔍 Step 3: Checking characteristic properties...");
+            let properties = characteristic.CharacteristicProperties().map_err(|e| anyhow!("Step 3 failed - Cannot get properties: {}", e))?;
+            info!("📋 Properties: {:?}", properties);
+            
+            let can_write = (properties & GattCharacteristicProperties::Write).0 != 0;
+            let can_write_no_response = (properties & GattCharacteristicProperties::WriteWithoutResponse).0 != 0;
+            
+            info!("   - Write (with response): {}", can_write);
+            info!("   - Write (without response): {}", can_write_no_response);
+            
+            if !can_write && !can_write_no_response {
+                return Err(anyhow!("Step 3 failed - Characteristic does not support writing! Properties: {:?}", properties));
+            }
+            
+            let write_option = if can_write {
+                info!("✅ Step 3: Using WriteWithResponse");
                 GattWriteOption::WriteWithResponse
             } else {
+                info!("✅ Step 3: Using WriteWithoutResponse");
                 GattWriteOption::WriteWithoutResponse
             };
             
-            let write_async = characteristic.WriteValueWithOptionAsync(&buffer, write_option)?;
-            let write_result = write_async.get()?;
+            info!("📤 Step 4: Initiating GATT write...");
+            let write_async = characteristic.WriteValueWithOptionAsync(&buffer, write_option)
+                .map_err(|e| anyhow!("Step 4 failed - WriteValueWithOptionAsync call failed: {} (HRESULT: 0x{:08X})", e, e.code().0))?;
             
+            info!("⏳ Step 5: Waiting for write operation to complete...");
+            let write_result = match write_async.get() {
+                Ok(result) => {
+                    info!("✅ Step 5: Write operation completed");
+                    result
+                }
+                Err(e) => {
+                    return Err(anyhow!("Step 5 failed - Write operation failed: {} (HRESULT: 0x{:08X}). This often means: 1) Device disconnected during write, 2) Pairing required, or 3) Characteristic requires authentication.", e, e.code().0));
+                }
+            };
+            
+            info!("🔍 Step 6: Checking write result status...");
             if write_result != GattCommunicationStatus::Success {
-                return Err(anyhow!("GATT write failed with status: {:?}", write_result));
+                return Err(anyhow!("Step 6 failed - GATT write failed with status: {:?}. Device may have disconnected or rejected the write.", write_result));
             }
             
-            info!("✅ Successfully wrote {} bytes", data.len());
+            info!("✅ Successfully wrote {} bytes to characteristic {}", data.len(), char_uuid);
         }
         
         Ok(())
@@ -669,42 +725,69 @@ impl WindowsGattManager {
     
     #[cfg(feature = "windows-gatt")]
     async fn find_characteristic(&self, address: &str, service_uuid: &str, char_uuid: &str) -> Result<GattCharacteristic> {
+        info!("🔍 Finding characteristic: service={}, char={}, device={}", service_uuid, char_uuid, address);
+        
         // Get device and discover services on-demand (avoid caching non-Send WinRT types)
         let devices = self.connected_devices.read().await;
         let device = devices.get(address)
             .ok_or_else(|| anyhow!("Device not connected: {}", address))?;
         
+        info!("📱 Device found in connected devices, discovering services...");
+        
         let services_async = device.GetGattServicesAsync()?;
         let services_result = services_async.get()?;
         
         if services_result.Status()? != GattCommunicationStatus::Success {
-            return Err(anyhow!("GATT service discovery failed for device: {}", address));
+            let status = services_result.Status()?;
+            return Err(anyhow!("GATT service discovery failed for device {}: status={:?}", address, status));
         }
         
         let services = services_result.Services()?;
+        let service_count = services.Size()?;
+        info!("📋 Found {} services on device {}", service_count, address);
+        
         let target_service_uuid = GUID::from(service_uuid);
         let target_char_uuid = GUID::from(char_uuid);
         
-        for i in 0..services.Size()? {
+        info!("🎯 Looking for service UUID: {:?}", target_service_uuid);
+        info!("🎯 Looking for char UUID: {:?}", target_char_uuid);
+        
+        for i in 0..service_count {
             let service = services.GetAt(i)?;
-            if service.Uuid()? == target_service_uuid {
+            let found_service_uuid = service.Uuid()?;
+            info!("   Service {}: {:?}", i, found_service_uuid);
+            
+            if found_service_uuid == target_service_uuid {
+                info!("✅ Found matching service! Discovering characteristics...");
+                
                 let chars_async = service.GetCharacteristicsAsync()?;
                 let chars_result = chars_async.get()?;
                 
                 if chars_result.Status()? == GattCommunicationStatus::Success {
                     let characteristics = chars_result.Characteristics()?;
+                    let char_count = characteristics.Size()?;
+                    info!("📋 Found {} characteristics in service", char_count);
                     
-                    for j in 0..characteristics.Size()? {
+                    for j in 0..char_count {
                         let characteristic = characteristics.GetAt(j)?;
-                        if characteristic.Uuid()? == target_char_uuid {
+                        let found_char_uuid = characteristic.Uuid()?;
+                        let properties = characteristic.CharacteristicProperties()?;
+                        info!("   Char {}: {:?} (properties: {:?})", j, found_char_uuid, properties);
+                        
+                        if found_char_uuid == target_char_uuid {
+                            info!("✅ Found matching characteristic with properties: {:?}", properties);
                             return Ok(characteristic);
                         }
                     }
+                    warn!("❌ Characteristic {} not found in service", char_uuid);
+                } else {
+                    let status = chars_result.Status()?;
+                    warn!("⚠️ Failed to get characteristics: status={:?}", status);
                 }
             }
         }
         
-        Err(anyhow!("Characteristic not found: {}/{}", service_uuid, char_uuid))
+        Err(anyhow!("Characteristic not found: service={}, char={}, device={}", service_uuid, char_uuid, address))
     }
     
     #[cfg(feature = "windows-gatt")]
