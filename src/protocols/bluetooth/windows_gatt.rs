@@ -490,14 +490,16 @@ impl WindowsGattManager {
                 return Err(anyhow!("Step 3 failed - Characteristic does not support writing! Properties: {:?}", properties));
             }
             
-            // Prefer WriteWithoutResponse to avoid pairing/authentication requirements
-            // WriteWithResponse can timeout if device requires pairing or doesn't respond
-            let write_option = if can_write_no_response {
-                info!("✅ Step 3: Using WriteWithoutResponse (no authentication required)");
+            // ALWAYS use WriteWithResponse so Mac's peripheralManager:didReceiveWriteRequests: delegate is called
+            // WriteWithoutResponse doesn't trigger delegate callbacks on Mac - data is silently written
+            let write_option = if can_write {
+                info!("✅ Step 3: Using WriteWithResponse (required for Mac delegate callbacks)");
+                GattWriteOption::WriteWithResponse
+            } else if can_write_no_response {
+                info!("⚠️ Step 3: Using WriteWithoutResponse (won't trigger Mac delegate - fallback only)");
                 GattWriteOption::WriteWithoutResponse
             } else {
-                info!("✅ Step 3: Using WriteWithResponse (may require pairing)");
-                GattWriteOption::WriteWithResponse
+                return Err(anyhow!("Step 3 failed - Characteristic does not support writing! Properties: {:?}", properties));
             };
             
             info!("📤 Step 4: Initiating GATT write...");
