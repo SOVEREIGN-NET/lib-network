@@ -10,7 +10,7 @@ use std::collections::HashMap;
 #[cfg(target_os = "macos")]
 use std::sync::Arc;
 #[cfg(target_os = "macos")]
-use std::ffi::CStr;
+use std::ffi::{CStr, c_void};
 #[cfg(target_os = "macos")]
 use tokio::sync::{RwLock, Mutex};
 
@@ -981,7 +981,8 @@ impl CoreBluetoothManager {
                 
                 // Create NSData from bytes
                 let ns_data_cls = AnyClass::get(c"NSData").ok_or_else(|| anyhow!("NSData class not found"))?;
-                let ns_data: *mut AnyObject = msg_send![ns_data_cls, dataWithBytes:data.as_ptr() length:data.len()];
+                let bytes_ptr = data.as_ptr() as *const c_void;
+                let ns_data: *mut AnyObject = msg_send![ns_data_cls, dataWithBytes:bytes_ptr length:data.len()];
                 
                 // Write value: [peripheral writeValue:data forCharacteristic:characteristic type:CBCharacteristicWriteWithResponse]
                 // type: 0 = CBCharacteristicWriteWithResponse, 1 = CBCharacteristicWriteWithoutResponse
@@ -1089,7 +1090,8 @@ impl CoreBluetoothManager {
                     
                     // Create NSData for initial value
                     let ns_data_cls = AnyClass::get(c"NSData").ok_or_else(|| anyhow!("NSData class not found"))?;
-                    let value_data: *mut AnyObject = msg_send![ns_data_cls, dataWithBytes:initial_value.as_ptr() length:initial_value.len()];
+                    let bytes_ptr = initial_value.as_ptr() as *const c_void;
+                    let value_data: *mut AnyObject = msg_send![ns_data_cls, dataWithBytes:bytes_ptr length:initial_value.len()];
                     
                     // CBCharacteristicProperties: Read=0x02, Write=0x08, Notify=0x10
                     let properties: u32 = 0x02 | 0x08 | 0x10; // Read | Write | Notify
@@ -1174,7 +1176,8 @@ impl CoreBluetoothManager {
                 // Add manufacturer data (contains the ZHTP mesh info)
                 if adv_data.len() > 10 {  // Ensure we have enough data
                     let ns_data_cls = AnyClass::get(c"NSData").ok_or_else(|| anyhow!("NSData class not found"))?;
-                    let manufacturer_data: *mut AnyObject = msg_send![ns_data_cls, dataWithBytes:adv_data.as_ptr() length:adv_data.len()];
+                    let bytes_ptr = adv_data.as_ptr() as *const c_void;
+                    let manufacturer_data: *mut AnyObject = msg_send![ns_data_cls, dataWithBytes:bytes_ptr length:adv_data.len()];
                     
                     let manufacturer_key = NSString::from_str("kCBAdvDataManufacturerData");
                     let _: () = msg_send![ad_dict, setObject:&*manufacturer_data forKey:&*manufacturer_key];
