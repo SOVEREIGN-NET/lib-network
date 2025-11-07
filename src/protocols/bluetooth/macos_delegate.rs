@@ -453,10 +453,15 @@ unsafe fn register_peripheral_manager_delegate() {
         
         // Respond to all requests with success
         // CBATTError.success = 0
-        let result_code: i64 = 0; // CBATTErrorSuccess
-        let _: () = msg_send![peripheral, respondToRequest:requests.wrapping_offset(0) withResult:result_code];
-        
-        info!("✅ Responded to write requests with success");
+        // Get first request from NSArray to respond to
+        if count > 0 {
+            let first_request: *mut AnyObject = msg_send![requests, objectAtIndex:0];
+            let result_code: i64 = 0; // CBATTErrorSuccess
+            let _: () = msg_send![peripheral, respondToRequest:first_request withResult:result_code];
+            info!("✅ Responded to {} write request(s) with success", count);
+        } else {
+            info!("⚠️ No write requests to respond to");
+        }
     }
     
     decl.add_method(
