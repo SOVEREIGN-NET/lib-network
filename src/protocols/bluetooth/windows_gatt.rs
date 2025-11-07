@@ -204,24 +204,44 @@ impl WindowsGattManager {
                             if let Some(ref tx) = *tx_lock {
                                 let address = format!("{:012X}", args.BluetoothAddress().unwrap_or(0));
                                 let rssi = args.RawSignalStrengthInDBm().unwrap_or(-100);
+                                
+                                // Extract local name
                                 let name = args.Advertisement().ok()
                                     .and_then(|ad| ad.LocalName().ok())
                                     .map(|s| s.to_string());
                                 
-                                // Extract advertisement data
-                                let mut ad_data = Vec::new();
-                                if let Ok(_data_sections) = args.Advertisement() {
-                                    // Process manufacturer data, service UUIDs, etc.
-                                    ad_data = vec![0x02, 0x01, 0x06]; // Basic flags
+                                // Extract Service UUIDs from advertisement
+                                let mut has_zhtp_service = false;
+                                if let Ok(advertisement) = args.Advertisement() {
+                                    if let Ok(service_uuids) = advertisement.ServiceUuids() {
+                                        for i in 0..service_uuids.Size().unwrap_or(0) {
+                                            if let Ok(uuid) = service_uuids.GetAt(i) {
+                                                let uuid_str = format!("{:?}", uuid);
+                                                // Check for ZHTP service UUID: 6ba7b810-9dad-11d1-80b4-00c04fd430c8
+                                                if uuid_str.to_uppercase().contains("6BA7B810-9DAD-11D1-80B4-00C04FD430C8") {
+                                                    has_zhtp_service = true;
+                                                    info!("🔍 Windows: Discovered ZHTP device {} RSSI: {}", 
+                                                        name.as_deref().unwrap_or(&address), rssi);
+                                                    break;
+                                                }
+                                            }
+                                        }
+                                    }
                                 }
                                 
-                                if let Err(_) = tx.send(GattEvent::DeviceDiscovered {
-                                    address,
-                                    name,
-                                    rssi,
-                                    advertisement_data: ad_data,
-                                }) {
-                                    // Handle send error if needed
+                                // Only send event if this is a ZHTP device
+                                if has_zhtp_service {
+                                    // Create advertisement data marker for ZHTP
+                                    let ad_data = vec![0x02, 0x01, 0x06, 0xFF, 0xFF]; // Flags + ZHTP marker
+                                    
+                                    if let Err(_) = tx.send(GattEvent::DeviceDiscovered {
+                                        address,
+                                        name,
+                                        rssi,
+                                        advertisement_data: ad_data,
+                                    }) {
+                                        // Handle send error if needed
+                                    }
                                 }
                             }
                         }

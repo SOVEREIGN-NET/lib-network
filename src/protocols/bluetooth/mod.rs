@@ -1016,42 +1016,26 @@ impl BluetoothMeshProtocol {
             tokio::select! {
                 event = event_rx.recv() => {
                     match event {
-                        Some(GattEvent::DeviceDiscovered { address, name, rssi, advertisement_data }) => {
-                            // Check if this is a ZHTP mesh peer
-                            if Self::is_zhtp_advertisement(&advertisement_data) {
-                                let peer = MeshPeer {
-                                    peer_id: address.clone(),
-                                    address: address.clone(),
-                                    rssi,
-                                    last_seen: std::time::SystemTime::now()
-                                        .duration_since(std::time::UNIX_EPOCH)
-                                        .unwrap_or_default()
-                                        .as_secs(),
-                                    mesh_capable: true,
-                                    services: vec!["ZHTP-MESH".to_string()],
-                                    quantum_secure: true,
-                                };
-                                info!("🔗 Found ZHTP mesh peer: {} ({})", peer.peer_id, address);
-                                peers.push(peer);
-                            } else if let Some(device_name) = &name {
-                                // Check if device name indicates ZHTP support
-                                if device_name.as_str().contains("ZHTP") || device_name.as_str().contains("SOVNET") {
-                                    let peer = MeshPeer {
-                                        peer_id: address.clone(),
-                                        address: address.clone(),
-                                        rssi: -60, // Default RSSI for potential peers
-                                        last_seen: std::time::SystemTime::now()
-                                            .duration_since(std::time::UNIX_EPOCH)
-                                            .unwrap_or_default()
-                                            .as_secs(),
-                                        mesh_capable: false, // Potential, not confirmed
-                                        services: vec!["POTENTIAL".to_string()],
-                                        quantum_secure: false,
-                                    };
-                                    info!("🔍 Found potential ZHTP peer: {} ({})", peer.peer_id, address);
-                                    peers.push(peer);
-                                }
-                            }
+                        Some(GattEvent::DeviceDiscovered { address, name, rssi, advertisement_data: _ }) => {
+                            // Windows BLE watcher now filters by service UUID at discovery level
+                            // All devices received here are ZHTP mesh peers
+                            let peer = MeshPeer {
+                                peer_id: address.clone(),
+                                address: address.clone(),
+                                rssi,
+                                last_seen: std::time::SystemTime::now()
+                                    .duration_since(std::time::UNIX_EPOCH)
+                                    .unwrap_or_default()
+                                    .as_secs(),
+                                mesh_capable: true,
+                                services: vec!["6ba7b810-9dad-11d1-80b4-00c04fd430c8".to_string()],
+                                quantum_secure: true,
+                            };
+                            info!("✅ Found ZHTP mesh peer: {} ({}) RSSI: {}", 
+                                name.as_deref().unwrap_or("Unknown"), 
+                                address, 
+                                rssi);
+                            peers.push(peer);
                         },
                         Some(_) => {}, // Ignore other events during scanning
                         None => break,
