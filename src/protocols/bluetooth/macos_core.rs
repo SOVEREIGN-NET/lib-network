@@ -1089,15 +1089,14 @@ impl CoreBluetoothManager {
                 
                 let mut char_objects: Vec<*mut AnyObject> = Vec::new();
                 
-                for (char_uuid, initial_value) in characteristics {
+                for (char_uuid, _initial_value) in characteristics {
                     // Create characteristic UUID
                     let char_uuid_ns = NSString::from_str(char_uuid);
                     let char_cbuuid: *mut AnyObject = msg_send![cbuuid_cls, UUIDWithString:&*char_uuid_ns];
                     
-                    // Create NSData for initial value
-                    let ns_data_cls = AnyClass::get(c"NSData").ok_or_else(|| anyhow!("NSData class not found"))?;
-                    let bytes_ptr = initial_value.as_ptr() as *const c_void;
-                    let value_data: *mut AnyObject = msg_send![ns_data_cls, dataWithBytes:bytes_ptr length:initial_value.len()];
+                    // For writable characteristics, value should be nil (not preset)
+                    // The value will be set when clients write to it
+                    let nil_value: *mut AnyObject = std::ptr::null_mut();
                     
                     // CBCharacteristicProperties: Read=0x02, Write=0x08, Notify=0x10
                     // Note: NSUInteger is 64-bit on modern macOS
@@ -1106,13 +1105,13 @@ impl CoreBluetoothManager {
                     // CBAttributePermissions: Readable=0x01, Writeable=0x02
                     let permissions: u64 = 0x01 | 0x02; // Readable | Writeable
                     
-                    // Create characteristic: [[CBMutableCharacteristic alloc] initWithType:UUID properties:props value:data permissions:perms]
+                    // Create characteristic: [[CBMutableCharacteristic alloc] initWithType:UUID properties:props value:nil permissions:perms]
                     let characteristic: *mut AnyObject = msg_send![mutable_char_cls, alloc];
                     let characteristic: *mut AnyObject = msg_send![
                         characteristic,
                         initWithType:char_cbuuid
                         properties:properties
-                        value:value_data
+                        value:nil_value
                         permissions:permissions
                     ];
                     
