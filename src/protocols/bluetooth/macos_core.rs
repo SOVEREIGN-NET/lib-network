@@ -425,6 +425,10 @@ impl CoreBluetoothManager {
         if let Some(manager) = central.as_ref() {
             info!("🔍 Starting BLE scan with Core Bluetooth");
             
+            // Wait for central manager to be ready (powered on)
+            info!("⏳ Waiting for central manager to power on...");
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+            
             // Call native CBCentralManager scanForPeripheralsWithServices
             self.native_start_scan(manager, service_uuids).await?;
             

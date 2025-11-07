@@ -177,6 +177,11 @@ impl BluetoothMeshProtocol {
         core_bt_manager.initialize_central_manager().await?;
         core_bt_manager.initialize_peripheral_manager().await?;
         
+        // Start the event processing loop to handle delegate callbacks
+        info!("🔄 Starting Core Bluetooth event loop...");
+        core_bt_manager.start_event_loop().await?;
+        info!("✅ Event loop started - delegate callbacks will now be processed");
+        
         *self.core_bluetooth.write().await = Some(core_bt_manager);
         
         info!("✅ Core Bluetooth initialized successfully");
