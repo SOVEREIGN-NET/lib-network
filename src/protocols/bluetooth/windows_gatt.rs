@@ -212,13 +212,19 @@ impl WindowsGattManager {
                                 
                                 // Extract Service UUIDs from advertisement
                                 let mut has_zhtp_service = false;
+                                
                                 if let Ok(advertisement) = args.Advertisement() {
                                     if let Ok(service_uuids) = advertisement.ServiceUuids() {
                                         for i in 0..service_uuids.Size().unwrap_or(0) {
                                             if let Ok(uuid) = service_uuids.GetAt(i) {
-                                                let uuid_str = format!("{:?}", uuid);
+                                                let uuid_str = format!("{:?}", uuid).to_uppercase();
+                                                
                                                 // Check for ZHTP service UUID: 6ba7b810-9dad-11d1-80b4-00c04fd430c8
-                                                if uuid_str.to_uppercase().contains("6BA7B810-9DAD-11D1-80B4-00C04FD430C8") {
+                                                // Remove all formatting characters and compare the hex digits
+                                                let clean_uuid = uuid_str.replace("-", "").replace("{", "").replace("}", "");
+                                                let zhtp_uuid_clean = "6BA7B8109DAD11D180B400C04FD430C8";
+                                                
+                                                if clean_uuid.contains(zhtp_uuid_clean) {
                                                     has_zhtp_service = true;
                                                     info!("🔍 Windows: Discovered ZHTP device {} RSSI: {}", 
                                                         name.as_deref().unwrap_or(&address), rssi);
@@ -376,20 +382,14 @@ impl WindowsGattManager {
             
             let services = services_result.Services()?;
             let mut service_uuids = Vec::new();
-            let mut cached_services = Vec::new();
             
             for i in 0..services.Size()? {
                 let service = services.GetAt(i)?;
                 let uuid = service.Uuid()?;
                 let uuid_str = format!("{:?}", uuid);
                 
-                service_uuids.push(uuid_str.clone());
-                cached_services.push(service);
+                service_uuids.push(uuid_str);
             }
-            
-            // Cache services for later use
-            let mut cache = self.services_cache.write().await;
-            cache.insert(address.to_string(), cached_services);
             
             info!("✅ Discovered {} GATT services", service_uuids.len());
             return Ok(service_uuids);
@@ -669,14 +669,24 @@ impl WindowsGattManager {
     
     #[cfg(feature = "windows-gatt")]
     async fn find_characteristic(&self, address: &str, service_uuid: &str, char_uuid: &str) -> Result<GattCharacteristic> {
-        let services_cache = self.services_cache.read().await;
-        let services = services_cache.get(address)
-            .ok_or_else(|| anyhow!("Services not cached for device: {}", address))?;
+        // Get device and discover services on-demand (avoid caching non-Send WinRT types)
+        let devices = self.connected_devices.read().await;
+        let device = devices.get(address)
+            .ok_or_else(|| anyhow!("Device not connected: {}", address))?;
         
+        let services_async = device.GetGattServicesAsync()?;
+        let services_result = services_async.get()?;
+        
+        if services_result.Status()? != GattCommunicationStatus::Success {
+            return Err(anyhow!("GATT service discovery failed for device: {}", address));
+        }
+        
+        let services = services_result.Services()?;
         let target_service_uuid = GUID::from(service_uuid);
         let target_char_uuid = GUID::from(char_uuid);
         
-        for service in services {
+        for i in 0..services.Size()? {
+            let service = services.GetAt(i)?;
             if service.Uuid()? == target_service_uuid {
                 let chars_async = service.GetCharacteristicsAsync()?;
                 let chars_result = chars_async.get()?;
@@ -684,8 +694,8 @@ impl WindowsGattManager {
                 if chars_result.Status()? == GattCommunicationStatus::Success {
                     let characteristics = chars_result.Characteristics()?;
                     
-                    for i in 0..characteristics.Size()? {
-                        let characteristic = characteristics.GetAt(i)?;
+                    for j in 0..characteristics.Size()? {
+                        let characteristic = characteristics.GetAt(j)?;
                         if characteristic.Uuid()? == target_char_uuid {
                             return Ok(characteristic);
                         }
