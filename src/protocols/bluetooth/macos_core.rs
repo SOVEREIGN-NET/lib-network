@@ -1057,6 +1057,7 @@ impl CoreBluetoothManager {
     async fn native_start_advertising(&self, manager: &CBPeripheralManagerHandle, service_uuid: &str, characteristics: &[(&str, &[u8])]) -> Result<()> {
         info!("📢 FFI: Starting GATT advertising for service {}", service_uuid);
         
+        // First, add the service (synchronous FFI operations)
         unsafe {
             // Get CBUUID class
             let cbuuid_cls = AnyClass::get(c"CBUUID").ok_or_else(|| anyhow!("CBUUID class not found"))?;
@@ -1131,11 +1132,20 @@ impl CoreBluetoothManager {
             // Add service to peripheral manager: [peripheralManager addService:service]
             info!("🔄 Adding GATT service to peripheral manager");
             let _: () = msg_send![manager.manager_ptr, addService:service];
+        } // End unsafe block - NSString objects are dropped here
+        
+        // Wait a moment for service to be added (outside unsafe block)
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        
+        // Now start advertising (separate unsafe block)
+        unsafe {
+            // Get CBUUID class again
+            let cbuuid_cls = AnyClass::get(c"CBUUID").ok_or_else(|| anyhow!("CBUUID class not found"))?;
             
-            // Wait a moment for service to be added
-            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            // Recreate service UUID for advertising
+            let service_uuid_ns = NSString::from_str(service_uuid);
+            let service_cbuuid: *mut AnyObject = msg_send![cbuuid_cls, UUIDWithString:&*service_uuid_ns];
             
-            // Start advertising
             // Create advertisement dictionary with service UUIDs
             let array_cls = AnyClass::get(c"NSArray").ok_or_else(|| anyhow!("NSArray class not found"))?;
             let service_array: *mut AnyObject = msg_send![array_cls, arrayWithObject:service_cbuuid];
@@ -1156,8 +1166,9 @@ impl CoreBluetoothManager {
             let _: () = msg_send![manager.manager_ptr, startAdvertising:ad_data];
             
             info!("✅ GATT advertising started");
-            Ok(())
-        }
+        } // End unsafe block
+        
+        Ok(())
     }
     
     /// Start ZHTP mesh advertising with the provided advertisement data
