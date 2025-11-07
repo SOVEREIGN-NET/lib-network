@@ -1157,9 +1157,11 @@ impl CoreBluetoothManager {
                     // The value will be set when clients write to it
                     let nil_value: *mut AnyObject = std::ptr::null_mut();
                     
-                    // CBCharacteristicProperties: Read=0x02, Write=0x08, Notify=0x10
+                    // CBCharacteristicProperties: 
+                    // Read=0x02, Write=0x08, WriteWithoutResponse=0x04, Notify=0x10
                     // Note: NSUInteger is 64-bit on modern macOS
-                    let properties: u64 = 0x02 | 0x08 | 0x10; // Read | Write | Notify
+                    // Adding WriteWithoutResponse to avoid authentication requirements
+                    let properties: u64 = 0x02 | 0x04 | 0x08 | 0x10; // Read | WriteWithoutResponse | Write | Notify
                     
                     // CBAttributePermissions: Readable=0x01, Writeable=0x02
                     let permissions: u64 = 0x01 | 0x02; // Readable | Writeable

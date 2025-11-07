@@ -490,12 +490,14 @@ impl WindowsGattManager {
                 return Err(anyhow!("Step 3 failed - Characteristic does not support writing! Properties: {:?}", properties));
             }
             
-            let write_option = if can_write {
-                info!("✅ Step 3: Using WriteWithResponse");
-                GattWriteOption::WriteWithResponse
-            } else {
-                info!("✅ Step 3: Using WriteWithoutResponse");
+            // Prefer WriteWithoutResponse to avoid pairing/authentication requirements
+            // WriteWithResponse can timeout if device requires pairing or doesn't respond
+            let write_option = if can_write_no_response {
+                info!("✅ Step 3: Using WriteWithoutResponse (no authentication required)");
                 GattWriteOption::WriteWithoutResponse
+            } else {
+                info!("✅ Step 3: Using WriteWithResponse (may require pairing)");
+                GattWriteOption::WriteWithResponse
             };
             
             info!("📤 Step 4: Initiating GATT write...");
