@@ -641,18 +641,41 @@ impl CoreBluetoothManager {
                 anyhow!("CBCentralManager class not found - Core Bluetooth framework missing")
             })?;
             
-            // Allocate and initialize CBCentralManager with delegate
-            // [CBCentralManager alloc]
+            // Create a dedicated dispatch queue for Core Bluetooth using GCD
+            // CRITICAL: Core Bluetooth needs a dispatch queue with an active run loop
+            // Passing nil uses main queue which doesn't work in our Tokio runtime
+            use std::ffi::CString;
+            
+            // Import dispatch_queue_create from libdispatch
+            extern "C" {
+                fn dispatch_queue_create(label: *const i8, attr: *const std::ffi::c_void) -> *mut std::ffi::c_void;
+            }
+            
+            let queue_label = CString::new("com.zhtp.corebluetooth.central").unwrap();
+            let dispatch_queue = dispatch_queue_create(queue_label.as_ptr(), std::ptr::null());
+            
+            if dispatch_queue.is_null() {
+                warn!("⚠️  Failed to create dispatch queue, using default queue");
+            } else {
+                info!("✅ Created dedicated dispatch queue for Core Bluetooth");
+            }
+            
+            // Allocate and initialize CBCentralManager with delegate and queue
             let manager: *mut AnyObject = msg_send![cls, alloc];
             
-            // [manager initWithDelegate:delegate queue:nil]
-            let manager: *mut AnyObject = msg_send![manager, initWithDelegate:delegate_obj queue:std::ptr::null_mut::<Object>()];
+            // [manager initWithDelegate:delegate queue:dispatch_queue]
+            let manager: *mut AnyObject = if !dispatch_queue.is_null() {
+                msg_send![manager, initWithDelegate:delegate_obj queue:dispatch_queue as *mut AnyObject]
+            } else {
+                // Fallback to nil queue if queue creation failed
+                msg_send![manager, initWithDelegate:delegate_obj queue:std::ptr::null_mut::<AnyObject>()]
+            };
             
             if manager.is_null() {
                 return Err(anyhow!("Failed to create CBCentralManager"));
             }
             
-            info!("✅ CBCentralManager created successfully with delegate");
+            info!("✅ CBCentralManager created successfully with delegate on dedicated queue");
             
             Ok(CBCentralManagerHandle {
                 manager_ptr: manager,
@@ -678,15 +701,35 @@ impl CoreBluetoothManager {
                 anyhow!("CBPeripheralManager class not found - Core Bluetooth framework missing")
             })?;
             
-            // Allocate and initialize with delegate
+            // Create dedicated dispatch queue for peripheral manager
+            use std::ffi::CString;
+            
+            extern "C" {
+                fn dispatch_queue_create(label: *const i8, attr: *const std::ffi::c_void) -> *mut std::ffi::c_void;
+            }
+            
+            let queue_label = CString::new("com.zhtp.corebluetooth.peripheral").unwrap();
+            let dispatch_queue = dispatch_queue_create(queue_label.as_ptr(), std::ptr::null());
+            
+            if dispatch_queue.is_null() {
+                warn!("⚠️  Failed to create dispatch queue for peripheral manager");
+            } else {
+                info!("✅ Created dedicated dispatch queue for peripheral manager");
+            }
+            
+            // Allocate and initialize with delegate and queue
             let manager: *mut AnyObject = msg_send![cls, alloc];
-            let manager: *mut AnyObject = msg_send![manager, initWithDelegate:delegate_obj queue:std::ptr::null_mut::<Object>()];
+            let manager: *mut AnyObject = if !dispatch_queue.is_null() {
+                msg_send![manager, initWithDelegate:delegate_obj queue:dispatch_queue as *mut AnyObject]
+            } else {
+                msg_send![manager, initWithDelegate:delegate_obj queue:std::ptr::null_mut::<AnyObject>()]
+            };
             
             if manager.is_null() {
                 return Err(anyhow!("Failed to create CBPeripheralManager"));
             }
             
-            info!("✅ CBPeripheralManager created successfully with delegate");
+            info!("✅ CBPeripheralManager created successfully with delegate on dedicated queue");
             
             Ok(CBPeripheralManagerHandle {
                 manager_ptr: manager,
