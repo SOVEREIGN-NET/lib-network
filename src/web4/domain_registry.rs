@@ -7,7 +7,7 @@ use anyhow::{anyhow, Result};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tracing::{info, error};
+use tracing::{info, error, warn};
 use lib_crypto::hash_blake3;
 use lib_proofs::ZeroKnowledgeProof;
 use lib_identity::ZhtpIdentity;
@@ -16,6 +16,7 @@ use lib_storage::{UnifiedStorageSystem, UploadRequest, AccessControlSettings, Co
 use crate::dht::DHTClient;
 use super::types::*;
 use super::content_publisher::ContentPublisher;
+use lib_blockchain;
 
 /// Web4 domain registry manager
 pub struct DomainRegistry {
@@ -179,6 +180,7 @@ impl DomainRegistry {
     pub async fn lookup_domain(&self, domain: &str) -> Result<DomainLookupResponse> {
         info!(" Looking up Web4 domain: {}", domain);
 
+        // First check local cache
         let records = self.domain_records.read().await;
         
         if let Some(record) = records.get(domain) {
@@ -188,35 +190,167 @@ impl DomainRegistry {
                 .as_secs();
 
             if record.expires_at < current_time {
+                info!(" Domain {} found locally but expired", domain);
+            } else {
+                info!(" Domain {} found in local cache", domain);
+                let owner_info = PublicOwnerInfo {
+                    identity_hash: hex::encode(&record.owner.0[..16]), // First 16 bytes for privacy
+                    registered_at: record.registered_at,
+                    verified: true, // All registered domains are verified
+                    alias: None, // Could be added later
+                };
+
                 return Ok(DomainLookupResponse {
+                    found: true,
+                    record: Some(record.clone()),
+                    content_mappings: record.content_mappings.clone(),
+                    owner_info: Some(owner_info),
+                });
+            }
+        }
+        
+        drop(records); // Release lock before blockchain query
+        
+        // Domain not found locally or expired - query blockchain
+        info!(" Domain {} not found locally, querying blockchain...", domain);
+        match self.query_blockchain_for_domain(domain).await {
+            Ok(Some(domain_record)) => {
+                info!(" Domain {} found on blockchain, caching locally", domain);
+                
+                // Cache the domain record locally for future lookups
+                {
+                    let mut records = self.domain_records.write().await;
+                    records.insert(domain.to_string(), domain_record.clone());
+                }
+                
+                let owner_info = PublicOwnerInfo {
+                    identity_hash: hex::encode(&domain_record.owner.0[..16]),
+                    registered_at: domain_record.registered_at,
+                    verified: true,
+                    alias: None,
+                };
+
+                Ok(DomainLookupResponse {
+                    found: true,
+                    record: Some(domain_record.clone()),
+                    content_mappings: domain_record.content_mappings.clone(),
+                    owner_info: Some(owner_info),
+                })
+            }
+            Ok(None) => {
+                info!(" Domain {} not found on blockchain either", domain);
+                Ok(DomainLookupResponse {
                     found: false,
                     record: None,
                     content_mappings: HashMap::new(),
                     owner_info: None,
-                });
+                })
             }
-
-            let owner_info = PublicOwnerInfo {
-                identity_hash: hex::encode(&record.owner.0[..16]), // First 16 bytes for privacy
-                registered_at: record.registered_at,
-                verified: true, // All registered domains are verified
-                alias: None, // Could be added later
-            };
-
-            Ok(DomainLookupResponse {
-                found: true,
-                record: Some(record.clone()),
-                content_mappings: record.content_mappings.clone(),
-                owner_info: Some(owner_info),
-            })
-        } else {
-            Ok(DomainLookupResponse {
-                found: false,
-                record: None,
-                content_mappings: HashMap::new(),
-                owner_info: None,
-            })
+            Err(e) => {
+                warn!(" Failed to query blockchain for domain {}: {}", domain, e);
+                // Return not found rather than error to maintain compatibility
+                Ok(DomainLookupResponse {
+                    found: false,
+                    record: None,
+                    content_mappings: HashMap::new(),
+                    owner_info: None,
+                })
+            }
         }
+    }
+
+    /// Query blockchain for Web4Contract by domain name
+    async fn query_blockchain_for_domain(&self, domain: &str) -> Result<Option<DomainRecord>> {
+        // Get shared blockchain instance
+        match lib_blockchain::get_shared_blockchain().await {
+            Ok(blockchain_arc) => {
+                use std::sync::Arc;
+                use tokio::sync::RwLock;
+                
+                let blockchain_arc: Arc<RwLock<lib_blockchain::Blockchain>> = blockchain_arc;
+                let blockchain = blockchain_arc.read().await;
+                
+                // Search through all Web4 contracts to find one with matching domain
+                for (contract_id, web4_contract) in &blockchain.web4_contracts {
+                    if web4_contract.domain == domain {
+                        info!(" Found Web4Contract for domain {} (contract_id: {})", domain, hex::encode(contract_id));
+                        
+                        // Convert Web4Contract to DomainRecord
+                        let domain_record = self.convert_web4_contract_to_domain_record(web4_contract)?;
+                        return Ok(Some(domain_record));
+                    }
+                }
+                
+                info!(" No Web4Contract found for domain {} in blockchain", domain);
+                Ok(None)
+            }
+            Err(e) => {
+                warn!(" Failed to access blockchain: {}", e);
+                Err(anyhow!("Blockchain access failed: {}", e))
+            }
+        }
+    }
+
+    /// Convert Web4Contract from blockchain to DomainRecord for local use
+    fn convert_web4_contract_to_domain_record(&self, web4_contract: &lib_blockchain::contracts::web4::Web4Contract) -> Result<DomainRecord> {
+        // Convert Web4Contract routes to content_mappings
+        let mut content_mappings: HashMap<String, String> = HashMap::new();
+        
+        for (path, content_route) in &web4_contract.routes {
+            let path_str: String = path.clone();
+            content_mappings.insert(path_str, content_route.content_hash.clone());
+        }
+        
+        // Parse owner identity from string
+        let owner = if web4_contract.owner.len() >= 32 {
+            // If owner is hex string, decode it
+            match hex::decode(&web4_contract.owner) {
+                Ok(bytes) if bytes.len() >= 32 => {
+                    let mut owner_bytes = [0u8; 32];
+                    owner_bytes.copy_from_slice(&bytes[..32]);
+                    lib_crypto::Hash(owner_bytes)
+                }
+                _ => {
+                    // Fallback: hash the owner string
+                    lib_crypto::Hash::from_bytes(&hash_blake3(web4_contract.owner.as_bytes())[..32])
+                }
+            }
+        } else {
+            // Hash short owner strings
+            lib_crypto::Hash::from_bytes(&hash_blake3(web4_contract.owner.as_bytes())[..32])
+        };
+
+        // Convert WebsiteMetadata to DomainMetadata
+        let domain_metadata = DomainMetadata {
+            title: web4_contract.metadata.title.clone(),
+            description: web4_contract.metadata.description.clone(),
+            category: "web4".to_string(), // Default category for Web4 sites
+            tags: web4_contract.metadata.tags.clone(),
+            public: true, // Web4 contracts are publicly accessible
+            economic_settings: DomainEconomicSettings {
+                registration_fee: 1000.0, // Default registration fee
+                renewal_fee: 500.0,       // Default renewal fee  
+                transfer_fee: 250.0,      // Default transfer fee
+                hosting_budget: 10000.0,  // Default hosting budget
+            },
+        };
+
+        Ok(DomainRecord {
+            domain: web4_contract.domain.clone(),
+            owner,
+            registered_at: web4_contract.created_at,
+            expires_at: web4_contract.created_at + (365 * 24 * 60 * 60), // 1 year default
+            content_mappings,
+            metadata: domain_metadata,
+            ownership_proof: ZeroKnowledgeProof::new(
+                "Web4Contract".to_string(),
+                web4_contract.contract_id.as_bytes().to_vec(),
+                web4_contract.domain.as_bytes().to_vec(),
+                web4_contract.owner.as_bytes().to_vec(),
+                None,
+            ),
+            transfer_history: Vec::new(), // Not tracked in current contract version
+        })
     }
 
     /// Transfer domain to new owner
