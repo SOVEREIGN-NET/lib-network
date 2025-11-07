@@ -490,11 +490,28 @@ impl WindowsGattManager {
                 return Err(anyhow!("Step 3 failed - Characteristic does not support writing! Properties: {:?}", properties));
             }
             
-            // CRITICAL FIX: Use WriteWithoutResponse for mesh networking
-            // WriteWithResponse requires pairing/bonding which breaks peer-to-peer mesh
-            // Mac's characteristic is configured with WriteWithoutResponse permissions
-            if can_write_no_response {
-                info!("✅ Step 3: Using WriteWithoutResponse (correct for unpaired mesh networking)");
+            // CRITICAL FIX: Prioritize Write (with response) over WriteWithoutResponse
+            // macOS Core Bluetooth may strip WriteWithoutResponse when both properties are set
+            // Windows WriteValueWithOptionAsync works better with explicit Write property
+            if can_write {
+                info!("✅ Step 3: Using Write (with response) for reliable mesh communication");
+                
+                info!("📤 Step 4: Initiating GATT write with response...");
+                let write_async = characteristic.WriteValueWithOptionAsync(&buffer, GattWriteOption::WriteWithResponse)
+                    .map_err(|e| anyhow!("Step 4 failed - WriteValueWithOptionAsync call failed: {} (HRESULT: 0x{:08X})", e, e.code().0))?;
+                
+                info!("⏳ Step 5: Waiting for write operation to complete...");
+                let write_result = write_async.get()
+                    .map_err(|e| anyhow!("Step 5 failed - Write operation failed: {} (HRESULT: 0x{:08X}). This often means: 1) Device disconnected during write, 2) Pairing required, or 3) Characteristic requires authentication.", e, e.code().0))?;
+                
+                info!("🔍 Step 6: Checking write result status...");
+                if write_result != GattCommunicationStatus::Success {
+                    return Err(anyhow!("Step 6 failed - GATT write failed with status: {:?}. Device may have disconnected or rejected the write.", write_result));
+                }
+                
+                info!("✅ Successfully wrote {} bytes to characteristic {}", data.len(), char_uuid);
+            } else if can_write_no_response {
+                warn!("⚠️ Step 3: Falling back to WriteWithoutResponse");
                 
                 // WriteWithoutResponse: Fire-and-forget write that doesn't wait for acknowledgment
                 info!("📤 Step 4: Initiating GATT write (WriteWithoutResponse)...");
@@ -514,23 +531,6 @@ impl WindowsGattManager {
                 }
                 
                 info!("✅ Successfully wrote {} bytes to characteristic {} (WriteWithoutResponse)", data.len(), char_uuid);
-            } else if can_write {
-                warn!("⚠️ Step 3: Falling back to WriteWithResponse (may require pairing)");
-                
-                info!("📤 Step 4: Initiating GATT write with response...");
-                let write_async = characteristic.WriteValueWithOptionAsync(&buffer, GattWriteOption::WriteWithResponse)
-                    .map_err(|e| anyhow!("Step 4 failed - WriteValueWithOptionAsync call failed: {} (HRESULT: 0x{:08X})", e, e.code().0))?;
-                
-                info!("⏳ Step 5: Waiting for write operation to complete...");
-                let write_result = write_async.get()
-                    .map_err(|e| anyhow!("Step 5 failed - Write operation failed: {} (HRESULT: 0x{:08X}). This often means: 1) Device disconnected during write, 2) Pairing required, or 3) Characteristic requires authentication.", e, e.code().0))?;
-                
-                info!("🔍 Step 6: Checking write result status...");
-                if write_result != GattCommunicationStatus::Success {
-                    return Err(anyhow!("Step 6 failed - GATT write failed with status: {:?}. Device may have disconnected or rejected the write.", write_result));
-                }
-                
-                info!("✅ Successfully wrote {} bytes to characteristic {}", data.len(), char_uuid);
             } else {
                 return Err(anyhow!("Step 3 failed - Characteristic does not support writing! Properties: {:?}", properties));
             }
