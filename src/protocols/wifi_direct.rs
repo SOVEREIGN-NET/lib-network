@@ -176,6 +176,9 @@ pub struct WiFiDirectMeshProtocol {
     pub persistent_groups: Arc<RwLock<HashMap<String, PersistentGroup>>>,
     /// Channel to notify when peers are discovered (for triggering blockchain sync)
     pub peer_discovery_tx: Option<tokio::sync::mpsc::UnboundedSender<String>>,
+    /// WiFi Direct advertisement publisher (Windows only) - must be kept alive
+    #[cfg(target_os = "windows")]
+    pub wifi_direct_publisher: Arc<RwLock<Option<windows::Devices::WiFiDirect::WiFiDirectAdvertisementPublisher>>>,
 }
 
 /// Persistent P2P Group information
@@ -278,6 +281,8 @@ impl WiFiDirectMeshProtocol {
             received_invitations: Arc::new(RwLock::new(HashMap::new())),
             persistent_groups: Arc::new(RwLock::new(HashMap::new())),
             peer_discovery_tx,
+            #[cfg(target_os = "windows")]
+            wifi_direct_publisher: Arc::new(RwLock::new(None)),
         })
     }
     
@@ -994,7 +999,7 @@ impl WiFiDirectMeshProtocol {
     }
     
     #[cfg(target_os = "windows")]
-    async fn windows_create_p2p_group(&self) -> Result<()> {
+    async fn windows_create_p2p_group(&mut self) -> Result<()> {
         info!("🪟 Creating Windows WiFi Direct group (WinRT API)...");
         
 
@@ -1036,8 +1041,13 @@ impl WiFiDirectMeshProtocol {
             info!("   This device is now discoverable to other WiFi Direct devices");
             info!("   Other devices can now discover and connect to this node");
             
-            // Store the publisher (in production, you'd keep this in the struct)
-            // For now, it will be dropped but the advertisement should persist
+            // CRITICAL FIX: Store the publisher so it stays alive for the lifetime of the program
+            // If we drop it, the advertisement stops immediately!
+            let mut publisher_guard = self.wifi_direct_publisher.write().await;
+            *publisher_guard = Some(publisher);
+            drop(publisher_guard);
+            
+            info!("🔒 WiFi Direct publisher stored - advertisement will remain active");
             
             return Ok(());
         }
