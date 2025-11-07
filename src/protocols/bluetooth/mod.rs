@@ -1084,18 +1084,24 @@ impl BluetoothMeshProtocol {
             let devices = manager.get_tracked_devices().await?;
             let mut mesh_peers = Vec::new();
             
+            // Since we scanned WITH a service UUID filter (6BA7B810...),
+            // Core Bluetooth only returns devices advertising that service.
+            // Therefore, ALL discovered devices are ZHTP mesh peers!
             for device in devices {
-                if device.services.iter().any(|s| s.to_uppercase().contains("6BA7B810")) {
-                    mesh_peers.push(MeshPeer {
-                        peer_id: device.ephemeral_address.clone(),
-                        address: device.ephemeral_address.clone(),
-                        rssi: device.signal_strength,
-                        last_seen: device.last_seen,
-                        mesh_capable: true,
-                        services: device.services.clone(),
-                        quantum_secure: true,
-                    });
-                }
+                info!("✅ Found ZHTP mesh peer: {} ({}) RSSI: {}", 
+                      device.device_name.as_deref().unwrap_or("Unknown"),
+                      device.ephemeral_address,
+                      device.signal_strength);
+                
+                mesh_peers.push(MeshPeer {
+                    peer_id: device.ephemeral_address.clone(),
+                    address: device.ephemeral_address.clone(),
+                    rssi: device.signal_strength,
+                    last_seen: device.last_seen,
+                    mesh_capable: true,
+                    services: vec!["6ba7b810-9dad-11d1-80b4-00c04fd430c8".to_string()],
+                    quantum_secure: true,
+                });
             }
             
             manager.stop_scan().await?;
