@@ -1082,7 +1082,7 @@ impl BluetoothMeshProtocol {
                     mesh_peers.push(MeshPeer {
                         peer_id: device.ephemeral_address.clone(),
                         address: device.ephemeral_address.clone(),
-                        rssi: device.signal_strength as i32,
+                        rssi: device.signal_strength,
                         last_seen: device.last_seen,
                         mesh_capable: true,
                         services: device.services.clone(),
