@@ -1160,16 +1160,16 @@ impl CoreBluetoothManager {
                     // CBCharacteristicProperties: 
                     // Read=0x02, Write=0x08, WriteWithoutResponse=0x04, Notify=0x10
                     // Note: NSUInteger is 64-bit on modern macOS
-                    // CRITICAL: Use WriteWithoutResponse for cross-platform compatibility
-                    // Encrypted writes require pairing which doesn't work for mesh networking
-                    let properties: u64 = 0x02 | 0x04 | 0x10; // Read | WriteWithoutResponse | Notify
+                    // CRITICAL: Include BOTH Write and WriteWithoutResponse for maximum compatibility
+                    // Windows may require Write property even when using WriteWithoutResponse option
+                    let properties: u64 = 0x02 | 0x04 | 0x08 | 0x10; // Read | WriteWithoutResponse | Write | Notify
                     
                     // CBAttributePermissions: Readable=0x01, Writeable=0x02
                     // DO NOT use encryption - it breaks mesh networking without pairing
                     // Mesh security is handled at application layer with ZK proofs
                     let permissions: u64 = 0x01 | 0x02; // Readable | Writeable (NO encryption required)
                     
-                    info!("🔧 Creating characteristic {} with properties=0x{:X} (Read|WriteWithoutResponse|Notify), permissions=0x{:X} (Readable|Writeable, NO encryption)", char_uuid, properties, permissions);
+                    info!("🔧 Creating characteristic {} with properties=0x{:X} (Read|WriteWithoutResponse|Write|Notify), permissions=0x{:X} (Readable|Writeable, NO encryption)", char_uuid, properties, permissions);
                     
                     // Create characteristic: [[CBMutableCharacteristic alloc] initWithType:UUID properties:props value:nil permissions:perms]
                     let characteristic: *mut AnyObject = msg_send![mutable_char_cls, alloc];

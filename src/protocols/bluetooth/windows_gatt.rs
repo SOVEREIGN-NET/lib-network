@@ -496,17 +496,17 @@ impl WindowsGattManager {
             if can_write_no_response {
                 info!("✅ Step 3: Using WriteWithoutResponse (correct for unpaired mesh networking)");
                 
-                // WriteWithoutResponse: Fire-and-forget, returns GattCommunicationStatus immediately
+                // WriteWithoutResponse: Fire-and-forget write that doesn't wait for acknowledgment
                 info!("📤 Step 4: Initiating GATT write (WriteWithoutResponse)...");
                 
-                // Use WriteValueAsync instead of WriteValueWithOptionAsync for WriteWithoutResponse
-                // Some devices have issues with WriteValueWithOptionAsync(WriteWithoutResponse)
-                let write_async = characteristic.WriteValueAsync(&buffer)
-                    .map_err(|e| anyhow!("Step 4 failed - WriteValueAsync call failed: {} (HRESULT: 0x{:08X})", e, e.code().0))?;
+                // Use WriteValueWithOptionAsync with WriteWithoutResponse option
+                // This sends the data without waiting for a response from the peripheral
+                let write_async = characteristic.WriteValueWithOptionAsync(&buffer, GattWriteOption::WriteWithoutResponse)
+                    .map_err(|e| anyhow!("Step 4 failed - WriteValueWithOptionAsync call failed: {} (HRESULT: 0x{:08X})", e, e.code().0))?;
                 
-                info!("⏳ Step 5: Waiting for write to complete...");
+                info!("⏳ Step 5: Waiting for write acknowledgment...");
                 let write_result = write_async.get()
-                    .map_err(|e| anyhow!("Step 5 failed - Write failed: {} (HRESULT: 0x{:08X})", e, e.code().0))?;
+                    .map_err(|e| anyhow!("Step 5 failed - Write operation failed: {} (HRESULT: 0x{:08X}). This may indicate the characteristic requires Write permission (0x08) in addition to WriteWithoutResponse (0x04).", e, e.code().0))?;
                 
                 info!("🔍 Step 6: Checking write result status...");
                 if write_result != GattCommunicationStatus::Success {
