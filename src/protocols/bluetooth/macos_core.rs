@@ -1094,10 +1094,11 @@ impl CoreBluetoothManager {
                     let value_data: *mut AnyObject = msg_send![ns_data_cls, dataWithBytes:bytes_ptr length:initial_value.len()];
                     
                     // CBCharacteristicProperties: Read=0x02, Write=0x08, Notify=0x10
-                    let properties: u32 = 0x02 | 0x08 | 0x10; // Read | Write | Notify
+                    // Note: NSUInteger is 64-bit on modern macOS
+                    let properties: u64 = 0x02 | 0x08 | 0x10; // Read | Write | Notify
                     
                     // CBAttributePermissions: Readable=0x01, Writeable=0x02
-                    let permissions: u32 = 0x01 | 0x02; // Readable | Writeable
+                    let permissions: u64 = 0x01 | 0x02; // Readable | Writeable
                     
                     // Create characteristic: [[CBMutableCharacteristic alloc] initWithType:UUID properties:props value:data permissions:perms]
                     let characteristic: *mut AnyObject = msg_send![mutable_char_cls, alloc];
