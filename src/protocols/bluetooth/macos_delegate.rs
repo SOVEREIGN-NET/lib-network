@@ -435,9 +435,15 @@ unsafe fn register_peripheral_manager_delegate() {
             // Extract data bytes
             let mut data = Vec::new();
             if !value.is_null() && length > 0 {
-                let bytes_ptr: *const u8 = msg_send![value, bytes];
-                data = std::slice::from_raw_parts(bytes_ptr, length).to_vec();
-                info!("📦 Data: {} bytes: {:?}", length, &data[..std::cmp::min(20, length)]);
+                // NSData.bytes returns *const c_void, we must cast it properly
+                let bytes_ptr: *const std::ffi::c_void = msg_send![value, bytes];
+                let bytes_ptr = bytes_ptr as *const u8;
+                if !bytes_ptr.is_null() && length > 0 {
+                    data = std::slice::from_raw_parts(bytes_ptr, length).to_vec();
+                    info!("📦 Data: {} bytes: {:?}", length, &data[..std::cmp::min(20, length)]);
+                } else {
+                    warn!("⚠️ Received null bytes pointer for {} byte write request", length);
+                }
             }
             
             // Send event to application
