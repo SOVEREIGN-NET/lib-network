@@ -130,6 +130,16 @@ pub enum CoreBluetoothEvent {
         characteristic_uuid: String,
         value: Vec<u8>,
     },
+    /// Central subscribed to characteristic (GATT server)
+    CentralSubscribed {
+        central_id: String,
+        characteristic_uuid: String,
+    },
+    /// Central unsubscribed from characteristic (GATT server)
+    CentralUnsubscribed {
+        central_id: String,
+        characteristic_uuid: String,
+    },
 }
 
 /// Core Bluetooth power state

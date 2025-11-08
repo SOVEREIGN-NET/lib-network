@@ -3349,7 +3349,8 @@ Value=00
             }
         }
         
-        // Keep gatt_manager alive until after potential notification
+        // Keep gatt_manager alive a bit longer to allow any pending notifications to be delivered
+        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
         drop(gatt_manager);
         
         Ok(())

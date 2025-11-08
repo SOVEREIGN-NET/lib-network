@@ -491,12 +491,86 @@ unsafe fn register_peripheral_manager_delegate() {
         peripheral_manager_did_receive_write_requests as unsafe extern "C" fn(*mut AnyObject, Sel, *mut AnyObject, *mut AnyObject)
     );
     
+    // Implement: - (void)peripheralManager:central:didSubscribeToCharacteristic:
+    unsafe extern "C" fn peripheral_manager_did_subscribe_to_characteristic(
+        this: *mut AnyObject,
+        _cmd: Sel,
+        peripheral: *mut AnyObject,
+        central: *mut AnyObject,
+        characteristic: *mut AnyObject,
+    ) {
+        let this = &*this;
+        
+        // Get central identifier
+        let central_id_obj: *mut AnyObject = msg_send![central, identifier];
+        let central_id_str: *mut AnyObject = msg_send![central_id_obj, UUIDString];
+        let central_id_cstr: *const i8 = msg_send![central_id_str, UTF8String];
+        let central_id = std::ffi::CStr::from_ptr(central_id_cstr).to_string_lossy().to_string();
+        
+        // Get characteristic UUID
+        let char_uuid_obj: *mut AnyObject = msg_send![characteristic, UUID];
+        let char_uuid_str: *mut AnyObject = msg_send![char_uuid_obj, UUIDString];
+        let char_uuid_cstr: *const i8 = msg_send![char_uuid_str, UTF8String];
+        let char_uuid = std::ffi::CStr::from_ptr(char_uuid_cstr).to_string_lossy().to_string();
+        
+        info!("🔔 Delegate: Central {} subscribed to characteristic {}", central_id, char_uuid);
+        
+        let sender_ptr: usize = *this.get_ivar::<usize>("event_sender_ptr");
+        if sender_ptr != 0 {
+            let sender = &*(sender_ptr as *const tokio::sync::mpsc::UnboundedSender<CoreBluetoothEvent>);
+            let _ = sender.send(CoreBluetoothEvent::CentralSubscribed { central_id, characteristic_uuid: char_uuid });
+        }
+    }
+    
+    decl.add_method(
+        sel!(peripheralManager:central:didSubscribeToCharacteristic:),
+        peripheral_manager_did_subscribe_to_characteristic as unsafe extern "C" fn(*mut AnyObject, Sel, *mut AnyObject, *mut AnyObject, *mut AnyObject)
+    );
+    
+    // Implement: - (void)peripheralManager:central:didUnsubscribeFromCharacteristic:
+    unsafe extern "C" fn peripheral_manager_did_unsubscribe_from_characteristic(
+        this: *mut AnyObject,
+        _cmd: Sel,
+        peripheral: *mut AnyObject,
+        central: *mut AnyObject,
+        characteristic: *mut AnyObject,
+    ) {
+        let this = &*this;
+        
+        // Get central identifier
+        let central_id_obj: *mut AnyObject = msg_send![central, identifier];
+        let central_id_str: *mut AnyObject = msg_send![central_id_obj, UUIDString];
+        let central_id_cstr: *const i8 = msg_send![central_id_str, UTF8String];
+        let central_id = std::ffi::CStr::from_ptr(central_id_cstr).to_string_lossy().to_string();
+        
+        // Get characteristic UUID
+        let char_uuid_obj: *mut AnyObject = msg_send![characteristic, UUID];
+        let char_uuid_str: *mut AnyObject = msg_send![char_uuid_obj, UUIDString];
+        let char_uuid_cstr: *const i8 = msg_send![char_uuid_str, UTF8String];
+        let char_uuid = std::ffi::CStr::from_ptr(char_uuid_cstr).to_string_lossy().to_string();
+        
+        info!("🔕 Delegate: Central {} unsubscribed from characteristic {}", central_id, char_uuid);
+        
+        let sender_ptr: usize = *this.get_ivar::<usize>("event_sender_ptr");
+        if sender_ptr != 0 {
+            let sender = &*(sender_ptr as *const tokio::sync::mpsc::UnboundedSender<CoreBluetoothEvent>);
+            let _ = sender.send(CoreBluetoothEvent::CentralUnsubscribed { central_id, characteristic_uuid: char_uuid });
+        }
+    }
+    
+    decl.add_method(
+        sel!(peripheralManager:central:didUnsubscribeFromCharacteristic:),
+        peripheral_manager_did_unsubscribe_from_characteristic as unsafe extern "C" fn(*mut AnyObject, Sel, *mut AnyObject, *mut AnyObject, *mut AnyObject)
+    );
+    
     decl.register();
-    info!("✅ Registered ZhtpCBPeripheralManagerDelegate with 4 methods:");
+    info!("✅ Registered ZhtpCBPeripheralManagerDelegate with 6 methods:");
     info!("   1. peripheralManagerDidUpdateState:");
     info!("   2. peripheralManager:didAddService:error:");
     info!("   3. peripheralManagerDidStartAdvertising:error:");
     info!("   4. peripheralManager:didReceiveWriteRequests: 🔥");
+    info!("   5. peripheralManager:central:didSubscribeToCharacteristic: 🔔");
+    info!("   6. peripheralManager:central:didUnsubscribeFromCharacteristic: 🔕");
 }
 
 /// Register ZhtpCBPeripheralDelegate class for GATT operations

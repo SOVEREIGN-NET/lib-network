@@ -655,20 +655,27 @@ impl WindowsGattManager {
             });
             
             let token = characteristic.ValueChanged(&handler)?;
+            info!("   ValueChanged handler registered, token received");
             
             // Store the handler token to keep it alive (boxed as Any to work around Send issues)
             if let Ok(mut handlers) = self.notification_event_handlers.lock() {
                 handlers.push(Box::new(token));
                 info!("   Handler token stored to keep subscription alive");
+                info!("   Total handlers stored: {}", handlers.len());
+            } else {
+                warn!("   ⚠️ Failed to lock notification_event_handlers!");
             }
             
             // Enable notifications via CCCD
             let cccd_value = if (properties & GattCharacteristicProperties::Notify).0 != 0 {
+                info!("   Using Notify mode for notifications");
                 GattClientCharacteristicConfigurationDescriptorValue::Notify
             } else {
+                info!("   Using Indicate mode for notifications");
                 GattClientCharacteristicConfigurationDescriptorValue::Indicate
             };
             
+            info!("   Writing CCCD to enable notifications...");
             let write_async = characteristic.WriteClientCharacteristicConfigurationDescriptorAsync(cccd_value)?;
             let write_result = write_async.get()?;
             
@@ -676,6 +683,7 @@ impl WindowsGattManager {
                 return Err(anyhow!("Failed to enable notifications: {:?}", write_result));
             }
             
+            info!("   CCCD write completed successfully - peripheral should now send notifications");
             info!("✅ Notifications enabled for characteristic {}", char_uuid);
         }
         
