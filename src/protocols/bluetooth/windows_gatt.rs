@@ -608,24 +608,42 @@ impl WindowsGattManager {
             let characteristic_uuid = char_uuid.to_string();
             
             let handler = TypedEventHandler::new(move |_characteristic: &Option<GattCharacteristic>, args: &Option<GattValueChangedEventArgs>| {
+                info!("🔔 ValueChanged handler triggered!");
                 if let Some(args) = args {
+                    info!("   Args present, extracting buffer...");
                     if let Ok(buffer) = args.CharacteristicValue() {
+                        info!("   Buffer obtained, length: {}", buffer.Length().unwrap_or(0));
                         if let Ok(data_reader) = DataReader::FromBuffer(&buffer) {
                             let length = buffer.Length().unwrap_or(0) as usize;
                             let mut data = vec![0u8; length];
                             if data_reader.ReadBytes(&mut data).is_ok() {
+                                info!("   Data read successfully: {} bytes: {:?}", data.len(), data);
                                 if let Ok(tx_lock) = event_tx.try_lock() {
                                     if let Some(ref tx) = *tx_lock {
+                                        info!("   Sending to event channel...");
                                         let _ = tx.send(GattEvent::CharacteristicValueChanged {
                                             device_address: device_addr.clone(),
                                             char_uuid: characteristic_uuid.clone(),
                                             value: data,
                                         });
+                                        info!("   ✅ Event sent to channel!");
+                                    } else {
+                                        warn!("   ⚠️ Event tx is None!");
                                     }
+                                } else {
+                                    warn!("   ⚠️ Failed to lock event_tx!");
                                 }
+                            } else {
+                                warn!("   ⚠️ Failed to read bytes from buffer!");
                             }
+                        } else {
+                            warn!("   ⚠️ Failed to create DataReader from buffer!");
                         }
+                    } else {
+                        warn!("   ⚠️ Failed to get CharacteristicValue from args!");
                     }
+                } else {
+                    warn!("   ⚠️ Args is None!");
                 }
                 Ok(())
             });
