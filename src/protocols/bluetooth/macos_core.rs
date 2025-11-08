@@ -410,15 +410,29 @@ impl CoreBluetoothManager {
                                     let mgr = manager_ref.clone();
                                     let char_uuid_for_task = characteristic_uuid.clone();
                                     tokio::spawn(async move {
-                                        // Wait briefly for subscription to be registered by Core Bluetooth
-                                        // The CCCD write happens slightly before the didSubscribe callback fires
-                                        tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
+                                        // Wait for subscription to be registered by Core Bluetooth
+                                        // Poll every 50ms for up to 1 second
+                                        let mut waited_ms = 0;
+                                        let max_wait_ms = 1000;
                                         
-                                        // Check if any centrals are subscribed
-                                        let subscriptions = mgr.subscribed_centrals.read().await;
-                                        let subscriber_count = subscriptions.get(&char_uuid_for_task).map(|v| v.len()).unwrap_or(0);
-                                        info!("   Subscribers registered: {}", subscriber_count);
-                                        drop(subscriptions);
+                                        loop {
+                                            let subscriptions = mgr.subscribed_centrals.read().await;
+                                            let subscriber_count = subscriptions.get(&char_uuid_for_task).map(|v| v.len()).unwrap_or(0);
+                                            drop(subscriptions);
+                                            
+                                            if subscriber_count > 0 {
+                                                info!("   ✅ Found {} subscriber(s) after {}ms", subscriber_count, waited_ms);
+                                                break;
+                                            }
+                                            
+                                            if waited_ms >= max_wait_ms {
+                                                warn!("   ⚠️ No subscribers found after {}ms - sending anyway", waited_ms);
+                                                break;
+                                            }
+                                            
+                                            tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+                                            waited_ms += 50;
+                                        }
                                         
                                         if let Err(e) = mgr.send_notification(&char_uuid_for_task, &response).await {
                                             warn!("⚠️ Failed to send handshake response notification: {}", e);
