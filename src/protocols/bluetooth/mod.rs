@@ -3309,8 +3309,8 @@ Value=00
                     while let Some(event) = rx.recv().await {
                         use crate::protocols::bluetooth::windows_gatt::GattEvent;
                         match event {
-                            GattEvent::CharacteristicValueChanged { address, characteristic_uuid, value } => {
-                                info!("🔔 Windows: Received notification from {} on char {}", address, characteristic_uuid);
+                            GattEvent::CharacteristicValueChanged { device_address, char_uuid, value } => {
+                                info!("🔔 Windows: Received notification from {} on char {}", device_address, char_uuid);
                                 info!("   Data: {} bytes: {:?}", value.len(), value);
                                 
                                 // Parse handshake ACK response
