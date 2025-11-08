@@ -748,7 +748,7 @@ impl BluetoothMeshProtocol {
     async fn send_mesh_handshake_to_peer(
         peer_address: &str, 
         node_id: [u8; 32],
-        core_bt: &Arc<RwLock<Option<CoreBluetoothManager>>>
+        core_bt: &Arc<RwLock<Option<Arc<CoreBluetoothManager>>>>
     ) -> Result<()> {
         use crate::discovery::local_network::{MeshHandshake, HandshakeCapabilities};
         use uuid::Uuid;
@@ -970,7 +970,7 @@ impl BluetoothMeshProtocol {
     
     /// Scan for ZHTP bypass peers
     #[cfg(target_os = "macos")]
-    async fn scan_for_mesh_peers(core_bt: &Arc<RwLock<Option<CoreBluetoothManager>>>) -> Result<Vec<MeshPeer>> {
+    async fn scan_for_mesh_peers(core_bt: &Arc<RwLock<Option<Arc<CoreBluetoothManager>>>>) -> Result<Vec<MeshPeer>> {
         let mut peers = Vec::new();
         peers.extend(Self::macos_scan_mesh_peers(core_bt).await?);
         Ok(peers)
@@ -1062,7 +1062,7 @@ impl BluetoothMeshProtocol {
     }
 
     #[cfg(target_os = "macos")]
-    async fn macos_scan_mesh_peers(core_bt: &Arc<RwLock<Option<CoreBluetoothManager>>>) -> Result<Vec<MeshPeer>> {
+    async fn macos_scan_mesh_peers(core_bt: &Arc<RwLock<Option<Arc<CoreBluetoothManager>>>>) -> Result<Vec<MeshPeer>> {
         info!("macOS: Scanning for ZHTP bypass peers with Core Bluetooth...");
         
         let manager_guard = core_bt.read().await;
@@ -1157,7 +1157,7 @@ impl BluetoothMeshProtocol {
     async fn connect_mesh_peer(
         peer: &MeshPeer, 
         _device_id: [u8; 6],
-        core_bt: &Arc<RwLock<Option<CoreBluetoothManager>>>
+        core_bt: &Arc<RwLock<Option<Arc<CoreBluetoothManager>>>>
     ) -> Result<BluetoothConnection> {
         info!("🔗 Establishing mesh connection to: {}", peer.address);
         let connection = Self::macos_connect_mesh_peer(peer, core_bt).await?;
@@ -1261,7 +1261,7 @@ impl BluetoothMeshProtocol {
     }
     
     #[cfg(target_os = "macos")]
-    async fn macos_connect_mesh_peer(peer: &MeshPeer, core_bt: &Arc<RwLock<Option<CoreBluetoothManager>>>) -> Result<BluetoothConnection> {
+    async fn macos_connect_mesh_peer(peer: &MeshPeer, core_bt: &Arc<RwLock<Option<Arc<CoreBluetoothManager>>>>) -> Result<BluetoothConnection> {
         info!("macOS: Connecting to mesh peer {} via Core Bluetooth", peer.address);
         
         let manager_guard = core_bt.read().await;
