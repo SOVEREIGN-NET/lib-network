@@ -3289,6 +3289,18 @@ Value=00
         gatt_manager.write_characteristic(peer_address, service_uuid, char_uuid, data).await?;
         
         info!("✅ Windows: Handshake written successfully");
+        
+        // Enable notifications to receive handshake response
+        info!("🔔 Windows: Enabling notifications on characteristic {}", char_uuid);
+        match gatt_manager.enable_notifications(peer_address, char_uuid).await {
+            Ok(_) => {
+                info!("✅ Windows: Notifications enabled - handshake response will be received via ValueChanged events");
+            }
+            Err(e) => {
+                warn!("⚠️ Windows: Failed to enable notifications: {} (handshake sent, but response may not be received)", e);
+            }
+        }
+        
         Ok(())
     }
     
