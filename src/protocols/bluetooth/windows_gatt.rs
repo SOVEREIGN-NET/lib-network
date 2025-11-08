@@ -179,6 +179,11 @@ impl WindowsGattManager {
         Ok(())
     }
     
+    /// Create a new event channel and return the receiver
+    pub fn create_event_channel() -> (mpsc::UnboundedSender<GattEvent>, mpsc::UnboundedReceiver<GattEvent>) {
+        mpsc::unbounded_channel()
+    }
+    
     /// Start BLE device discovery
     pub async fn start_discovery(&self) -> Result<()> {
         info!("🔍 Starting Windows BLE device discovery");

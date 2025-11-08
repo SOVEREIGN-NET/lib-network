@@ -3276,6 +3276,10 @@ Value=00
         let gatt_manager = WindowsGattManager::new()?;
         gatt_manager.initialize().await?;
         
+        // Create event channel for notifications
+        let (tx, mut rx) = WindowsGattManager::create_event_channel();
+        gatt_manager.set_event_channel(tx).await?;
+        
         // Connect to device
         gatt_manager.connect_device(peer_address).await?;
         
@@ -3299,6 +3303,30 @@ Value=00
         match gatt_manager.enable_notifications(peer_address, char_uuid).await {
             Ok(_) => {
                 info!("✅ Windows: Notifications enabled - handshake response will be received via ValueChanged events");
+                
+                // Spawn event listener for notifications
+                tokio::spawn(async move {
+                    while let Some(event) = rx.recv().await {
+                        use crate::protocols::bluetooth::windows_gatt::GattEvent;
+                        match event {
+                            GattEvent::CharacteristicValueChanged { address, characteristic_uuid, value } => {
+                                info!("🔔 Windows: Received notification from {} on char {}", address, characteristic_uuid);
+                                info!("   Data: {} bytes: {:?}", value.len(), value);
+                                
+                                // Parse handshake ACK response
+                                if value.len() == 2 {
+                                    let version = value[0];
+                                    let status = value[1];
+                                    match status {
+                                        1 => info!("✅ Handshake acknowledged by peer (version {}, status: Success)", version),
+                                        _ => warn!("⚠️ Handshake response: version {}, status: {}", version, status),
+                                    }
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                });
             }
             Err(e) => {
                 warn!("⚠️ Windows: Failed to enable notifications: {} (handshake sent, but response may not be received)", e);
