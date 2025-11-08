@@ -78,9 +78,9 @@ pub struct WindowsGattManager {
     /// Event channel for notifications
     event_tx: Arc<Mutex<Option<mpsc::UnboundedSender<GattEvent>>>>,
     
-    /// Store notification handlers to keep them alive
-    /// Note: EventRegistrationToken contains raw pointers but is safe to store
-    /// as long as we don't move the manager across threads during active use
+    /// Store notification handlers AND characteristics to keep them alive
+    /// CRITICAL: Windows WinRT handlers only stay alive while the GattCharacteristic object lives!
+    /// We must store both the token AND the characteristic object itself.
     notification_event_handlers: Arc<std::sync::Mutex<Vec<Box<dyn std::any::Any + Send>>>>,
     
     /// Track discovered devices to prevent duplicates
@@ -657,11 +657,14 @@ impl WindowsGattManager {
             let token = characteristic.ValueChanged(&handler)?;
             info!("   ValueChanged handler registered, token received");
             
-            // Store the handler token to keep it alive (boxed as Any to work around Send issues)
+            // CRITICAL: Store BOTH the token AND the characteristic to keep the handler alive!
+            // In Windows WinRT, handlers are only active while the GattCharacteristic object exists.
+            // Storing just the token is NOT sufficient - the characteristic must stay in memory.
             if let Ok(mut handlers) = self.notification_event_handlers.lock() {
-                handlers.push(Box::new(token));
-                info!("   Handler token stored to keep subscription alive");
-                info!("   Total handlers stored: {}", handlers.len());
+                handlers.push(Box::new(token));  // Store token
+                handlers.push(Box::new(characteristic.clone()));  // Store characteristic object
+                info!("   Handler token AND characteristic stored to keep subscription alive");
+                info!("   Total items stored: {}", handlers.len());
             } else {
                 warn!("   ⚠️ Failed to lock notification_event_handlers!");
             }

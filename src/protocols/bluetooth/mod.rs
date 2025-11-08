@@ -3304,9 +3304,9 @@ Value=00
             Ok(_) => {
                 info!("✅ Windows: Notifications enabled - handshake response will be received via ValueChanged events");
                 
-                // Wait for notification response with timeout
+                // Wait for notification response with timeout (5 seconds to allow for Core Bluetooth subscription delays)
                 info!("⏳ Windows: Waiting for handshake ACK notification...");
-                let timeout_duration = tokio::time::Duration::from_secs(3);
+                let timeout_duration = tokio::time::Duration::from_secs(5);
                 
                 match tokio::time::timeout(timeout_duration, async {
                     while let Some(event) = rx.recv().await {
