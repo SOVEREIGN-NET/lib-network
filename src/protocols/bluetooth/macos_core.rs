@@ -1118,6 +1118,113 @@ impl CoreBluetoothManager {
         }
     }
     
+    /// Register GATT service WITHOUT starting advertising (advertising started separately later)
+    pub async fn register_service(&self, service_uuid: &str, characteristics: &[(&str, &[u8])]) -> Result<()> {
+        info!("📝 Registering GATT service {} (without advertising)", service_uuid);
+        
+        let manager = self.peripheral_manager.lock().await;
+        if manager.manager_ptr.is_null() {
+            return Err(anyhow!("CBPeripheralManager not initialized"));
+        }
+        
+        // Register the service using the same logic as start_advertising but skip the advertising part
+        self.native_register_service_only(&manager, service_uuid, characteristics).await
+    }
+    
+    /// Register GATT service only (without advertising) - called before mesh advertising is started
+    async fn native_register_service_only(&self, manager: &CBPeripheralManagerHandle, service_uuid: &str, characteristics: &[(&str, &[u8])]) -> Result<()> {
+        info!("📝 Registering GATT service {} without advertising", service_uuid);
+        
+        // CRITICAL FIX: Remove all previously cached services before adding new one
+        unsafe {
+            info!("🧹 Removing all cached GATT services from CBPeripheralManager");
+            let _: () = msg_send![manager.manager_ptr, removeAllServices];
+            info!("✅ All old services cleared - ready for fresh service registration");
+        }
+        
+        // Wait for services to be fully removed
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        
+        // Add the service (synchronous FFI operations)
+        unsafe {
+            // Get CBUUID class
+            let cbuuid_cls = AnyClass::get(c"CBUUID").ok_or_else(|| anyhow!("CBUUID class not found"))?;
+            
+            // Create service UUID
+            let service_uuid_ns = NSString::from_str(service_uuid);
+            let service_cbuuid: *mut AnyObject = msg_send![cbuuid_cls, UUIDWithString:&*service_uuid_ns];
+            
+            // Get CBMutableService class
+            let mutable_service_cls = AnyClass::get(c"CBMutableService").ok_or_else(|| {
+                anyhow!("CBMutableService class not found")
+            })?;
+            
+            // Create mutable service
+            let service: *mut AnyObject = msg_send![mutable_service_cls, alloc];
+            let is_primary: bool = true;
+            let service: *mut AnyObject = msg_send![service, initWithType:service_cbuuid primary:is_primary];
+            
+            // Create characteristics
+            if !characteristics.is_empty() {
+                let mutable_char_cls = AnyClass::get(c"CBMutableCharacteristic").ok_or_else(|| {
+                    anyhow!("CBMutableCharacteristic class not found")
+                })?;
+                
+                let mut char_objects: Vec<*mut AnyObject> = Vec::new();
+                
+                for (char_uuid, _initial_value) in characteristics {
+                    // Create characteristic UUID
+                    let char_uuid_ns = NSString::from_str(char_uuid);
+                    let char_cbuuid: *mut AnyObject = msg_send![cbuuid_cls, UUIDWithString:&*char_uuid_ns];
+                    
+                    // Value should be nil for writable characteristics
+                    let nil_value: *mut AnyObject = std::ptr::null_mut();
+                    
+                    // Properties: Read | Write | Notify (0x02 | 0x08 | 0x10)
+                    let properties: u64 = 0x02 | 0x08 | 0x10;
+                    
+                    // Permissions: Readable | Writeable (0x01 | 0x02)
+                    let permissions: u64 = 0x01 | 0x02;
+                    
+                    info!("🔧 Creating characteristic {} with properties=0x{:X}, permissions=0x{:X}", char_uuid, properties, permissions);
+                    
+                    // Create characteristic
+                    let characteristic: *mut AnyObject = msg_send![mutable_char_cls, alloc];
+                    let characteristic: *mut AnyObject = msg_send![
+                        characteristic,
+                        initWithType:char_cbuuid
+                        properties:properties
+                        value:nil_value
+                        permissions:permissions
+                    ];
+                    
+                    char_objects.push(characteristic);
+                }
+                
+                // Set characteristics on service
+                let array_cls = AnyClass::get(c"NSArray").ok_or_else(|| anyhow!("NSArray class not found"))?;
+                let char_array: *mut AnyObject = msg_send![array_cls, alloc];
+                let char_array: *mut AnyObject = msg_send![
+                    char_array,
+                    initWithObjects:char_objects.as_ptr()
+                    count:char_objects.len()
+                ];
+                
+                let _: () = msg_send![service, setCharacteristics:char_array];
+            }
+            
+            // Add service to peripheral manager
+            info!("🔄 Adding GATT service to peripheral manager");
+            let _: () = msg_send![manager.manager_ptr, addService:service];
+        }
+        
+        // Wait for service to be added
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        
+        info!("✅ GATT service registered successfully (advertising to be started separately)");
+        Ok(())
+    }
+    
     async fn native_start_advertising(&self, manager: &CBPeripheralManagerHandle, service_uuid: &str, characteristics: &[(&str, &[u8])]) -> Result<()> {
         info!("📢 FFI: Starting GATT advertising for service {}", service_uuid);
         

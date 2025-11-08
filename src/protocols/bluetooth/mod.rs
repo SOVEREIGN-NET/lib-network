@@ -1852,9 +1852,10 @@ Value=00
                 .map(|uuid| (*uuid, &b""[..]))  // Empty initial value
                 .collect();
             
-            // Register service with Core Bluetooth - don't start advertising yet
+            // Register service with Core Bluetooth - but DON'T start advertising yet
             // Advertising will be started later by macos_broadcast_mesh_adv with proper advertisement data
-            manager.start_advertising(service_uuid, &char_data).await?;
+            // Calling start_advertising here causes double-initialization which breaks the delegate
+            manager.register_service(service_uuid, &char_data).await?;
             
             info!("✅ macOS: GATT service registered (advertising will be started separately)");
             Ok(())
