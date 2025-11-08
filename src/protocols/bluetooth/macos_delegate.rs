@@ -406,7 +406,7 @@ unsafe fn register_peripheral_manager_delegate() {
         
         // Process each write request
         for i in 0..count {
-            let request: *mut AnyObject = msg_send![requests, objectAtIndex: i];
+            let request: *mut AnyObject = msg_send![requests, objectAtIndex: i as usize];
             
             // Get characteristic UUID
             let characteristic: *mut AnyObject = msg_send![request, characteristic];
@@ -477,7 +477,7 @@ unsafe fn register_peripheral_manager_delegate() {
         // CBATTError.success = 0
         // Get first request from NSArray to respond to
         if count > 0 {
-            let first_request: *mut AnyObject = msg_send![requests, objectAtIndex:0];
+            let first_request: *mut AnyObject = msg_send![requests, objectAtIndex:0usize];
             let result_code: i64 = 0; // CBATTErrorSuccess
             let _: () = msg_send![peripheral, respondToRequest:first_request withResult:result_code];
             info!("✅ Responded to {} write request(s) with success", count);
