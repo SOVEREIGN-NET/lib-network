@@ -3304,8 +3304,11 @@ Value=00
             Ok(_) => {
                 info!("✅ Windows: Notifications enabled - handshake response will be received via ValueChanged events");
                 
-                // Spawn event listener for notifications
-                tokio::spawn(async move {
+                // Wait for notification response with timeout
+                info!("⏳ Windows: Waiting for handshake ACK notification...");
+                let timeout_duration = tokio::time::Duration::from_secs(3);
+                
+                match tokio::time::timeout(timeout_duration, async {
                     while let Some(event) = rx.recv().await {
                         use crate::protocols::bluetooth::windows_gatt::GattEvent;
                         match event {
@@ -3318,20 +3321,36 @@ Value=00
                                     let version = value[0];
                                     let status = value[1];
                                     match status {
-                                        1 => info!("✅ Handshake acknowledged by peer (version {}, status: Success)", version),
-                                        _ => warn!("⚠️ Handshake response: version {}, status: {}", version, status),
+                                        1 => {
+                                            info!("✅ Handshake acknowledged by peer (version {}, status: Success)", version);
+                                            return true; // Exit loop on successful ACK
+                                        }
+                                        _ => {
+                                            warn!("⚠️ Handshake response: version {}, status: {}", version, status);
+                                            return false;
+                                        }
                                     }
                                 }
                             }
                             _ => {}
                         }
                     }
-                });
+                    false
+                }).await {
+                    Ok(true) => info!("✅ Bidirectional handshake complete!"),
+                    Ok(false) => warn!("⚠️ Handshake ACK received but status indicates failure"),
+                    Err(_) => {
+                        warn!("⏰ Timeout waiting for handshake ACK notification (peer may not have responded)");
+                    }
+                }
             }
             Err(e) => {
                 warn!("⚠️ Windows: Failed to enable notifications: {} (handshake sent, but response may not be received)", e);
             }
         }
+        
+        // Keep gatt_manager alive until after potential notification
+        drop(gatt_manager);
         
         Ok(())
     }
