@@ -1852,12 +1852,14 @@ Value=00
                 .map(|uuid| (*uuid, &b""[..]))  // Empty initial value
                 .collect();
             
-            // Register service with Core Bluetooth - but DON'T start advertising yet
-            // Advertising will be started later by macos_broadcast_mesh_adv with proper advertisement data
-            // Calling start_advertising here causes double-initialization which breaks the delegate
-            manager.register_service(service_uuid, &char_data).await?;
+            // Register service and start advertising in ONE call
+            // This ensures the service is properly included in advertisements
+            // The advertising data will be the default (service UUID + local name)
+            // Later, start_mesh_advertising will be called which will UPDATE the advertising
+            // with manufacturer data, but the service will already be registered
+            manager.start_advertising(service_uuid, &char_data).await?;
             
-            info!("✅ macOS: GATT service registered (advertising will be started separately)");
+            info!("✅ macOS: GATT service registered and initial advertising started");
             Ok(())
         } else {
             Err(anyhow::anyhow!("macOS: Core Bluetooth manager not initialized"))
