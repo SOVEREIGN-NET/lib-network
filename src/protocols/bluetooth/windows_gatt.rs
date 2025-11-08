@@ -545,7 +545,48 @@ impl WindowsGattManager {
         
         #[cfg(feature = "windows-gatt")]
         {
-            let characteristic = self.find_characteristic_by_uuid(address, char_uuid).await?;
+            // Use on-demand service discovery instead of cache
+            let devices = self.connected_devices.read().await;
+            let device = devices.get(address)
+                .ok_or_else(|| anyhow!("Device not connected: {}", address))?;
+            
+            // Discover services to find the characteristic
+            let services_async = device.GetGattServicesAsync()?;
+            let services_result = services_async.get()?;
+            
+            if services_result.Status()? != GattCommunicationStatus::Success {
+                return Err(anyhow!("GATT service discovery failed"));
+            }
+            
+            let services = services_result.Services()?;
+            let target_char_uuid = GUID::from(char_uuid);
+            let mut found_characteristic = None;
+            
+            // Search through all services for the characteristic
+            for i in 0..services.Size()? {
+                let service = services.GetAt(i)?;
+                let chars_async = service.GetCharacteristicsAsync()?;
+                let chars_result = chars_async.get()?;
+                
+                if chars_result.Status()? == GattCommunicationStatus::Success {
+                    let characteristics = chars_result.Characteristics()?;
+                    
+                    for j in 0..characteristics.Size()? {
+                        let characteristic = characteristics.GetAt(j)?;
+                        if characteristic.Uuid()? == target_char_uuid {
+                            found_characteristic = Some(characteristic);
+                            break;
+                        }
+                    }
+                }
+                
+                if found_characteristic.is_some() {
+                    break;
+                }
+            }
+            
+            let characteristic = found_characteristic
+                .ok_or_else(|| anyhow!("Characteristic {} not found", char_uuid))?;
             
             // Check if characteristic supports notifications
             let properties = characteristic.CharacteristicProperties()?;
