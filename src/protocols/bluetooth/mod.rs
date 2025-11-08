@@ -648,9 +648,9 @@ impl BluetoothMeshProtocol {
         // 3. 128-bit Service UUID: ZHTP Mesh Service
         adv_data.push(0x11); // Length: 17 bytes (16 + 1)
         adv_data.push(0x07); // Type: Complete List of 128-bit Service UUIDs
-        // ZHTP Service UUID: 6ba7b810-9dad-11d1-80b4-00c04fd430c9 (little-endian)
+        // ZHTP Service UUID: 6ba7b810-9dad-11d1-80b4-00c04fd430c9 (little-endian, v2 with c9)
         let service_uuid = [
-            0xc8, 0x30, 0xd4, 0x30, 0xc0, 0x00, 0xb4, 0x80,
+            0xc9, 0x30, 0xd4, 0x30, 0xc0, 0x00, 0xb4, 0x80,  // Changed 0xc8 to 0xc9
             0xd1, 0x11, 0xad, 0x9d, 0x10, 0xb8, 0xa7, 0x6b
         ];
         adv_data.extend_from_slice(&service_uuid);
