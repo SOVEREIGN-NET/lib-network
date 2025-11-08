@@ -1121,7 +1121,18 @@ impl CoreBluetoothManager {
     async fn native_start_advertising(&self, manager: &CBPeripheralManagerHandle, service_uuid: &str, characteristics: &[(&str, &[u8])]) -> Result<()> {
         info!("📢 FFI: Starting GATT advertising for service {}", service_uuid);
         
-        // First, add the service (synchronous FFI operations)
+        // CRITICAL FIX: Remove all previously cached services before adding new one
+        // This clears old service UUIDs (C8, C9) from Core Bluetooth's persistent cache
+        unsafe {
+            info!("🧹 Removing all cached GATT services from CBPeripheralManager");
+            let _: () = msg_send![manager.manager_ptr, removeAllServices];
+            info!("✅ All old services cleared - ready for fresh service registration");
+        }
+        
+        // Wait a moment for services to be fully removed
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        
+        // Now add the service (synchronous FFI operations)
         unsafe {
             // Get CBUUID class
             let cbuuid_cls = AnyClass::get(c"CBUUID").ok_or_else(|| anyhow!("CBUUID class not found"))?;
