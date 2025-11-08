@@ -78,6 +78,12 @@ pub struct WindowsGattManager {
     /// Event channel for notifications
     event_tx: Arc<Mutex<Option<mpsc::UnboundedSender<GattEvent>>>>,
     
+    /// Store notification handlers to keep them alive
+    #[cfg(all(target_os = "windows", feature = "windows-gatt"))]
+    notification_event_handlers: Arc<Mutex<Vec<EventRegistrationToken>>>,
+    #[cfg(not(all(target_os = "windows", feature = "windows-gatt")))]
+    notification_event_handlers: Arc<Mutex<Vec<()>>>,
+    
     /// Track discovered devices to prevent duplicates
     discovered_devices: Arc<RwLock<HashSet<String>>>,
 }
@@ -148,6 +154,7 @@ impl WindowsGattManager {
             gatt_service_provider: Arc::new(Mutex::new(None)),
             local_services: Arc::new(RwLock::new(HashMap::new())),
             event_tx: Arc::new(Mutex::new(None)),
+            notification_event_handlers: Arc::new(Mutex::new(Vec::new())),
             discovered_devices: Arc::new(RwLock::new(HashSet::new())),
         })
     }
@@ -648,7 +655,11 @@ impl WindowsGattManager {
                 Ok(())
             });
             
-            characteristic.ValueChanged(&handler)?;
+            let token = characteristic.ValueChanged(&handler)?;
+            
+            // Store the handler token to keep it alive
+            self.notification_event_handlers.lock().await.push(token);
+            info!("   Handler token stored to keep subscription alive");
             
             // Enable notifications via CCCD
             let cccd_value = if (properties & GattCharacteristicProperties::Notify).0 != 0 {
