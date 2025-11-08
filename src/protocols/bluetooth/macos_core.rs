@@ -1260,9 +1260,9 @@ impl CoreBluetoothManager {
                 let local_name_value = NSString::from_str("ZHTP-MESH");
                 let _: () = msg_send![ad_dict, setObject:&*local_name_value forKey:&*local_name_key];
                 
-                // Add service UUID: 6ba7b810-9dad-11d1-80b4-00c04fd430c9
+                // Add service UUID: 6BA7B810-9DAD-11D1-80B4-00C04FD430CA
                 let cbuuid_cls = AnyClass::get(c"CBUUID").ok_or_else(|| anyhow!("CBUUID class not found"))?;
-                let service_uuid_str = "6BA7B810-9DAD-11D1-80B4-00C04FD430C9";
+                let service_uuid_str = "6BA7B810-9DAD-11D1-80B4-00C04FD430CA";
                 let service_uuid_ns = NSString::from_str(service_uuid_str);
                 let service_uuid: *mut AnyObject = msg_send![cbuuid_cls, UUIDWithString:&*service_uuid_ns];
                 
