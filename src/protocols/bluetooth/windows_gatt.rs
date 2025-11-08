@@ -228,7 +228,7 @@ impl WindowsGattManager {
                                                 // Check for ZHTP service UUID: 6ba7b810-9dad-11d1-80b4-00c04fd430c9
                                                 // Remove all formatting characters and compare the hex digits
                                                 let clean_uuid = uuid_str.replace("-", "").replace("{", "").replace("}", "");
-                                                let zhtp_uuid_clean = "6BA7B8109DAD11D180B400c04fd430c9";
+                                                let zhtp_uuid_clean = "6BA7B8109DAD11D180B400C04FD430C9";  // Fixed: uppercase C9
                                                 
                                                 if clean_uuid.contains(zhtp_uuid_clean) {
                                                     has_zhtp_service = true;

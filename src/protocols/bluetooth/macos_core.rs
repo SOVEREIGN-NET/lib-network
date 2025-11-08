@@ -1262,7 +1262,7 @@ impl CoreBluetoothManager {
                 
                 // Add service UUID: 6ba7b810-9dad-11d1-80b4-00c04fd430c9
                 let cbuuid_cls = AnyClass::get(c"CBUUID").ok_or_else(|| anyhow!("CBUUID class not found"))?;
-                let service_uuid_str = "6BA7B810-9DAD-11D1-80B4-00c04fd430c9";
+                let service_uuid_str = "6BA7B810-9DAD-11D1-80B4-00C04FD430C9";
                 let service_uuid_ns = NSString::from_str(service_uuid_str);
                 let service_uuid: *mut AnyObject = msg_send![cbuuid_cls, UUIDWithString:&*service_uuid_ns];
                 
