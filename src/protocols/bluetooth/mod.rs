@@ -114,9 +114,9 @@ pub struct BluetoothMeshProtocol {
     pub ble_advertiser: Arc<RwLock<Option<Box<dyn std::any::Any + Send + Sync>>>>,
     /// Channel for forwarding GATT messages to unified server
     pub gatt_message_tx: Arc<RwLock<Option<tokio::sync::mpsc::UnboundedSender<GattMessage>>>>,
-    /// Core Bluetooth manager for macOS
+    /// Core Bluetooth manager for macOS (wrapped in Arc for event loop)
     #[cfg(target_os = "macos")]
-    pub core_bluetooth: Arc<RwLock<Option<CoreBluetoothManager>>>,
+    pub core_bluetooth: Arc<RwLock<Option<Arc<CoreBluetoothManager>>>>,
 }
 
 // Note: Old duplicate re-export removed - types are already available through the module structure
@@ -171,7 +171,7 @@ impl BluetoothMeshProtocol {
     pub async fn initialize_core_bluetooth(&self) -> Result<()> {
         info!("🔄 Initializing Core Bluetooth for macOS");
         
-        let core_bt_manager = CoreBluetoothManager::new()?;
+        let core_bt_manager = Arc::new(CoreBluetoothManager::new()?);
         
         // Initialize both central and peripheral managers
         core_bt_manager.initialize_central_manager().await?;
@@ -182,7 +182,8 @@ impl BluetoothMeshProtocol {
         core_bt_manager.start_event_loop().await?;
         info!("✅ Event loop started - delegate callbacks will now be processed");
         
-        *self.core_bluetooth.write().await = Some(core_bt_manager);
+        // Store the Arc directly - need to update the field type
+        *self.core_bluetooth.write().await = Some(Arc::clone(&core_bt_manager));
         
         info!("✅ Core Bluetooth initialized successfully");
         Ok(())

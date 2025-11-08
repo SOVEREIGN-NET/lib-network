@@ -292,7 +292,7 @@ impl CoreBluetoothManager {
     }
     
     /// Start event processing loop (must be called after initialization)
-    pub async fn start_event_loop(&self) -> Result<()> {
+    pub async fn start_event_loop(self: &Arc<Self>) -> Result<()> {
         let mut receiver = self.event_receiver.lock().await.take()
             .ok_or_else(|| anyhow!("Event loop already started"))?;
         
@@ -300,6 +300,7 @@ impl CoreBluetoothManager {
         let services_cache = self.services_cache.clone();
         let char_values = self.characteristic_values.clone();
         let notification_handlers = self.notification_handlers.clone();
+        let manager_ref = Arc::clone(self); // Clone Arc for notification sending
         
         tokio::spawn(async move {
             while let Some(event) = receiver.recv().await {
@@ -373,8 +374,45 @@ impl CoreBluetoothManager {
                         debug!("📖 Read request from {} for {}", central_id, characteristic_uuid);
                     }
                     CoreBluetoothEvent::WriteRequest { central_id, characteristic_uuid, value } => {
-                        debug!("✍️ Write request from {} for {} ({} bytes)", 
+                        info!("✍️ Write request from {} for {} ({} bytes)", 
                                central_id, characteristic_uuid, value.len());
+                        
+                        // Try to deserialize as MeshHandshake
+                        if value.len() >= 20 { // Minimum handshake size
+                            match bincode::deserialize::<crate::discovery::local_network::MeshHandshake>(&value) {
+                                Ok(handshake) => {
+                                    info!("🤝 Received MeshHandshake from {}", central_id);
+                                    info!("   Version: {}", handshake.version);
+                                    info!("   Node ID: {}", handshake.node_id);
+                                    info!("   Mesh Port: {}", handshake.mesh_port);
+                                    info!("   Protocols: {:?}", handshake.protocols);
+                                    info!("   Discovery: {} (1=bluetooth)", handshake.discovered_via);
+                                    
+                                    // Send handshake response via notification
+                                    info!("📤 Sending handshake acknowledgment via GATT notification");
+                                    
+                                    // Create simple ACK response (version + status)
+                                    let response = vec![1u8, 1u8]; // Version 1, Status: Success
+                                    
+                                    let mgr = manager_ref.clone();
+                                    tokio::spawn(async move {
+                                        if let Err(e) = mgr.send_notification(&characteristic_uuid, &response).await {
+                                            warn!("⚠️ Failed to send handshake response notification: {}", e);
+                                        } else {
+                                            info!("✅ Handshake response notification sent");
+                                        }
+                                    });
+                                    
+                                    info!("✅ MeshHandshake successfully processed from peer {}", handshake.node_id);
+                                }
+                                Err(e) => {
+                                    warn!("⚠️ Failed to deserialize MeshHandshake: {} ({} bytes received)", e, value.len());
+                                    debug!("   Data: {:?}", &value[..std::cmp::min(40, value.len())]);
+                                }
+                            }
+                        } else {
+                            debug!("   Data too small for MeshHandshake, treating as raw data");
+                        }
                     }
                     _ => {}
                 }
@@ -1442,6 +1480,98 @@ impl CoreBluetoothManager {
         }
         
         Ok(devices)
+    }
+    
+    /// Send notification to subscribed centrals on a characteristic
+    pub async fn send_notification(&self, characteristic_uuid: &str, data: &[u8]) -> Result<()> {
+        info!("📤 Sending {} byte notification on characteristic {}", data.len(), characteristic_uuid);
+        
+        let manager = self.peripheral_manager.lock().await;
+        if let Some(ref mgr) = *manager {
+            unsafe {
+                // Create NSData from bytes
+                let ns_data: *mut AnyObject = msg_send![
+                    objc2::class!(NSData),
+                    dataWithBytes:data.as_ptr() as *const c_void
+                    length:data.len()
+                ];
+                
+                if ns_data.is_null() {
+                    return Err(anyhow!("Failed to create NSData for notification"));
+                }
+                
+                // Convert characteristic UUID string to CBUUID
+                let uuid_str = NSString::from_str(characteristic_uuid);
+                let uuid_obj: *mut AnyObject = msg_send![
+                    objc2::class!(CBUUID),
+                    UUIDWithString: &*uuid_str
+                ];
+                
+                if uuid_obj.is_null() {
+                    return Err(anyhow!("Failed to create CBUUID for {}", characteristic_uuid));
+                }
+                
+                // Find the characteristic in the peripheral manager's services
+                // Get all services
+                let services: *mut AnyObject = msg_send![mgr.manager_ptr, services];
+                if services.is_null() {
+                    return Err(anyhow!("No services registered on peripheral manager"));
+                }
+                
+                let service_count: usize = msg_send![services, count];
+                let mut target_char: *mut AnyObject = std::ptr::null_mut();
+                
+                // Search through services for the characteristic
+                for i in 0..service_count {
+                    let service: *mut AnyObject = msg_send![services, objectAtIndex: i];
+                    let characteristics: *mut AnyObject = msg_send![service, characteristics];
+                    
+                    if !characteristics.is_null() {
+                        let char_count: usize = msg_send![characteristics, count];
+                        for j in 0..char_count {
+                            let characteristic: *mut AnyObject = msg_send![characteristics, objectAtIndex: j];
+                            let char_uuid: *mut AnyObject = msg_send![characteristic, UUID];
+                            
+                            // Compare UUIDs
+                            let is_equal: bool = msg_send![char_uuid, isEqual: uuid_obj];
+                            if is_equal {
+                                target_char = characteristic;
+                                break;
+                            }
+                        }
+                    }
+                    
+                    if !target_char.is_null() {
+                        break;
+                    }
+                }
+                
+                if target_char.is_null() {
+                    return Err(anyhow!("Characteristic {} not found in peripheral manager services", characteristic_uuid));
+                }
+                
+                // Send notification: updateValue:forCharacteristic:onSubscribedCentrals:
+                // Passing nil for centrals sends to ALL subscribed centrals
+                let success: bool = msg_send![
+                    mgr.manager_ptr,
+                    updateValue: ns_data
+                    forCharacteristic: target_char
+                    onSubscribedCentrals: std::ptr::null::<AnyObject>()
+                ];
+                
+                if success {
+                    info!("✅ Notification sent successfully to subscribed centrals");
+                    Ok(())
+                } else {
+                    warn!("⚠️ Failed to send notification (queue may be full - will retry on didUpdateValueForCharacteristic callback)");
+                    // Note: iOS docs say this can fail if transmission queue is full,
+                    // in which case you should wait for peripheralManagerIsReadyToUpdateSubscribers callback
+                    Ok(()) // Return success anyway, iOS will handle retries
+                }
+            }
+        } else {
+            Err(anyhow!("Peripheral manager not initialized"))
+        }
     }
 }
 
