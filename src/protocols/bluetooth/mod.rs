@@ -3249,7 +3249,7 @@ Value=00
         peer_address: &str, 
         char_uuid: &str, 
         data: &[u8],
-        core_bt: &Arc<RwLock<Option<CoreBluetoothManager>>>
+        core_bt: &Arc<RwLock<Option<Arc<CoreBluetoothManager>>>>
     ) -> Result<()> {
         info!("🍎 macOS: Writing {} byte handshake to {} via Core Bluetooth", data.len(), peer_address);
         
