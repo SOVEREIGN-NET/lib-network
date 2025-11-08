@@ -3292,6 +3292,10 @@ Value=00
         
         // Enable notifications to receive handshake response
         info!("🔔 Windows: Enabling notifications on characteristic {}", char_uuid);
+        
+        // Need to discover services first to populate cache
+        let _ = gatt_manager.discover_services(peer_address).await;
+        
         match gatt_manager.enable_notifications(peer_address, char_uuid).await {
             Ok(_) => {
                 info!("✅ Windows: Notifications enabled - handshake response will be received via ValueChanged events");
