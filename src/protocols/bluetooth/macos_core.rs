@@ -1123,12 +1123,12 @@ impl CoreBluetoothManager {
         info!("📝 Registering GATT service {} (without advertising)", service_uuid);
         
         let manager = self.peripheral_manager.lock().await;
-        if manager.manager_ptr.is_null() {
-            return Err(anyhow!("CBPeripheralManager not initialized"));
+        if let Some(ref mgr) = *manager {
+            // Register the service using the same logic as start_advertising but skip the advertising part
+            self.native_register_service_only(mgr, service_uuid, characteristics).await
+        } else {
+            Err(anyhow!("Peripheral manager not initialized"))
         }
-        
-        // Register the service using the same logic as start_advertising but skip the advertising part
-        self.native_register_service_only(&manager, service_uuid, characteristics).await
     }
     
     /// Register GATT service only (without advertising) - called before mesh advertising is started
