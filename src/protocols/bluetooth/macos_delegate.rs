@@ -432,17 +432,32 @@ unsafe fn register_peripheral_manager_delegate() {
             
             info!("📝 Write request: char={}, peer={}, bytes={}", char_uuid, peer_id, length);
             
-            // Extract data bytes
+            // Extract data bytes - wrapped in catch_unwind to prevent Objective-C callback crashes
             let mut data = Vec::new();
             if !value.is_null() && length > 0 {
                 // NSData.bytes returns *const c_void, we must cast it properly
-                let bytes_ptr: *const std::ffi::c_void = msg_send![value, bytes];
-                let bytes_ptr = bytes_ptr as *const u8;
-                if !bytes_ptr.is_null() && length > 0 {
-                    data = std::slice::from_raw_parts(bytes_ptr, length).to_vec();
-                    info!("📦 Data: {} bytes: {:?}", length, &data[..std::cmp::min(20, length)]);
-                } else {
-                    warn!("⚠️ Received null bytes pointer for {} byte write request", length);
+                match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    let bytes_ptr: *const std::ffi::c_void = msg_send![value, bytes];
+                    let bytes_ptr = bytes_ptr as *const u8;
+                    if !bytes_ptr.is_null() && length > 0 {
+                        std::slice::from_raw_parts(bytes_ptr, length).to_vec()
+                    } else {
+                        Vec::new()
+                    }
+                })) {
+                    Ok(extracted_data) => {
+                        data = extracted_data;
+                        if !data.is_empty() {
+                            info!("📦 Data: {} bytes: {:?}", length, &data[..std::cmp::min(20, length)]);
+                        } else {
+                            warn!("⚠️ Received null bytes pointer for {} byte write request", length);
+                        }
+                    }
+                    Err(e) => {
+                        error!("❌ CRITICAL: Failed to extract NSData bytes: {:?}", e);
+                        warn!("⚠️ Attempting safe fallback for {} byte write request", length);
+                        // Leave data empty - will still send response to avoid Windows hanging
+                    }
                 }
             }
             
