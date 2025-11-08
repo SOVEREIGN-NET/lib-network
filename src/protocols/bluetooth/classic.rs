@@ -676,7 +676,7 @@ impl BluetoothClassicProtocol {
                 .map_err(|e| anyhow!("Failed to complete listener binding: {:?}", e))?;
             
             info!(" Windows: RFCOMM service provider created");
-            info!(" Windows: Service UUID: 6ba7b810-9dad-11d1-80b4-00c04fd430c8");
+            info!(" Windows: Service UUID: 6ba7b810-9dad-11d1-80b4-00c04fd430c9");
             info!(" Windows: RFCOMM channel: {}", rfcomm_channels::MESH_DATA);
             
             // Start advertising (Windows API only takes listener parameter)
@@ -693,7 +693,7 @@ impl BluetoothClassicProtocol {
     
     #[cfg(target_os = "windows")]
     fn parse_service_uuid_to_guid(&self) -> Result<windows::core::GUID> {
-        // ZHTP Mesh Service UUID: 6ba7b810-9dad-11d1-80b4-00c04fd430c8
+        // ZHTP Mesh Service UUID: 6ba7b810-9dad-11d1-80b4-00c04fd430c9
         Ok(windows::core::GUID::from_values(
             0x6ba7b810,
             0x9dad,
@@ -708,7 +708,7 @@ impl BluetoothClassicProtocol {
         info!(" Linux: Registering RFCOMM service via BlueZ");
         
         // Use sdptool to register RFCOMM service
-        let service_uuid = "6ba7b810-9dad-11d1-80b4-00c04fd430c8";
+        let service_uuid = "6ba7b810-9dad-11d1-80b4-00c04fd430c9";
         let service_name = "ZHTP Mesh RFCOMM";
         
         // Register service on channel 3 (MESH_DATA)
@@ -770,7 +770,7 @@ impl BluetoothClassicProtocol {
         
         // Service will be registered when we create the listening socket
         info!(" macOS: RFCOMM service will be registered on socket bind");
-        info!(" macOS: Service UUID: 6ba7b810-9dad-11d1-80b4-00c04fd430c8");
+        info!(" macOS: Service UUID: 6ba7b810-9dad-11d1-80b4-00c04fd430c9");
         info!("📞 macOS: RFCOMM channel: {}", rfcomm_channels::MESH_DATA);
         
         Ok(())
@@ -1839,7 +1839,7 @@ impl BluetoothClassicProtocol {
         // If no services found via sdptool, try default ZHTP channel
         if services.is_empty() {
             services.push(RfcommServiceInfo {
-                service_uuid: "6ba7b810-9dad-11d1-80b4-00c04fd430c8".to_string(),
+                service_uuid: "6ba7b810-9dad-11d1-80b4-00c04fd430c9".to_string(),
                 service_name: "ZHTP Mesh (default)".to_string(),
                 channel: rfcomm_channels::MESH_DATA,
                 device_address: device_address.to_string(),
@@ -2011,7 +2011,7 @@ impl BluetoothClassicProtocol {
         // Return default ZHTP service info
         let services = vec![
             RfcommServiceInfo {
-                service_uuid: "6ba7b810-9dad-11d1-80b4-00c04fd430c8".to_string(),
+                service_uuid: "6ba7b810-9dad-11d1-80b4-00c04fd430c9".to_string(),
                 service_name: "ZHTP Mesh".to_string(),
                 channel: rfcomm_channels::MESH_DATA,
                 device_address: device_address.to_string(),
@@ -2599,7 +2599,7 @@ mod tests {
     #[tokio::test]
     async fn test_rfcomm_service_info_structure() {
         let service = RfcommServiceInfo {
-            service_uuid: "6ba7b810-9dad-11d1-80b4-00c04fd430c8".to_string(),
+            service_uuid: "6ba7b810-9dad-11d1-80b4-00c04fd430c9".to_string(),
             service_name: "ZHTP Mesh".to_string(),
             channel: 3,
             device_address: "AA:BB:CC:DD:EE:FF".to_string(),

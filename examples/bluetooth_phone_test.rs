@@ -51,11 +51,11 @@ async fn main() -> Result<()> {
         println!();
         
         println!(" Available GATT Services & Characteristics:");
-        println!("   ZHTP Mesh Service: 6ba7b810-9dad-11d1-80b4-00c04fd430c8");
-        println!("     ZK Authentication: 6ba7b811-9dad-11d1-80b4-00c04fd430c8");
-        println!("     Quantum Routing:   6ba7b812-9dad-11d1-80b4-00c04fd430c8");
-        println!("     Mesh Data:         6ba7b813-9dad-11d1-80b4-00c04fd430c8");
-        println!("    🤝 Coordination:      6ba7b814-9dad-11d1-80b4-00c04fd430c8");
+        println!("   ZHTP Mesh Service: 6ba7b810-9dad-11d1-80b4-00c04fd430c9");
+        println!("     ZK Authentication: 6ba7b811-9dad-11d1-80b4-00c04fd430c9");
+        println!("     Quantum Routing:   6ba7b812-9dad-11d1-80b4-00c04fd430c9");
+        println!("     Mesh Data:         6ba7b813-9dad-11d1-80b4-00c04fd430c9");
+        println!("    🤝 Coordination:      6ba7b814-9dad-11d1-80b4-00c04fd430c9");
         println!();
         
         // Display network stats

@@ -231,8 +231,8 @@ impl BluetoothMeshProtocol {
     async fn send_auth_message(&self, peer_address: &str, message_type: &str, data: &[u8]) -> Result<()> {
         // Discover ZHTP authentication service and characteristics
         let auth_char_uuid = match message_type {
-            "zhtp-auth-challenge" => "6ba7b810-9dad-11d1-80b4-00c04fd430c8", // Challenge characteristic
-            "zhtp-auth-response" => "6ba7b811-9dad-11d1-80b4-00c04fd430c8",  // Response characteristic
+            "zhtp-auth-challenge" => "6ba7b810-9dad-11d1-80b4-00c04fd430c9", // Challenge characteristic (v2 UUID)
+            "zhtp-auth-response" => "6ba7b811-9dad-11d1-80b4-00c04fd430c9",  // Response characteristic (v2 UUID)
             _ => return Err(anyhow!("Unknown auth message type: {}", message_type)),
         };
         
@@ -243,7 +243,7 @@ impl BluetoothMeshProtocol {
     /// Wait for authentication response from peer
     async fn wait_for_auth_response(&self, peer_address: &str, message_type: &str, timeout_secs: u64) -> Result<Vec<u8>> {
         let response_char_uuid = match message_type {
-            "zhtp-auth-response" => "6ba7b811-9dad-11d1-80b4-00c04fd430c8",
+            "zhtp-auth-response" => "6ba7b811-9dad-11d1-80b4-00c04fd430c9",
             _ => return Err(anyhow!("Unknown response message type: {}", message_type)),
         };
         
@@ -575,20 +575,20 @@ impl BluetoothMeshProtocol {
         info!("🔧 DEBUG: setup_zk_mesh_protocols() ENTRY POINT");
         info!("Setting up quantum-resistant ZK mesh protocols...");
         
-        // ZHTP Mesh Service UUID (custom for mesh networking)
-        let lib_mesh_service = "6ba7b810-9dad-11d1-80b4-00c04fd430c8";
+        // ZHTP Mesh Service UUID (v2 - changed to bypass macOS bluetoothd cache)
+        let lib_mesh_service = "6ba7b810-9dad-11d1-80b4-00c04fd430c9";
         
         // ZK Authentication characteristic
-        let zk_auth_char = "6ba7b811-9dad-11d1-80b4-00c04fd430c8";
+        let zk_auth_char = "6ba7b811-9dad-11d1-80b4-00c04fd430c9";
         
         // Quantum-resistant routing characteristic  
-        let quantum_routing_char = "6ba7b812-9dad-11d1-80b4-00c04fd430c8";
+        let quantum_routing_char = "6ba7b812-9dad-11d1-80b4-00c04fd430c9";
         
         // Mesh data transfer characteristic
-        let mesh_data_char = "6ba7b813-9dad-11d1-80b4-00c04fd430c8";
+        let mesh_data_char = "6ba7b813-9dad-11d1-80b4-00c04fd430c9";
         
         // Mesh coordination characteristic
-        let mesh_coord_char = "6ba7b814-9dad-11d1-80b4-00c04fd430c8";
+        let mesh_coord_char = "6ba7b814-9dad-11d1-80b4-00c04fd430c9";
         
         info!("🔧 DEBUG: About to call register_mesh_gatt_service...");
         self.register_mesh_gatt_service(lib_mesh_service, vec![
@@ -612,7 +612,7 @@ impl BluetoothMeshProtocol {
         #[cfg(target_os = "windows")]
         {
             info!("✅ Windows: Mesh advertising active via GATT service");
-            info!("   GATT Service UUID: 6ba7b810-9dad-11d1-80b4-00c04fd430c8");
+            info!("   GATT Service UUID: 6ba7b810-9dad-11d1-80b4-00c04fd430c9(v2)");
             info!("   Mesh capabilities available through GATT characteristics");
         }
         
@@ -648,7 +648,7 @@ impl BluetoothMeshProtocol {
         // 3. 128-bit Service UUID: ZHTP Mesh Service
         adv_data.push(0x11); // Length: 17 bytes (16 + 1)
         adv_data.push(0x07); // Type: Complete List of 128-bit Service UUIDs
-        // ZHTP Service UUID: 6ba7b810-9dad-11d1-80b4-00c04fd430c8 (little-endian)
+        // ZHTP Service UUID: 6ba7b810-9dad-11d1-80b4-00c04fd430c9 (little-endian)
         let service_uuid = [
             0xc8, 0x30, 0xd4, 0x30, 0xc0, 0x00, 0xb4, 0x80,
             0xd1, 0x11, 0xad, 0x9d, 0x10, 0xb8, 0xa7, 0x6b
@@ -780,7 +780,7 @@ impl BluetoothMeshProtocol {
         info!("📝 Sending {} byte handshake to {}", handshake_data.len(), peer_address);
         
         // Write to mesh data characteristic (6ba7b813)
-        let mesh_data_char = "6ba7b813-9dad-11d1-80b4-00c04fd430c8";
+        let mesh_data_char = "6ba7b813-9dad-11d1-80b4-00c04fd430c9";
         
         // Use Core Bluetooth to write handshake
         Self::macos_write_handshake(peer_address, mesh_data_char, &handshake_data, core_bt).await?;
@@ -829,7 +829,7 @@ impl BluetoothMeshProtocol {
         info!("📝 Sending {} byte handshake to {}", handshake_data.len(), peer_address);
         
         // Write to mesh data characteristic (6ba7b813)
-        let mesh_data_char = "6ba7b813-9dad-11d1-80b4-00c04fd430c8";
+        let mesh_data_char = "6ba7b813-9dad-11d1-80b4-00c04fd430c9";
         
         // Platform-specific GATT write
         #[cfg(target_os = "windows")]
@@ -1034,7 +1034,7 @@ impl BluetoothMeshProtocol {
                                     .unwrap_or_default()
                                     .as_secs(),
                                 mesh_capable: true,
-                                services: vec!["6ba7b810-9dad-11d1-80b4-00c04fd430c8".to_string()],
+                                services: vec!["6ba7b810-9dad-11d1-80b4-00c04fd430c9".to_string()],
                                 quantum_secure: true,
                             };
                             info!("✅ Found ZHTP mesh peer: {} ({}) RSSI: {}", 
@@ -1063,8 +1063,8 @@ impl BluetoothMeshProtocol {
         
         let manager_guard = core_bt.read().await;
         if let Some(ref manager) = *manager_guard {
-            // Start scan for ZHTP mesh service UUID: 6ba7b810-9dad-11d1-80b4-00c04fd430c8
-            let service_uuid = "6BA7B810-9DAD-11D1-80B4-00C04FD430C8";
+            // Start scan for ZHTP mesh service UUID: 6ba7b810-9dad-11d1-80b4-00c04fd430c9
+            let service_uuid = "6BA7B810-9DAD-11D1-80B4-00c04fd430c9";
             manager.start_scan(Some(&[service_uuid])).await?;
             
             // Give scan time to discover peers
@@ -1089,7 +1089,7 @@ impl BluetoothMeshProtocol {
                     rssi: device.signal_strength,
                     last_seen: device.last_seen,
                     mesh_capable: true,
-                    services: vec!["6ba7b810-9dad-11d1-80b4-00c04fd430c8".to_string()],
+                    services: vec!["6ba7b810-9dad-11d1-80b4-00c04fd430c9".to_string()],
                     quantum_secure: true,
                 });
             }
@@ -1106,7 +1106,7 @@ impl BluetoothMeshProtocol {
     /// Check if advertisement data indicates ZHTP support
     fn is_zhtp_advertisement(advertisement_data: &[u8]) -> bool {
         // Look for ZHTP service UUID in advertisement data
-        // ZHTP service UUID: 6ba7b810-9dad-11d1-80b4-00c04fd430c8
+        // ZHTP service UUID: 6ba7b810-9dad-11d1-80b4-00c04fd430c9
         let zhtp_uuid_bytes = [
             0x6b, 0xa7, 0xb8, 0x10, 0x9d, 0xad, 0x11, 0xd1,
             0x80, 0xb4, 0x00, 0xc0, 0x4f, 0xd4, 0x30, 0xc8
@@ -1666,22 +1666,22 @@ Value=00
                                         
                                         // Prepare response data based on characteristic type
                                         let response_data = match char_uuid_owned.as_str() {
-                                            "6ba7b811-9dad-11d1-80b4-00c04fd430c8" => {
+                                            "6ba7b811-9dad-11d1-80b4-00c04fd430c9" => {
                                                 // ZK Authentication - send REAL challenge with cryptographic nonce
                                                 info!(" Sending REAL ZK auth challenge ({} bytes)", zk_auth_data_clone.len());
                                                 zk_auth_data_clone.clone()
                                             },
-                                            "6ba7b812-9dad-11d1-80b4-00c04fd430c8" => {
+                                            "6ba7b812-9dad-11d1-80b4-00c04fd430c9" => {
                                                 // Quantum routing info
                                                 info!(" Sending quantum routing data");
                                                 vec![0x05, 0x06, 0x07, 0x08]
                                             },
-                                            "6ba7b813-9dad-11d1-80b4-00c04fd430c8" => {
+                                            "6ba7b813-9dad-11d1-80b4-00c04fd430c9" => {
                                                 // Mesh data
                                                 info!(" Sending mesh network data");
                                                 vec![0x09, 0x0A, 0x0B, 0x0C]
                                             },
-                                            "6ba7b814-9dad-11d1-80b4-00c04fd430c8" => {
+                                            "6ba7b814-9dad-11d1-80b4-00c04fd430c9" => {
                                                 // ISP bypass info
                                                 info!(" Sending ISP bypass coordination");
                                                 vec![0x0D, 0x0E, 0x0F, 0x10]
@@ -1729,17 +1729,17 @@ Value=00
                                                         
                                                         //  PROCESS AND FORWARD DATA
                                                         let message = match char_uuid_owned2.as_str() {
-                                                            "6ba7b811-9dad-11d1-80b4-00c04fd430c8" => {
+                                                            "6ba7b811-9dad-11d1-80b4-00c04fd430c9" => {
                                                                 // ZK auth characteristic - try to parse auth response
                                                                 info!(" Received ZK auth data");
                                                                 Some(GattMessage::RawData(char_uuid_owned2.clone(), data.clone()))
                                                             },
-                                                            "6ba7b812-9dad-11d1-80b4-00c04fd430c8" => {
+                                                            "6ba7b812-9dad-11d1-80b4-00c04fd430c9" => {
                                                                 // Quantum routing characteristic
                                                                 info!(" Received quantum routing data");
                                                                 Some(GattMessage::RawData(char_uuid_owned2.clone(), data.clone()))
                                                             },
-                                                            "6ba7b813-9dad-11d1-80b4-00c04fd430c8" => {
+                                                            "6ba7b813-9dad-11d1-80b4-00c04fd430c9" => {
                                                                 // Mesh data transfer characteristic
                                                                 info!(" Processing mesh data transfer");
                                                                 
@@ -1760,7 +1760,7 @@ Value=00
                                                                     }
                                                                 }
                                                             },
-                                                            "6ba7b814-9dad-11d1-80b4-00c04fd430c8" => {
+                                                            "6ba7b814-9dad-11d1-80b4-00c04fd430c9" => {
                                                                 // Mesh coordination characteristic
                                                                 info!(" Received mesh coordination data");
                                                                 Some(GattMessage::RawData(char_uuid_owned2.clone(), data.clone()))
@@ -2635,7 +2635,7 @@ Value=00
     
     #[cfg(target_os = "windows")]
     fn parse_uuid_to_guid(&self, uuid_str: &str) -> Result<windows::core::GUID> {
-        // Parse UUID string (e.g., "6ba7b810-9dad-11d1-80b4-00c04fd430c8") to Windows GUID
+        // Parse UUID string (e.g., "6ba7b810-9dad-11d1-80b4-00c04fd430c9") to Windows GUID
         let cleaned = uuid_str.replace("-", "").replace("{", "").replace("}", "");
         
         if cleaned.len() != 32 {
@@ -2802,7 +2802,7 @@ Value=00
             let _ = manager.discover_services(device_address).await;
             
             // Read the characteristic 
-            let data = manager.read_characteristic(device_address, "6ba7b810-9dad-11d1-80b4-00c04fd430c8", char_uuid).await?;
+            let data = manager.read_characteristic(device_address, "6ba7b810-9dad-11d1-80b4-00c04fd430c9", char_uuid).await?;
             
             info!("✅ macOS: Read {} bytes via Core Bluetooth", data.len());
             Ok(data)
@@ -2854,7 +2854,7 @@ Value=00
             let _ = manager.discover_services(device_address).await;
             
             // Write to the characteristic
-            manager.write_characteristic(device_address, "6ba7b810-9dad-11d1-80b4-00c04fd430c8", char_uuid, data).await?;
+            manager.write_characteristic(device_address, "6ba7b810-9dad-11d1-80b4-00c04fd430c9", char_uuid, data).await?;
             
             info!("✅ macOS: GATT write successful via Core Bluetooth");
             Ok(())
@@ -3249,7 +3249,7 @@ Value=00
         let manager_guard = core_bt.read().await;
         if let Some(ref manager) = *manager_guard {
             // Write to the ZHTP mesh service characteristic
-            let service_uuid = "6ba7b810-9dad-11d1-80b4-00c04fd430c8";
+            let service_uuid = "6ba7b810-9dad-11d1-80b4-00c04fd430c9";
             manager.write_characteristic(peer_address, service_uuid, char_uuid, data).await?;
             
             info!("✅ macOS: Handshake written successfully");
@@ -3278,7 +3278,7 @@ Value=00
         
         // Write handshake data to characteristic
         // Use ZHTP service UUID
-        let service_uuid = "6ba7b810-9dad-11d1-80b4-00c04fd430c8";
+        let service_uuid = "6ba7b810-9dad-11d1-80b4-00c04fd430c9";
         gatt_manager.write_characteristic(peer_address, service_uuid, char_uuid, data).await?;
         
         info!("✅ Windows: Handshake written successfully");
@@ -3396,7 +3396,7 @@ Value=00
             
             info!("✅ Windows: BLE advertising started successfully");
             info!("   Broadcasting as: ZHTP-MESH");
-            info!("   Service UUID: 6ba7b810-9dad-11d1-80b4-00c04fd430c8");
+            info!("   Service UUID: 6ba7b810-9dad-11d1-80b4-00c04fd430c9");
             info!("   Advertisement Data: {} bytes", adv_data.len());
             
             Ok(())
@@ -3485,8 +3485,8 @@ Value=00
             
             let services = services_result.Services()?;
             
-            // Find ZHTP mesh service (6ba7b810-9dad-11d1-80b4-00c04fd430c8)
-            let zhtp_service_uuid = windows::core::GUID::from("6ba7b810-9dad-11d1-80b4-00c04fd430c8");
+            // Find ZHTP mesh service (6ba7b810-9dad-11d1-80b4-00c04fd430c9)
+            let zhtp_service_uuid = windows::core::GUID::from("6ba7b810-9dad-11d1-80b4-00c04fd430c9");
             
             for i in 0..services.Size()? {
                 let service = services.GetAt(i)?;
@@ -3501,8 +3501,8 @@ Value=00
                     
                     let characteristics = chars_result.Characteristics()?;
                     
-                    // Find mesh data characteristic (6ba7b813-9dad-11d1-80b4-00c04fd430c8)
-                    let mesh_data_uuid = windows::core::GUID::from("6ba7b813-9dad-11d1-80b4-00c04fd430c8");
+                    // Find mesh data characteristic (6ba7b813-9dad-11d1-80b4-00c04fd430c9)
+                    let mesh_data_uuid = windows::core::GUID::from("6ba7b813-9dad-11d1-80b4-00c04fd430c9");
                     
                     for j in 0..characteristics.Size()? {
                         let characteristic = characteristics.GetAt(j)?;
@@ -3665,7 +3665,7 @@ Value=00
                 // Start peripheral advertising with the mesh advertisement data
                 manager.start_mesh_advertising(adv_data).await?;
                 info!("✅ macOS: BLE mesh advertising started via Core Bluetooth");
-                info!("   Service UUID: 6ba7b810-9dad-11d1-80b4-00c04fd430c8");
+                info!("   Service UUID: 6ba7b810-9dad-11d1-80b4-00c04fd430c9");
                 info!("   Advertisement data: {} bytes", adv_data.len());
             } else {
                 warn!("❌ macOS: Core Bluetooth manager not initialized");

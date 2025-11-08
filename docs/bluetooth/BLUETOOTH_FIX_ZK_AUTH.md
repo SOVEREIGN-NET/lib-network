@@ -13,7 +13,7 @@ The Bluetooth GATT server was returning **placeholder challenge data** instead o
 
 ```rust
 // BEFORE (Line 1471 in mod.rs)
-"6ba7b811-9dad-11d1-80b4-00c04fd430c8" => {
+"6ba7b811-9dad-11d1-80b4-00c04fd430c9" => {
     info!(" Sending ZK auth challenge");
     vec![0x01, 0x02, 0x03, 0x04] // Placeholder challenge ❌
 }
@@ -130,7 +130,7 @@ characteristic.ReadRequested(&TypedEventHandler::new(
         // ... get request ...
         
         let response_data = match char_uuid_owned.as_str() {
-            "6ba7b811-9dad-11d1-80b4-00c04fd430c8" => {
+            "6ba7b811-9dad-11d1-80b4-00c04fd430c9" => {
                 // ZK Authentication - REAL challenge ✅
                 info!(" Sending REAL ZK auth challenge ({} bytes)", 
                       zk_auth_data_clone.len());
@@ -234,7 +234,7 @@ async fn test_gatt_challenge_generation() {
 
 ### Integration Tests
 1. **BLE Connection Test**: Windows device connects to GATT server
-2. **Challenge Read**: Client reads ZK auth characteristic `6ba7b811-9dad-11d1-80b4-00c04fd430c8`
+2. **Challenge Read**: Client reads ZK auth characteristic `6ba7b811-9dad-11d1-80b4-00c04fd430c9`
 3. **Response Generation**: Client creates valid response using received challenge
 4. **Verification**: Server validates response using `verify_response()`
 5. **Session Established**: Mesh peer added with authentication
