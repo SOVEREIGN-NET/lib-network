@@ -170,6 +170,8 @@ pub struct CoreBluetoothManager {
     /// Notification callbacks
     #[allow(dead_code)]
     notification_handlers: Arc<RwLock<HashMap<String, Box<dyn Fn(Vec<u8>) + Send + Sync>>>>,
+    /// Track which centrals are subscribed to which characteristics
+    subscribed_centrals: Arc<RwLock<HashMap<String, Vec<String>>>>, // characteristic_uuid -> vec of central_ids
     /// Event channel for Core Bluetooth callbacks
     event_sender: tokio::sync::mpsc::UnboundedSender<CoreBluetoothEvent>,
     event_receiver: Arc<Mutex<Option<tokio::sync::mpsc::UnboundedReceiver<CoreBluetoothEvent>>>>,
@@ -296,6 +298,7 @@ impl CoreBluetoothManager {
             services_cache: Arc::new(RwLock::new(HashMap::new())),
             characteristic_values: Arc::new(RwLock::new(HashMap::new())),
             notification_handlers: Arc::new(RwLock::new(HashMap::new())),
+            subscribed_centrals: Arc::new(RwLock::new(HashMap::new())),
             event_sender,
             event_receiver: Arc::new(Mutex::new(Some(event_receiver))),
         })
@@ -405,8 +408,19 @@ impl CoreBluetoothManager {
                                     let response = vec![1u8, 1u8]; // Version 1, Status: Success
                                     
                                     let mgr = manager_ref.clone();
+                                    let char_uuid_for_task = characteristic_uuid.clone();
                                     tokio::spawn(async move {
-                                        if let Err(e) = mgr.send_notification(&characteristic_uuid, &response).await {
+                                        // Wait briefly for subscription to be registered by Core Bluetooth
+                                        // The CCCD write happens slightly before the didSubscribe callback fires
+                                        tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
+                                        
+                                        // Check if any centrals are subscribed
+                                        let subscriptions = mgr.subscribed_centrals.read().await;
+                                        let subscriber_count = subscriptions.get(&char_uuid_for_task).map(|v| v.len()).unwrap_or(0);
+                                        info!("   Subscribers registered: {}", subscriber_count);
+                                        drop(subscriptions);
+                                        
+                                        if let Err(e) = mgr.send_notification(&char_uuid_for_task, &response).await {
                                             warn!("⚠️ Failed to send handshake response notification: {}", e);
                                         } else {
                                             info!("✅ Handshake response notification sent");
@@ -422,6 +436,29 @@ impl CoreBluetoothManager {
                             }
                         } else {
                             debug!("   Data too small for MeshHandshake, treating as raw data");
+                        }
+                    }
+                    CoreBluetoothEvent::CentralSubscribed { central_id, characteristic_uuid } => {
+                        info!("🔔 Central {} subscribed to characteristic {}", central_id, characteristic_uuid);
+                        
+                        // Track subscription
+                        let mut subscriptions = manager_ref.subscribed_centrals.write().await;
+                        subscriptions.entry(characteristic_uuid.clone())
+                            .or_insert_with(Vec::new)
+                            .push(central_id.clone());
+                        
+                        info!("   Total subscribed centrals for {}: {}", characteristic_uuid, subscriptions.get(&characteristic_uuid).map(|v| v.len()).unwrap_or(0));
+                    }
+                    CoreBluetoothEvent::CentralUnsubscribed { central_id, characteristic_uuid } => {
+                        info!("🔕 Central {} unsubscribed from characteristic {}", central_id, characteristic_uuid);
+                        
+                        // Remove subscription
+                        let mut subscriptions = manager_ref.subscribed_centrals.write().await;
+                        if let Some(centrals) = subscriptions.get_mut(&characteristic_uuid) {
+                            centrals.retain(|id| id != &central_id);
+                            if centrals.is_empty() {
+                                subscriptions.remove(&characteristic_uuid);
+                            }
                         }
                     }
                     _ => {}
