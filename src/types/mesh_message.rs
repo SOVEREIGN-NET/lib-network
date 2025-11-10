@@ -204,6 +204,7 @@ pub enum ZhtpMeshMessage {
 
     /// Send blockchain data in chunked format
     BlockchainData {
+        sender: PublicKey,
         request_id: u64,
         chunk_index: u32,
         total_chunks: u32,
@@ -249,22 +250,85 @@ pub enum ZhtpMeshMessage {
         route_quality: f64,
         latency_ms: u32,
     },
+
+    /// Request bootstrap proof for edge node sync (ZK proof + recent headers)
+    /// **EDGE NODES ONLY** - Constrained devices (BLE phones/IoT) use this
+    /// to get cryptographic proof of chain validity without downloading full blocks
+    BootstrapProofRequest {
+        requester: PublicKey,
+        request_id: u64,
+        /// Current block height known to requester
+        current_height: u64,
+    },
+
+    /// Response with ZK bootstrap proof + recent headers
+    /// **EDGE NODES ONLY** - Contains ChainRecursiveProof for O(1) verification
+    /// plus recent headers for the rolling window (no full block data)
+    BootstrapProofResponse {
+        request_id: u64,
+        /// Serialized ChainRecursiveProof (compressed ZK proof)
+        proof_data: Vec<u8>,
+        /// Height that the proof covers up to
+        proof_height: u64,
+        /// Recent block headers ONLY (typically last 500 or less)
+        /// Edge nodes store only headers, not full blocks
+        headers: Vec<Vec<u8>>, // Serialized BlockHeaders
+    },
+
+    /// Request specific block headers (for edge node incremental sync)
+    /// **EDGE NODES ONLY** - For catching up when close to chain tip
+    HeadersRequest {
+        requester: PublicKey,
+        request_id: u64,
+        /// Starting block height
+        start_height: u64,
+        /// Number of headers to fetch
+        count: u32,
+    },
+
+    /// Response with block headers
+    /// **EDGE NODES ONLY** - Headers only, no transaction data
+    HeadersResponse {
+        request_id: u64,
+        /// Serialized block headers (no full blocks)
+        headers: Vec<Vec<u8>>,
+        /// Starting height of the first header
+        start_height: u64,
+    },
 }
 
 /// Types of blockchain data requests
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum BlockchainRequestType {
-    /// Request full blockchain
+    /// Request full blockchain (FULL NODES)
+    /// Returns complete blocks with all transactions via BlockchainData chunks
     FullChain,
-    /// Request blocks after a specific height
+    
+    /// Request blocks after a specific height (FULL NODES)
+    /// Used for catching up to chain tip with complete block data
     BlocksAfter(u64),
-    /// Request specific block by height
+    
+    /// Request specific block by height (FULL NODES)
+    /// Returns single complete block with all transactions
     Block(u64),
-    /// Request transaction by ID
+    
+    /// Request transaction by ID (ANY NODE)
+    /// Returns single transaction data
     Transaction(String),
-    /// Request mempool contents
+    
+    /// Request mempool contents (FULL NODES)
+    /// Returns pending transactions not yet in blocks
     Mempool,
+    
+    /// Request headers only - DEPRECATED, use HeadersRequest message instead
+    /// (EDGE NODES - use HeadersRequest message for better protocol design)
+    HeadersOnly { start_height: u64, count: u32 },
+    
+    /// Request bootstrap proof with headers - DEPRECATED, use BootstrapProofRequest instead
+    /// (EDGE NODES - use BootstrapProofRequest message for better protocol design)
+    BootstrapWithHeaders { current_height: u64 },
 }
+
 
 #[cfg(test)]
 mod tests {

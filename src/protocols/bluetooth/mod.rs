@@ -3369,7 +3369,7 @@ Value=00
         bt_ops.connect_device(peer_address).await?;
         
         // Write handshake data
-        bt_ops.write_characteristic(peer_address, char_uuid, data).await?;
+        bt_ops.write_gatt_characteristic(peer_address, char_uuid, data).await?;
         
         info!("✅ Linux: Handshake written successfully");
         Ok(())

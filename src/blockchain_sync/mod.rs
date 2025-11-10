@@ -3,6 +3,10 @@
 //! Provides peer-to-peer blockchain synchronization using bincode messages
 //! over any mesh protocol (Bluetooth, WiFi Direct, LoRaWAN, etc.)
 
+pub mod edge_sync;
+pub mod blockchain_provider;
+pub mod sync_coordinator;
+
 use anyhow::{Result, anyhow};
 use lib_crypto::PublicKey;
 use crate::types::mesh_message::ZhtpMeshMessage;
@@ -12,6 +16,10 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::{info, debug};
+
+pub use edge_sync::EdgeNodeSyncManager;
+pub use blockchain_provider::{BlockchainProvider, NullBlockchainProvider};
+pub use sync_coordinator::{SyncCoordinator, PeerSyncState, SyncStats, SyncType};
 
 /// Chunk sizes based on protocol capabilities
 pub const BLE_CHUNK_SIZE: usize = 200;       // Conservative for BLE GATT (247-byte MTU)
@@ -86,21 +94,23 @@ impl BlockchainSyncManager {
 
     /// Chunk blockchain data with protocol-specific chunk size
     pub fn chunk_blockchain_data_for_protocol(
+        sender: PublicKey,
         request_id: u64,
         data: Vec<u8>,
         protocol: &NetworkProtocol,
     ) -> Result<Vec<ZhtpMeshMessage>> {
         let chunk_size = get_chunk_size_for_protocol(protocol);
-        Self::chunk_blockchain_data_with_size(request_id, data, chunk_size)
+        Self::chunk_blockchain_data_with_size(sender, request_id, data, chunk_size)
     }
 
     /// Chunk blockchain data for mesh transmission (legacy - uses BLE size)
-    pub fn chunk_blockchain_data(request_id: u64, data: Vec<u8>) -> Result<Vec<ZhtpMeshMessage>> {
-        Self::chunk_blockchain_data_with_size(request_id, data, BLE_CHUNK_SIZE)
+    pub fn chunk_blockchain_data(sender: PublicKey, request_id: u64, data: Vec<u8>) -> Result<Vec<ZhtpMeshMessage>> {
+        Self::chunk_blockchain_data_with_size(sender, request_id, data, BLE_CHUNK_SIZE)
     }
 
     /// Chunk blockchain data with specific chunk size
     fn chunk_blockchain_data_with_size(
+        sender: PublicKey,
         request_id: u64,
         data: Vec<u8>,
         chunk_size: usize,
@@ -122,6 +132,7 @@ impl BlockchainSyncManager {
         let mut messages = Vec::new();
         for (index, chunk) in chunks.iter().enumerate() {
             let message = ZhtpMeshMessage::BlockchainData {
+                sender: sender.clone(),
                 request_id,
                 chunk_index: index as u32,
                 total_chunks,
@@ -224,14 +235,17 @@ mod tests {
         // Create test data
         let test_data = vec![0u8; 500]; // 500 bytes should create 3 chunks
         
+        // Create test sender
+        let (sender_pubkey, _, _) = lib_crypto::generate_keypair();
+        
         // Chunk the data
-        let chunks = BlockchainSyncManager::chunk_blockchain_data(request_id, test_data.clone()).unwrap();
+        let chunks = BlockchainSyncManager::chunk_blockchain_data(sender_pubkey, request_id, test_data.clone()).unwrap();
         
         assert_eq!(chunks.len(), 3); // 500 bytes / 200 = 3 chunks
 
         // Simulate receiving chunks
         for message in chunks {
-            if let ZhtpMeshMessage::BlockchainData { request_id, chunk_index, total_chunks, data, complete_data_hash } = message {
+            if let ZhtpMeshMessage::BlockchainData { sender: _, request_id, chunk_index, total_chunks, data, complete_data_hash } = message {
                 let result = sync_manager.add_chunk(request_id, chunk_index, total_chunks, data, complete_data_hash).await.unwrap();
                 
                 // Last chunk should return complete data

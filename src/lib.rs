@@ -18,7 +18,7 @@ pub use crate::mesh::statistics::MeshProtocolStats;
 pub use crate::types::*;
 pub use crate::discovery::*;
 pub use crate::relays::*;
-pub use crate::blockchain_sync::BlockchainSyncManager;
+pub use crate::blockchain_sync::{BlockchainSyncManager, EdgeNodeSyncManager};
 
 
 // Native binary DHT protocol with lib-storage backend

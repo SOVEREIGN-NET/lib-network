@@ -29,8 +29,12 @@ pub struct MeshMessageHandler {
     pub message_router: Option<Arc<RwLock<crate::routing::message_routing::MeshMessageRouter>>>,
     /// Node ID for this handler (Phase 2)
     pub node_id: Option<PublicKey>,
-    /// Blockchain sync manager for chunk reassembly
+    /// Blockchain sync manager for chunk reassembly (full nodes)
     pub sync_manager: Arc<crate::blockchain_sync::BlockchainSyncManager>,
+    /// Edge node sync manager (optional - only for constrained devices)
+    pub edge_sync_manager: Option<Arc<crate::blockchain_sync::EdgeNodeSyncManager>>,
+    /// Blockchain provider for accessing chain data (injected by application layer)
+    pub blockchain_provider: Arc<dyn crate::blockchain_sync::BlockchainProvider>,
 }
 
 impl MeshMessageHandler {
@@ -47,6 +51,8 @@ impl MeshMessageHandler {
             message_router: None,
             node_id: None,
             sync_manager: Arc::new(crate::blockchain_sync::BlockchainSyncManager::new()),
+            edge_sync_manager: None, // Only set for edge nodes
+            blockchain_provider: Arc::new(crate::blockchain_sync::NullBlockchainProvider),
         }
     }
     
@@ -58,6 +64,16 @@ impl MeshMessageHandler {
     /// Set node ID (Phase 2)
     pub fn set_node_id(&mut self, node_id: PublicKey) {
         self.node_id = Some(node_id);
+    }
+    
+    /// Set edge node sync manager (for constrained devices)
+    pub fn set_edge_sync_manager(&mut self, edge_sync: Arc<crate::blockchain_sync::EdgeNodeSyncManager>) {
+        self.edge_sync_manager = Some(edge_sync);
+    }
+    
+    /// Set blockchain provider (injected by application layer)
+    pub fn set_blockchain_provider(&mut self, provider: Arc<dyn crate::blockchain_sync::BlockchainProvider>) {
+        self.blockchain_provider = provider;
     }
     
     /// Handle incoming mesh message
@@ -99,8 +115,8 @@ impl MeshMessageHandler {
             ZhtpMeshMessage::BlockchainRequest { requester, request_id, request_type } => {
                 self.handle_blockchain_request(requester, request_id, request_type).await?;
             },
-            ZhtpMeshMessage::BlockchainData { request_id, chunk_index, total_chunks, data, complete_data_hash } => {
-                self.handle_blockchain_data(request_id, chunk_index, total_chunks, data, complete_data_hash).await?;
+            ZhtpMeshMessage::BlockchainData { sender, request_id, chunk_index, total_chunks, data, complete_data_hash } => {
+                self.handle_blockchain_data(&sender, request_id, chunk_index, total_chunks, data, complete_data_hash).await?;
             },
             ZhtpMeshMessage::NewBlock { block, sender, height, timestamp } => {
                 self.handle_new_block(block, sender, height, timestamp).await?;
@@ -116,6 +132,18 @@ impl MeshMessageHandler {
                 // TODO: Implement route response handling
                 tracing::info!("Received route response for probe {} with quality {} and latency {}ms", 
                     probe_id, route_quality, latency_ms);
+            },
+            ZhtpMeshMessage::BootstrapProofRequest { requester, request_id, current_height } => {
+                self.handle_bootstrap_proof_request(requester, request_id, current_height).await?;
+            },
+            ZhtpMeshMessage::BootstrapProofResponse { request_id, proof_data, proof_height, headers } => {
+                self.handle_bootstrap_proof_response(request_id, proof_data, proof_height, headers).await?;
+            },
+            ZhtpMeshMessage::HeadersRequest { requester, request_id, start_height, count } => {
+                self.handle_headers_request(requester, request_id, start_height, count).await?;
+            },
+            ZhtpMeshMessage::HeadersResponse { request_id, headers, start_height } => {
+                self.handle_headers_response(request_id, headers, start_height).await?;
             },
         }
         Ok(())
@@ -518,6 +546,7 @@ impl MeshMessageHandler {
     /// Chunk blockchain data for protocol (NEW - Phase 3)
     fn chunk_blockchain_data(
         &self,
+        sender: PublicKey,
         request_id: u64,
         data: Vec<u8>,
         protocol: &NetworkProtocol,
@@ -546,6 +575,7 @@ impl MeshMessageHandler {
         // Create ZhtpMeshMessage for each chunk
         let messages: Vec<ZhtpMeshMessage> = chunks.into_iter().enumerate().map(|(i, chunk)| {
             ZhtpMeshMessage::BlockchainData {
+                sender: sender.clone(),
                 request_id,
                 chunk_index: i as u32,
                 total_chunks,
@@ -560,6 +590,7 @@ impl MeshMessageHandler {
     /// Handle incoming blockchain data chunks
     pub async fn handle_blockchain_data(
         &self,
+        _sender: &PublicKey,
         request_id: u64,
         chunk_index: u32,
         total_chunks: u32,
@@ -627,6 +658,261 @@ impl MeshMessageHandler {
         
         // TODO: Implement blockchain integration at application layer
         warn!("⚠️ Blockchain integration not yet implemented (circular dependency issue)");
+        
+        Ok(())
+    }
+
+    /// Handle bootstrap proof request from edge node
+    /// 
+    /// This is called on a FULL VALIDATOR NODE when an edge node requests
+    /// a chain bootstrap proof. The validator generates a ChainRecursiveProof
+    /// that proves the entire blockchain state up to the current height.
+    /// 
+    /// Edge nodes are computationally constrained (BLE phones, IoT devices)
+    /// and cannot generate proofs themselves - they only verify proofs.
+    pub async fn handle_bootstrap_proof_request(
+        &self,
+        requester: PublicKey,
+        request_id: u64,
+        current_height: u64,
+    ) -> Result<()> {
+        info!("🔐 Bootstrap proof request from edge node {:?} at height {}", 
+              hex::encode(&requester.key_id[0..4]), 
+              current_height);
+        
+        // Check if blockchain is available
+        if !self.blockchain_provider.is_available().await {
+            warn!("⚠️ Blockchain not available - cannot generate bootstrap proof");
+            return Err(anyhow!("Blockchain not available"));
+        }
+        
+        // Get current blockchain height
+        let chain_tip_height = self.blockchain_provider.get_current_height().await?;
+        info!("📊 Current chain height: {}, edge node at: {}", chain_tip_height, current_height);
+        
+        // Get the recursive chain proof (cached or generated)
+        let chain_proof = self.blockchain_provider.get_chain_proof(chain_tip_height).await?;
+        info!("✅ Got chain proof for height {}", chain_proof.chain_tip_height);
+        
+        // Get recent headers for edge node (last 500 blocks or less)
+        let headers_count = std::cmp::min(500, chain_tip_height.saturating_sub(current_height));
+        let start_height = chain_tip_height.saturating_sub(headers_count) + 1;
+        
+        let headers = self.blockchain_provider.get_headers(start_height, headers_count).await?;
+        info!("📦 Fetched {} headers starting from height {}", headers.len(), start_height);
+        
+        // Serialize headers
+        let serialized_headers: Vec<Vec<u8>> = headers.iter()
+            .map(|h| bincode::serialize(h))
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| anyhow!("Failed to serialize headers: {}", e))?;
+        
+        // Serialize proof
+        let proof_data = bincode::serialize(&chain_proof.recursive_proof)
+            .map_err(|e| anyhow!("Failed to serialize proof: {}", e))?;
+        
+        // Send response
+        let response_message = ZhtpMeshMessage::BootstrapProofResponse {
+            request_id,
+            proof_data,
+            proof_height: chain_proof.chain_tip_height,
+            headers: serialized_headers,
+        };
+        
+        // Send via message router if available
+        if let Some(router) = &self.message_router {
+            let router_lock = router.read().await;
+            if let Some(sender_node_id) = &self.node_id {
+                router_lock.route_message(response_message, requester, sender_node_id.clone()).await?;
+                info!("✅ Bootstrap proof response sent to edge node");
+            } else {
+                warn!("⚠️ Node ID not set - cannot send response");
+            }
+        } else {
+            warn!("⚠️ Message router not available - cannot send response");
+        }
+        
+        Ok(())
+    }
+
+    /// Handle bootstrap proof response
+    /// 
+    /// This is called on an EDGE NODE when it receives a ChainRecursiveProof
+    /// from a validator. The edge node performs lightweight verification
+    /// (O(1) time regardless of chain length!) and then stores headers.
+    /// 
+    /// Edge nodes have limited computation/storage, so they:
+    /// 1. Verify the recursive proof (fast!)
+    /// 2. Store rolling window of headers (100-500 blocks)
+    /// 3. Track UTXOs for their addresses
+    pub async fn handle_bootstrap_proof_response(
+        &self,
+        request_id: u64,
+        proof_data: Vec<u8>,
+        proof_height: u64,
+        headers: Vec<Vec<u8>>,
+    ) -> Result<()> {
+        info!("🔐 Bootstrap proof response: {} headers at height {}", 
+              headers.len(), 
+              proof_height);
+        
+        // Check if we have an edge node sync manager
+        let edge_sync = match &self.edge_sync_manager {
+            Some(sync) => sync,
+            None => {
+                warn!("⚠️ Edge sync manager not configured - ignoring bootstrap proof");
+                return Ok(());
+            }
+        };
+        
+        // Deserialize the chain proof
+        use lib_proofs::{RecursiveProofAggregator, ChainRecursiveProof};
+        let chain_proof: ChainRecursiveProof = bincode::deserialize(&proof_data)
+            .map_err(|e| anyhow!("Failed to deserialize chain proof: {}", e))?;
+        
+        info!("📊 Chain proof: tip={}, genesis={}, txs={}", 
+              chain_proof.chain_tip_height, 
+              chain_proof.genesis_height,
+              chain_proof.total_transaction_count);
+        
+        // Verify the recursive proof (O(1) verification!)
+        let aggregator = RecursiveProofAggregator::new()?;
+        let is_valid = aggregator.verify_recursive_chain_proof(&chain_proof)?;
+        
+        if !is_valid {
+            return Err(anyhow!("❌ Invalid bootstrap proof from validator!"));
+        }
+        
+        info!("✅ Bootstrap proof VALID! Chain proven up to height {}", chain_proof.chain_tip_height);
+        
+        // Deserialize headers
+        let block_headers: Vec<lib_blockchain::block::BlockHeader> = headers.iter()
+            .map(|h| bincode::deserialize(h))
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| anyhow!("Failed to deserialize headers: {}", e))?;
+        
+        // Process headers through edge node sync manager
+        edge_sync.process_bootstrap_proof(proof_data, proof_height, block_headers).await?;
+        
+        info!("✅ Edge node bootstrapped to height {} with {} headers", 
+              proof_height, 
+              headers.len());
+        
+        // Log storage usage
+        let storage_bytes = edge_sync.estimated_storage_bytes().await;
+        info!("💾 Edge node storage: ~{} KB", storage_bytes / 1024);
+        
+        Ok(())
+    }
+
+    /// Handle headers request from edge node
+    /// 
+    /// Edge nodes request specific block headers when they're close to the
+    /// chain tip (<500 blocks behind) and don't need a full bootstrap proof.
+    /// This is more efficient for incremental sync.
+    pub async fn handle_headers_request(
+        &self,
+        requester: PublicKey,
+        request_id: u64,
+        start_height: u64,
+        count: u32,
+    ) -> Result<()> {
+        info!("📦 Headers request from {:?}: start={}, count={}", 
+              hex::encode(&requester.key_id[0..4]), 
+              start_height, 
+              count);
+        
+        // Check if blockchain is available
+        if !self.blockchain_provider.is_available().await {
+            warn!("⚠️ Blockchain not available - cannot fetch headers");
+            return Err(anyhow!("Blockchain not available"));
+        }
+        
+        // Limit count to prevent abuse (max 1000 headers per request)
+        let safe_count = std::cmp::min(count as u64, 1000);
+        
+        // Fetch headers from blockchain
+        let headers = self.blockchain_provider.get_headers(start_height, safe_count).await?;
+        info!("✅ Fetched {} headers starting at height {}", headers.len(), start_height);
+        
+        // Serialize headers
+        let serialized_headers: Vec<Vec<u8>> = headers.iter()
+            .map(|h| bincode::serialize(h))
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| anyhow!("Failed to serialize headers: {}", e))?;
+        
+        // Send response
+        let response_message = ZhtpMeshMessage::HeadersResponse {
+            request_id,
+            headers: serialized_headers,
+            start_height,
+        };
+        
+        // Send via message router if available
+        if let Some(router) = &self.message_router {
+            let router_lock = router.read().await;
+            if let Some(sender_node_id) = &self.node_id {
+                router_lock.route_message(response_message, requester, sender_node_id.clone()).await?;
+                info!("📤 Sent {} headers to edge node", headers.len());
+            } else {
+                warn!("⚠️ Node ID not set - cannot send response");
+            }
+        } else {
+            warn!("⚠️ Message router not available - cannot send response");
+        }
+        
+        Ok(())
+    }
+
+    /// Handle headers response
+    /// 
+    /// Edge node receives block headers from validator for incremental sync.
+    /// Headers are stored in a rolling window (100-500 blocks) and used to:
+    /// 1. Verify merkle proofs for transactions
+    /// 2. Track UTXO states for owned addresses
+    /// 3. Validate incoming payments instantly
+    pub async fn handle_headers_response(
+        &self,
+        request_id: u64,
+        headers: Vec<Vec<u8>>,
+        start_height: u64,
+    ) -> Result<()> {
+        info!("📦 Headers response: {} headers from height {}", 
+              headers.len(), 
+              start_height);
+        
+        // Check if we have an edge node sync manager
+        let edge_sync = match &self.edge_sync_manager {
+            Some(sync) => sync,
+            None => {
+                warn!("⚠️ Edge sync manager not configured - ignoring headers");
+                return Ok(());
+            }
+        };
+        
+        // Deserialize headers
+        let block_headers: Vec<lib_blockchain::block::BlockHeader> = headers.iter()
+            .map(|h| bincode::deserialize(h))
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| anyhow!("Failed to deserialize headers: {}", e))?;
+        
+        // Process headers through edge node state
+        edge_sync.process_headers(block_headers).await?;
+        
+        let current_height = edge_sync.current_height().await;
+        info!("✅ Edge node synced {} headers, now at height {}", 
+              headers.len(), 
+              current_height);
+        
+        // Check if we need more headers (if blockchain provider is available)
+        if self.blockchain_provider.is_available().await {
+            if let Ok(network_height) = self.blockchain_provider.get_current_height().await {
+                if network_height.saturating_sub(current_height) > 100 {
+                    info!("🔄 Still {} blocks behind, may need more headers", 
+                          network_height - current_height);
+                }
+            }
+        }
         
         Ok(())
     }

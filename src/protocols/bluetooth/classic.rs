@@ -2323,8 +2323,8 @@ impl BluetoothClassicProtocol {
                 ZhtpMeshMessage::BlockchainRequest { requester, request_id, request_type } => {
                     handler_guard.handle_blockchain_request(requester, request_id, request_type).await?;
                 }
-                ZhtpMeshMessage::BlockchainData { request_id, chunk_index, total_chunks, data, complete_data_hash } => {
-                    handler_guard.handle_blockchain_data(request_id, chunk_index, total_chunks, data, complete_data_hash).await?;
+                ZhtpMeshMessage::BlockchainData { sender, request_id, chunk_index, total_chunks, data, complete_data_hash } => {
+                    handler_guard.handle_blockchain_data(&sender, request_id, chunk_index, total_chunks, data, complete_data_hash).await?;
                 }
                 ZhtpMeshMessage::NewBlock { .. } => {
                     info!("NewBlock message received - handler not yet implemented");
