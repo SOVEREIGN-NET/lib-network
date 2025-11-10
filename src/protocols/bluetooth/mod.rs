@@ -210,6 +210,11 @@ impl BluetoothMeshProtocol {
         core_bt_manager.initialize_central_manager().await?;
         core_bt_manager.initialize_peripheral_manager().await?;
         
+        // Forward gatt_message_tx channel to CoreBluetoothManager if available
+        if let Some(tx) = self.gatt_message_tx.read().await.as_ref() {
+            core_bt_manager.set_gatt_message_channel(tx.clone()).await;
+        }
+        
         // Start the event processing loop to handle delegate callbacks
         info!("🔄 Starting Core Bluetooth event loop...");
         core_bt_manager.start_event_loop().await?;
@@ -1055,9 +1060,29 @@ impl BluetoothMeshProtocol {
         
         #[cfg(target_os = "macos")]
         {
-                        info!(" macOS: Transmitted via mesh networking to {}", address);
+            self.macos_transmit_gatt(data, address).await?;
         }
         
+        Ok(())
+    }
+    
+    /// macOS GATT transmission
+    #[cfg(target_os = "macos")]
+    async fn macos_transmit_gatt(&self, data: &[u8], address: &str) -> Result<()> {
+        info!(" macOS: Transmitting {} bytes via GATT to {}", data.len(), address);
+        
+        let core_bt = self.core_bluetooth.read().await;
+        let manager = core_bt.as_ref()
+            .ok_or_else(|| anyhow::anyhow!("Core Bluetooth not initialized"))?;
+        
+        // ZHTP mesh service and characteristic UUIDs
+        let service_uuid = "6ba7b810-9dad-11d1-80b4-00c04fd430ca";
+        let mesh_data_char = "6ba7b813-9dad-11d1-80b4-00c04fd430ca";
+        
+        // Write to characteristic
+        manager.write_characteristic(address, service_uuid, mesh_data_char, data).await?;
+        
+        info!("✅ macOS: Successfully transmitted {} bytes to {}", data.len(), address);
         Ok(())
     }
     

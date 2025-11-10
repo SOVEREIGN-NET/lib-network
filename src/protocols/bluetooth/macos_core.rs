@@ -175,6 +175,8 @@ pub struct CoreBluetoothManager {
     /// Event channel for Core Bluetooth callbacks
     event_sender: tokio::sync::mpsc::UnboundedSender<CoreBluetoothEvent>,
     event_receiver: Arc<Mutex<Option<tokio::sync::mpsc::UnboundedReceiver<CoreBluetoothEvent>>>>,
+    /// GATT message channel for forwarding to unified server
+    gatt_message_tx: Arc<RwLock<Option<tokio::sync::mpsc::UnboundedSender<crate::protocols::bluetooth::GattMessage>>>>,
 }
 
 #[cfg(target_os = "macos")]
@@ -301,7 +303,14 @@ impl CoreBluetoothManager {
             subscribed_centrals: Arc::new(RwLock::new(HashMap::new())),
             event_sender,
             event_receiver: Arc::new(Mutex::new(Some(event_receiver))),
+            gatt_message_tx: Arc::new(RwLock::new(None)),
         })
+    }
+    
+    /// Set GATT message channel for forwarding GATT writes to unified server
+    pub async fn set_gatt_message_channel(&self, tx: tokio::sync::mpsc::UnboundedSender<crate::protocols::bluetooth::GattMessage>) {
+        *self.gatt_message_tx.write().await = Some(tx);
+        info!("✅ GATT message channel connected to CoreBluetoothManager");
     }
     
     /// Start event processing loop (must be called after initialization)
@@ -401,6 +410,19 @@ impl CoreBluetoothManager {
                                     info!("   Protocols: {:?}", handshake.protocols);
                                     info!("   Discovery: {} (1=bluetooth)", handshake.discovered_via);
                                     
+                                    // Forward MeshHandshake to unified server via GATT message channel
+                                    let gatt_tx = manager_ref.gatt_message_tx.clone();
+                                    let value_clone = value.clone();
+                                    tokio::spawn(async move {
+                                        if let Some(tx) = gatt_tx.read().await.as_ref() {
+                                            if let Err(e) = tx.send(crate::protocols::bluetooth::GattMessage::MeshHandshake(value_clone)) {
+                                                warn!("Failed to forward MeshHandshake to unified server: {}", e);
+                                            } else {
+                                                info!("📨 MeshHandshake forwarded to unified server for peer discovery");
+                                            }
+                                        }
+                                    });
+                                    
                                     // Send handshake response via notification
                                     info!("📤 Sending handshake acknowledgment via GATT notification");
                                     
@@ -444,12 +466,38 @@ impl CoreBluetoothManager {
                                     info!("✅ MeshHandshake successfully processed from peer {}", handshake.node_id);
                                 }
                                 Err(e) => {
-                                    warn!("⚠️ Failed to deserialize MeshHandshake: {} ({} bytes received)", e, value.len());
-                                    debug!("   Data: {:?}", &value[..std::cmp::min(40, value.len())]);
+                                    warn!("⚠️ Not a MeshHandshake: {} ({} bytes received)", e, value.len());
+                                    debug!("   Forwarding raw data to unified server for ZhtpMeshMessage parsing");
+                                    
+                                    // Forward non-handshake messages (HeadersRequest, HeadersResponse, etc.) to unified server
+                                    let gatt_tx = manager_ref.gatt_message_tx.clone();
+                                    let value_clone = value.clone();
+                                    tokio::spawn(async move {
+                                        if let Some(tx) = gatt_tx.read().await.as_ref() {
+                                            if let Err(e) = tx.send(crate::protocols::bluetooth::GattMessage::MeshHandshake(value_clone)) {
+                                                warn!("Failed to forward GATT message to unified server: {}", e);
+                                            } else {
+                                                info!("📨 GATT message forwarded to unified server");
+                                            }
+                                        }
+                                    });
                                 }
                             }
                         } else {
                             debug!("   Data too small for MeshHandshake, treating as raw data");
+                            
+                            // Forward small messages too (could be ZhtpMeshMessage)
+                            let gatt_tx = manager_ref.gatt_message_tx.clone();
+                            let value_clone = value.clone();
+                            tokio::spawn(async move {
+                                if let Some(tx) = gatt_tx.read().await.as_ref() {
+                                    if let Err(e) = tx.send(crate::protocols::bluetooth::GattMessage::MeshHandshake(value_clone)) {
+                                        warn!("Failed to forward small GATT message to unified server: {}", e);
+                                    } else {
+                                        debug!("📨 Small GATT message forwarded to unified server");
+                                    }
+                                }
+                            });
                         }
                     }
                     CoreBluetoothEvent::CentralSubscribed { central_id, characteristic_uuid } => {
