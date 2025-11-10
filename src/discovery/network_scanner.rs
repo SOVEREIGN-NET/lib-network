@@ -33,7 +33,7 @@ pub struct ScanResult {
 }
 
 /// Start background network scanner
-pub async fn start_network_scanner(_mesh_port: u16, local_node_id: uuid::Uuid) -> Result<()> {
+pub async fn start_network_scanner(_mesh_port: u16, local_node_id: uuid::Uuid, local_public_key: lib_crypto::PublicKey) -> Result<()> {
     info!(" Starting automatic network scanner for ZHTP nodes...");
     info!(" Local node ID: {}", local_node_id);
     
@@ -84,7 +84,7 @@ pub async fn start_network_scanner(_mesh_port: u16, local_node_id: uuid::Uuid) -
                                     node.ip, node.port, node.response_time_ms);
                                 
                                 // Attempt automatic connection with our persistent node ID
-                                if let Err(e) = attempt_auto_connect(node, local_node_id).await {
+                                if let Err(e) = attempt_auto_connect(node, local_node_id, &local_public_key).await {
                                     debug!("Auto-connect failed for {}:{}: {}", node.ip, node.port, e);
                                 }
                             }
@@ -314,7 +314,7 @@ fn extract_node_id(response: &str) -> Option<String> {
 }
 
 /// Attempt automatic connection to discovered node
-async fn attempt_auto_connect(node: &ScanResult, local_node_id: uuid::Uuid) -> Result<()> {
+async fn attempt_auto_connect(node: &ScanResult, local_node_id: uuid::Uuid, local_public_key: &lib_crypto::PublicKey) -> Result<()> {
     use crate::discovery::local_network::MeshHandshake;
     use tokio::io::AsyncWriteExt;
     
@@ -334,6 +334,7 @@ async fn attempt_auto_connect(node: &ScanResult, local_node_id: uuid::Uuid) -> R
     let handshake = MeshHandshake {
         node_id: local_node_id,  //  Using persistent node ID from server
         version: 1,
+        public_key: local_public_key.clone(),
         mesh_port: 9333,
         protocols: vec!["zhtp".to_string(), "dht".to_string()],
         discovered_via: 4, // 4 = network scan

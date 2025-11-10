@@ -674,8 +674,12 @@ impl ZhtpMeshServer {
         
         let node_id = self.mesh_node.read().await.node_id;
         
+        // Create temporary PublicKey from node_id for Bluetooth initialization
+        // Note: In production, the main zhtp application provides the real PublicKey
+        let temp_public_key = lib_crypto::PublicKey::new(node_id.to_vec());
+        
         // Initialize Bluetooth LE mesh protocol
-        let bluetooth_protocol = BluetoothMeshProtocol::new(node_id)?;
+        let bluetooth_protocol = BluetoothMeshProtocol::new(node_id, temp_public_key)?;
         let bluetooth_arc = Arc::new(RwLock::new(bluetooth_protocol));
         
         // Start discovery
@@ -878,10 +882,14 @@ impl ZhtpMeshServer {
         let mesh_connections = self.mesh_connections.clone();
         let server_id = self.server_id.clone();
         
+        // Create temporary PublicKey for discovery (library code doesn't have full identity)
+        let node_id = self.mesh_node.read().await.node_id;
+        let temp_public_key_for_discovery = lib_crypto::PublicKey::new(node_id.to_vec());
+        
         // Start continuous multicast discovery  
         let discovery_server_id = server_id.clone();
         let discovery_task = tokio::spawn(async move {
-            if let Err(e) = crate::discovery::local_network::start_local_discovery(discovery_server_id, 33444).await {
+            if let Err(e) = crate::discovery::local_network::start_local_discovery(discovery_server_id, 33444, temp_public_key_for_discovery).await {
                 error!("Failed to start local discovery: {}", e);
             }
         });

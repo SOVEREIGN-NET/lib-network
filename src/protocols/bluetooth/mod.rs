@@ -84,6 +84,8 @@ pub use self::device::BleConnection as BluetoothConnection;
 pub struct BluetoothMeshProtocol {
     /// Node ID for this mesh node
     pub node_id: [u8; 32],
+    /// Cryptographic public key for peer authentication
+    pub public_key: lib_crypto::PublicKey,
     /// Bluetooth MAC address
     pub device_id: [u8; 6],
     /// Advertising interval in milliseconds
@@ -123,11 +125,12 @@ pub struct BluetoothMeshProtocol {
 
 impl BluetoothMeshProtocol {
     /// Create new Bluetooth LE mesh protocol
-    pub fn new(node_id: [u8; 32]) -> Result<Self> {
+    pub fn new(node_id: [u8; 32], public_key: lib_crypto::PublicKey) -> Result<Self> {
         let device_id = get_system_bluetooth_mac()?;
         
         Ok(BluetoothMeshProtocol {
             node_id,
+            public_key,
             device_id,
             advertising_interval: 100, // 100ms - standard for discovery
             connection_interval: 7,    // 7.5ms - minimum allowed by BLE spec for max throughput
@@ -677,6 +680,7 @@ impl BluetoothMeshProtocol {
         let connections = self.current_connections.clone();
         let device_id = self.device_id;
         let node_id = self.node_id;
+        let public_key = self.public_key.clone();
         
         #[cfg(target_os = "macos")]
         let core_bt = self.core_bluetooth.clone();
@@ -718,10 +722,10 @@ impl BluetoothMeshProtocol {
                                 drop(conns); // Release lock before async operations
                                 
                                 #[cfg(target_os = "macos")]
-                                let handshake_result = Self::send_mesh_handshake_to_peer(&peer.address, node_id, &core_bt).await;
+                                let handshake_result = Self::send_mesh_handshake_to_peer(&peer.address, node_id, &public_key, &core_bt).await;
                                 
                                 #[cfg(not(target_os = "macos"))]
-                                let handshake_result = Self::send_mesh_handshake_to_peer(&peer.address, node_id).await;
+                                let handshake_result = Self::send_mesh_handshake_to_peer(&peer.address, node_id, &public_key).await;
                                 
                                 if let Err(e) = handshake_result {
                                     warn!("Failed to send handshake to {}: {}", peer.address, e);
@@ -748,6 +752,7 @@ impl BluetoothMeshProtocol {
     async fn send_mesh_handshake_to_peer(
         peer_address: &str, 
         node_id: [u8; 32],
+        public_key: &lib_crypto::PublicKey,
         core_bt: &Arc<RwLock<Option<Arc<CoreBluetoothManager>>>>
     ) -> Result<()> {
         use crate::discovery::local_network::{MeshHandshake, HandshakeCapabilities};
@@ -761,6 +766,7 @@ impl BluetoothMeshProtocol {
         let handshake = MeshHandshake {
             version: 1,
             node_id: Uuid::from_bytes(uuid_bytes),
+            public_key: public_key.clone(),
             mesh_port: 9333,
             protocols: vec![
                 "bluetooth".to_string(),
@@ -797,7 +803,8 @@ impl BluetoothMeshProtocol {
     #[cfg(not(target_os = "macos"))]
     async fn send_mesh_handshake_to_peer(
         peer_address: &str, 
-        node_id: [u8; 32]
+        node_id: [u8; 32],
+        public_key: &lib_crypto::PublicKey
     ) -> Result<()> {
         use crate::discovery::local_network::{MeshHandshake, HandshakeCapabilities};
         use uuid::Uuid;
@@ -810,6 +817,7 @@ impl BluetoothMeshProtocol {
         let handshake = MeshHandshake {
             version: 1,
             node_id: Uuid::from_bytes(uuid_bytes),
+            public_key: public_key.clone(),
             mesh_port: 9333,
             protocols: vec![
                 "bluetooth".to_string(),
@@ -3369,7 +3377,7 @@ Value=00
         bt_ops.connect_device(peer_address).await?;
         
         // Write handshake data
-        bt_ops.write_gatt_characteristic(peer_address, char_uuid, data).await?;
+        bt_ops.write_characteristic(peer_address, char_uuid, data).await?;
         
         info!("✅ Linux: Handshake written successfully");
         Ok(())

@@ -30,6 +30,7 @@ pub struct NodeAnnouncement {
 pub struct MeshHandshake {
     pub version: u8,
     pub node_id: Uuid,
+    pub public_key: lib_crypto::PublicKey, // Actual cryptographic public key for peer identification
     pub mesh_port: u16,
     pub protocols: Vec<String>,
     pub discovered_via: u8, // 0=multicast, 1=bluetooth, 2=wifi_direct, 3=manual
@@ -48,7 +49,7 @@ pub struct HandshakeCapabilities {
 }
 
 /// Start local network discovery service
-pub async fn start_local_discovery(node_id: Uuid, mesh_port: u16) -> Result<()> {
+pub async fn start_local_discovery(node_id: Uuid, mesh_port: u16, public_key: lib_crypto::PublicKey) -> Result<()> {
     info!("🔷 Starting UDP Multicast discovery...");
     info!("   Multicast address: {}:{}", ZHTP_MULTICAST_ADDR, ZHTP_MULTICAST_PORT);
     info!("   Node ID: {}", node_id);
@@ -64,8 +65,9 @@ pub async fn start_local_discovery(node_id: Uuid, mesh_port: u16) -> Result<()> 
     
     // Start discovery listener
     let listen_node_id = node_id;
+    let listen_public_key = public_key.clone();
     tokio::spawn(async move {
-        if let Err(e) = listen_for_announcements(listen_node_id).await {
+        if let Err(e) = listen_for_announcements(listen_node_id, listen_public_key).await {
             error!("❌ Local discovery listener failed: {}", e);
         }
     });
@@ -126,7 +128,7 @@ async fn broadcast_announcements(node_id: Uuid, mesh_port: u16) -> Result<()> {
 }
 
 /// Listen for other ZHTP nodes on local network
-async fn listen_for_announcements(our_node_id: Uuid) -> Result<()> {
+async fn listen_for_announcements(our_node_id: Uuid, our_public_key: lib_crypto::PublicKey) -> Result<()> {
     let socket = UdpSocket::bind(format!("{}:{}", "0.0.0.0", ZHTP_MULTICAST_PORT)).await?;
     
     // Join multicast group
@@ -168,7 +170,7 @@ async fn listen_for_announcements(our_node_id: Uuid) -> Result<()> {
                             info!("   Attempting connection...");
                             
                             // TODO: Add this peer to our connections
-                            attempt_connect_to_discovered_peer(&announcement).await;
+                            attempt_connect_to_discovered_peer(&announcement, &our_public_key).await;
                         }
                     },
                     Err(e) => {
@@ -185,7 +187,7 @@ async fn listen_for_announcements(our_node_id: Uuid) -> Result<()> {
 }
 
 /// Attempt to connect to a newly discovered peer
-async fn attempt_connect_to_discovered_peer(announcement: &NodeAnnouncement) {
+async fn attempt_connect_to_discovered_peer(announcement: &NodeAnnouncement, our_public_key: &lib_crypto::PublicKey) {
     let peer_addr = format!("{}:{}", announcement.local_ip, announcement.mesh_port);
     info!("🔗 Connecting to discovered ZHTP peer at {}", peer_addr);
     
@@ -198,6 +200,7 @@ async fn attempt_connect_to_discovered_peer(announcement: &NodeAnnouncement) {
             let handshake = MeshHandshake {
                 version: 1,
                 node_id: announcement.node_id,
+                public_key: our_public_key.clone(),
                 mesh_port: announcement.mesh_port,
                 protocols: announcement.protocols.clone(),
                 discovered_via: 0, // 0 = local multicast discovery

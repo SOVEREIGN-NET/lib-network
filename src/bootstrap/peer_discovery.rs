@@ -7,11 +7,12 @@ use std::collections::HashMap;
 /// Discover peers through bootstrap process
 pub async fn discover_bootstrap_peers(
     bootstrap_addresses: &[String],
+    local_public_key: &lib_crypto::PublicKey,
 ) -> Result<Vec<PeerInfo>> {
     let mut discovered_peers = Vec::new();
     
     for address in bootstrap_addresses {
-        if let Ok(peer_info) = connect_to_bootstrap_peer(address).await {
+        if let Ok(peer_info) = connect_to_bootstrap_peer(address, local_public_key).await {
             discovered_peers.push(peer_info);
         }
     }
@@ -20,7 +21,7 @@ pub async fn discover_bootstrap_peers(
 }
 
 /// Connect to a bootstrap peer
-async fn connect_to_bootstrap_peer(address: &str) -> Result<PeerInfo> {
+async fn connect_to_bootstrap_peer(address: &str, local_public_key: &lib_crypto::PublicKey) -> Result<PeerInfo> {
     use tokio::net::TcpStream;
     use tokio::io::AsyncWriteExt;
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -32,6 +33,7 @@ async fn connect_to_bootstrap_peer(address: &str) -> Result<PeerInfo> {
     let handshake = crate::discovery::local_network::MeshHandshake {
         version: 1,
         node_id: uuid::Uuid::new_v4(), // Generate temporary ID for bootstrap
+        public_key: local_public_key.clone(),
         mesh_port: 9333, // Default mesh port
         protocols: vec!["zhtp".to_string(), "dht".to_string(), "tcp".to_string()],
         discovered_via: 4, // 4 = bootstrap peer
