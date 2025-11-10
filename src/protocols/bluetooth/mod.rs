@@ -1925,7 +1925,7 @@ Value=00
                                                                 
                                                                 // Try to parse as MeshHandshake
                                                                 if data.len() >= 8 {  // Minimum size check
-                                                                    Some(GattMessage::MeshHandshake(data.clone()))
+                                                                    Some(GattMessage::MeshHandshake { data: data.clone(), peripheral_id: None })
                                                                 } else {
                                                                     // Try as text message
                                                                     if let Ok(text) = String::from_utf8(data.clone()) {

@@ -413,9 +413,13 @@ impl CoreBluetoothManager {
                                     // Forward MeshHandshake to unified server via GATT message channel
                                     let gatt_tx = manager_ref.gatt_message_tx.clone();
                                     let value_clone = value.clone();
+                                    let peripheral_id_clone = central_id.clone();
                                     tokio::spawn(async move {
                                         if let Some(tx) = gatt_tx.read().await.as_ref() {
-                                            if let Err(e) = tx.send(crate::protocols::bluetooth::GattMessage::MeshHandshake(value_clone)) {
+                                            if let Err(e) = tx.send(crate::protocols::bluetooth::GattMessage::MeshHandshake { 
+                                                data: value_clone, 
+                                                peripheral_id: Some(peripheral_id_clone) 
+                                            }) {
                                                 warn!("Failed to forward MeshHandshake to unified server: {}", e);
                                             } else {
                                                 info!("📨 MeshHandshake forwarded to unified server for peer discovery");
@@ -472,9 +476,13 @@ impl CoreBluetoothManager {
                                     // Forward non-handshake messages (HeadersRequest, HeadersResponse, etc.) to unified server
                                     let gatt_tx = manager_ref.gatt_message_tx.clone();
                                     let value_clone = value.clone();
+                                    let peripheral_id_clone = central_id.clone();
                                     tokio::spawn(async move {
                                         if let Some(tx) = gatt_tx.read().await.as_ref() {
-                                            if let Err(e) = tx.send(crate::protocols::bluetooth::GattMessage::MeshHandshake(value_clone)) {
+                                            if let Err(e) = tx.send(crate::protocols::bluetooth::GattMessage::MeshHandshake { 
+                                                data: value_clone, 
+                                                peripheral_id: Some(peripheral_id_clone) 
+                                            }) {
                                                 warn!("Failed to forward GATT message to unified server: {}", e);
                                             } else {
                                                 info!("📨 GATT message forwarded to unified server");
@@ -489,9 +497,13 @@ impl CoreBluetoothManager {
                             // Forward small messages too (could be ZhtpMeshMessage)
                             let gatt_tx = manager_ref.gatt_message_tx.clone();
                             let value_clone = value.clone();
+                            let peripheral_id_clone = central_id.clone();
                             tokio::spawn(async move {
                                 if let Some(tx) = gatt_tx.read().await.as_ref() {
-                                    if let Err(e) = tx.send(crate::protocols::bluetooth::GattMessage::MeshHandshake(value_clone)) {
+                                    if let Err(e) = tx.send(crate::protocols::bluetooth::GattMessage::MeshHandshake { 
+                                        data: value_clone, 
+                                        peripheral_id: Some(peripheral_id_clone) 
+                                    }) {
                                         warn!("Failed to forward small GATT message to unified server: {}", e);
                                     } else {
                                         debug!("📨 Small GATT message forwarded to unified server");

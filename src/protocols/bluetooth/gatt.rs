@@ -171,8 +171,8 @@ pub fn calculate_optimal_mtu(requested_mtu: u16, max_mtu: u16) -> u16 {
 pub enum GattMessage {
     /// Raw data from GATT write (characteristic UUID, data)
     RawData(String, Vec<u8>),
-    /// Mesh handshake
-    MeshHandshake(Vec<u8>),
+    /// Mesh handshake (data, optional peripheral_id for macOS)
+    MeshHandshake { data: Vec<u8>, peripheral_id: Option<String> },
     /// DHT bridge message
     DhtBridge(String),
     /// ZHTP relay query
@@ -273,7 +273,7 @@ impl GattMessage {
                     }
                 } else if data.len() >= 8 {
                     // Regular mesh handshake
-                    GattMessage::MeshHandshake(data)
+                    GattMessage::MeshHandshake { data, peripheral_id: None }
                 } else if let Ok(text) = String::from_utf8(data.clone()) {
                     if text.starts_with("DHT:") {
                         GattMessage::DhtBridge(text)
