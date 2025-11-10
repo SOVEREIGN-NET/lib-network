@@ -3,7 +3,11 @@
 //! Shared GATT functionality for characteristic read/write operations
 
 use anyhow::{Result, anyhow};
-use tracing::{info, debug};
+use tracing::{info, debug, warn};
+use serde::{Serialize, Deserialize};
+use lib_blockchain::block::BlockHeader;
+use lib_proofs::ChainRecursiveProof;
+use std::collections::HashMap;
 
 /// GATT operation types
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -62,6 +66,96 @@ pub fn fragment_data(data: &[u8], mtu: u16) -> Vec<Vec<u8>> {
         .collect()
 }
 
+/// Fragment a large message for BLE transmission (with sequencing)
+/// Returns Vec of fragments, each containing: [fragment_id:1][total_fragments:1][sequence:1][data...]
+pub fn fragment_large_message(message_id: u64, data: &[u8], mtu: u16) -> Vec<Vec<u8>> {
+    const HEADER_SIZE: usize = 11; // message_id(8) + total_fragments(2) + sequence(1)
+    let max_data_per_fragment = (mtu as usize).saturating_sub(3 + HEADER_SIZE);
+    
+    let chunks: Vec<&[u8]> = data.chunks(max_data_per_fragment).collect();
+    let total_fragments = chunks.len() as u16;
+    
+    chunks.into_iter().enumerate().map(|(index, chunk)| {
+        let mut fragment = Vec::with_capacity(HEADER_SIZE + chunk.len());
+        fragment.extend_from_slice(&message_id.to_le_bytes());
+        fragment.extend_from_slice(&total_fragments.to_le_bytes());
+        fragment.push(index as u8);
+        fragment.extend_from_slice(chunk);
+        fragment
+    }).collect()
+}
+
+/// Fragment reassembler for multi-part BLE messages
+#[derive(Debug)]
+pub struct FragmentReassembler {
+    fragments: HashMap<u64, HashMap<u8, Vec<u8>>>,  // message_id -> (fragment_index -> data)
+    total_fragments: HashMap<u64, u16>,              // message_id -> total count
+}
+
+impl FragmentReassembler {
+    pub fn new() -> Self {
+        Self {
+            fragments: HashMap::new(),
+            total_fragments: HashMap::new(),
+        }
+    }
+    
+    /// Add a fragment and return complete message if all fragments received
+    pub fn add_fragment(&mut self, fragment: Vec<u8>) -> Result<Option<Vec<u8>>> {
+        if fragment.len() < 11 {
+            return Err(anyhow!("Fragment too small: {} bytes", fragment.len()));
+        }
+        
+        let message_id = u64::from_le_bytes(fragment[0..8].try_into()?);
+        let total_fragments = u16::from_le_bytes(fragment[8..10].try_into()?);
+        let fragment_index = fragment[10];
+        let data = fragment[11..].to_vec();
+        
+        // Store total fragments count
+        self.total_fragments.insert(message_id, total_fragments);
+        
+        // Store this fragment
+        self.fragments.entry(message_id)
+            .or_insert_with(HashMap::new)
+            .insert(fragment_index, data);
+        
+        // Check if all fragments received
+        let received_count = self.fragments.get(&message_id).map(|f| f.len()).unwrap_or(0);
+        if received_count == total_fragments as usize {
+            // Reassemble in order
+            let mut complete_data = Vec::new();
+            for i in 0..total_fragments {
+                if let Some(fragment_data) = self.fragments.get(&message_id).and_then(|f| f.get(&(i as u8))) {
+                    complete_data.extend_from_slice(fragment_data);
+                } else {
+                    return Err(anyhow!("Missing fragment {} for message {}", i, message_id));
+                }
+            }
+            
+            // Clean up
+            self.fragments.remove(&message_id);
+            self.total_fragments.remove(&message_id);
+            
+            info!("✅ Reassembled message {} from {} fragments ({} bytes)", 
+                message_id, total_fragments, complete_data.len());
+            
+            return Ok(Some(complete_data));
+        }
+        
+        debug!("📦 Fragment {}/{} received for message {}", 
+            received_count, total_fragments, message_id);
+        
+        Ok(None)
+    }
+    
+    /// Clear stale fragments older than timeout
+    pub fn cleanup_stale_fragments(&mut self, message_id: u64) {
+        self.fragments.remove(&message_id);
+        self.total_fragments.remove(&message_id);
+        warn!("🗑️ Cleaned up stale fragments for message {}", message_id);
+    }
+}
+
 /// Calculate optimal MTU for connection
 pub fn calculate_optimal_mtu(requested_mtu: u16, max_mtu: u16) -> u16 {
     // BLE spec minimum is 23, maximum is typically 512
@@ -83,6 +177,60 @@ pub enum GattMessage {
     DhtBridge(String),
     /// ZHTP relay query
     RelayQuery(Vec<u8>),
+    /// Edge node headers request (lightweight sync)
+    HeadersRequest {
+        request_id: u64,
+        start_height: u64,
+        count: u32,
+    },
+    /// Edge node headers response
+    HeadersResponse {
+        request_id: u64,
+        headers: Vec<BlockHeader>,
+    },
+    /// Edge node bootstrap proof request (ZK proof + recent headers)
+    BootstrapProofRequest {
+        request_id: u64,
+        current_height: u64,
+    },
+    /// Edge node bootstrap proof response
+    BootstrapProofResponse {
+        request_id: u64,
+        proof_data: Vec<u8>,  // Serialized ChainRecursiveProof
+        proof_height: u64,
+        headers: Vec<BlockHeader>,
+    },
+    /// Multi-fragment message header (for messages >512 bytes)
+    FragmentHeader {
+        message_id: u64,
+        total_fragments: u16,
+        fragment_index: u16,
+        data: Vec<u8>,
+    },
+}
+
+/// Serializable edge sync message for BLE transport
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum EdgeSyncMessage {
+    HeadersRequest {
+        request_id: u64,
+        start_height: u64,
+        count: u32,
+    },
+    HeadersResponse {
+        request_id: u64,
+        headers: Vec<BlockHeader>,
+    },
+    BootstrapProofRequest {
+        request_id: u64,
+        current_height: u64,
+    },
+    BootstrapProofResponse {
+        request_id: u64,
+        proof_data: Vec<u8>,
+        proof_height: u64,
+        headers: Vec<BlockHeader>,
+    },
 }
 
 impl GattMessage {
@@ -91,21 +239,63 @@ impl GattMessage {
         // Try to parse based on characteristic UUID and data content
         match char_uuid {
             uuid if uuid.contains("6ba7b813") => {
-                // Mesh data characteristic
-                if data.len() >= 8 {
+                // Mesh data characteristic - check for edge sync messages
+                if data.len() >= 11 && data.starts_with(&[0xED, 0x6E]) {
+                    // Edge sync message marker "EDge Node"
+                    if let Ok(edge_msg) = bincode::deserialize::<EdgeSyncMessage>(&data[2..]) {
+                        match edge_msg {
+                            EdgeSyncMessage::HeadersRequest { request_id, start_height, count } => {
+                                GattMessage::HeadersRequest { request_id, start_height, count }
+                            }
+                            EdgeSyncMessage::HeadersResponse { request_id, headers } => {
+                                GattMessage::HeadersResponse { request_id, headers }
+                            }
+                            EdgeSyncMessage::BootstrapProofRequest { request_id, current_height } => {
+                                GattMessage::BootstrapProofRequest { request_id, current_height }
+                            }
+                            EdgeSyncMessage::BootstrapProofResponse { request_id, proof_data, proof_height, headers } => {
+                                GattMessage::BootstrapProofResponse { request_id, proof_data, proof_height, headers }
+                            }
+                        }
+                    } else {
+                        // Failed to deserialize edge sync message, treat as raw data
+                        GattMessage::RawData(uuid.to_string(), data.to_vec())
+                    }
+                }
+                // Check for fragmented message
+                else if data.len() >= 11 {
+                    // Might be a fragment (has message_id + total_fragments + sequence)
+                    GattMessage::FragmentHeader {
+                        message_id: u64::from_le_bytes(data[0..8].try_into().unwrap_or_default()),
+                        total_fragments: u16::from_le_bytes(data[8..10].try_into().unwrap_or_default()),
+                        fragment_index: u16::from_le_bytes(data[10..12].try_into().unwrap_or_default()),
+                        data: data[12..].to_vec(),
+                    }
+                } else if data.len() >= 8 {
+                    // Regular mesh handshake
                     GattMessage::MeshHandshake(data)
                 } else if let Ok(text) = String::from_utf8(data.clone()) {
                     if text.starts_with("DHT:") {
                         GattMessage::DhtBridge(text)
                     } else {
-                        GattMessage::RawData(char_uuid.to_string(), data)
+                        GattMessage::RawData(uuid.to_string(), data)
                     }
                 } else {
-                    GattMessage::RawData(char_uuid.to_string(), data)
+                    // Too short for any structured message, treat as raw data
+                    GattMessage::RawData(uuid.to_string(), data.to_vec())
                 }
             }
             _ => GattMessage::RawData(char_uuid.to_string(), data)
         }
+    }
+    
+    /// Serialize edge sync message to bytes (with marker)
+    pub fn serialize_edge_sync(msg: &EdgeSyncMessage) -> Result<Vec<u8>> {
+        let mut data = vec![0xED, 0x6E]; // "EDge Node" marker
+        let serialized = bincode::serialize(msg)
+            .map_err(|e| anyhow!("Failed to serialize edge sync message: {}", e))?;
+        data.extend_from_slice(&serialized);
+        Ok(data)
     }
 }
 

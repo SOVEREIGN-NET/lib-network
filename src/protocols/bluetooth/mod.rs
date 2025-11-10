@@ -80,7 +80,6 @@ pub use self::gatt::GattMessage as GattMessageType;
 pub use self::device::BleConnection as BluetoothConnection;
 
 /// Bluetooth LE mesh protocol handler
-#[derive(Debug, Clone)]
 pub struct BluetoothMeshProtocol {
     /// Node ID for this mesh node
     pub node_id: [u8; 32],
@@ -119,6 +118,29 @@ pub struct BluetoothMeshProtocol {
     /// Core Bluetooth manager for macOS (wrapped in Arc for event loop)
     #[cfg(target_os = "macos")]
     pub core_bluetooth: Arc<RwLock<Option<Arc<CoreBluetoothManager>>>>,
+    /// Blockchain provider for serving headers/proofs to edge nodes
+    pub blockchain_provider: Arc<RwLock<Option<Arc<dyn crate::blockchain_sync::BlockchainProvider>>>>,
+    /// Fragment reassembler for large BLE messages
+    pub fragment_reassembler: Arc<RwLock<gatt::FragmentReassembler>>,
+}
+
+impl std::fmt::Debug for BluetoothMeshProtocol {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BluetoothMeshProtocol")
+            .field("node_id", &self.node_id)
+            .field("public_key", &self.public_key)
+            .field("device_id", &self.device_id)
+            .field("advertising_interval", &self.advertising_interval)
+            .field("connection_interval", &self.connection_interval)
+            .field("max_connections", &self.max_connections)
+            .field("current_connections", &"<connections>")
+            .field("discovery_active", &self.discovery_active)
+            .field("tracked_devices", &"<devices>")
+            .field("address_mapping", &"<mapping>")
+            .field("blockchain_provider", &"<provider>")
+            .field("fragment_reassembler", &"<reassembler>")
+            .finish()
+    }
 }
 
 // Note: Old duplicate re-export removed - types are already available through the module structure
@@ -149,7 +171,15 @@ impl BluetoothMeshProtocol {
             gatt_message_tx: Arc::new(RwLock::new(None)),
             #[cfg(target_os = "macos")]
             core_bluetooth: Arc::new(RwLock::new(None)),
+            blockchain_provider: Arc::new(RwLock::new(None)),
+            fragment_reassembler: Arc::new(RwLock::new(gatt::FragmentReassembler::new())),
         })
+    }
+    
+    /// Set blockchain provider for serving edge node sync requests
+    pub async fn set_blockchain_provider(&self, provider: Arc<dyn crate::blockchain_sync::BlockchainProvider>) {
+        *self.blockchain_provider.write().await = Some(provider);
+        info!("📦 Blockchain provider configured for BLE edge sync");
     }
     
     /// Set the GATT message channel for forwarding to unified server
@@ -330,6 +360,111 @@ impl BluetoothMeshProtocol {
             reputation,
             quantum_secure: true,
         }
+    }
+    
+    /// Handle edge node sync message (headers/proof requests from lightweight clients)
+    pub async fn handle_edge_sync_message(
+        &self,
+        message: &gatt::EdgeSyncMessage,
+        peer_address: &str,
+    ) -> Result<Option<gatt::EdgeSyncMessage>> {
+        let blockchain_provider = self.blockchain_provider.read().await;
+        let provider = blockchain_provider.as_ref()
+            .ok_or_else(|| anyhow!("Blockchain provider not configured for BLE edge sync"))?;
+        
+        match message {
+            gatt::EdgeSyncMessage::HeadersRequest { request_id, start_height, count } => {
+                info!("📥 BLE HeadersRequest from {}: height {}, count {}", 
+                    peer_address, start_height, count);
+                
+                // Get headers from blockchain
+                let headers = provider.get_headers(*start_height, *count as u64).await?;
+                info!("📤 Sending {} headers via BLE to {}", headers.len(), peer_address);
+                
+                Ok(Some(gatt::EdgeSyncMessage::HeadersResponse {
+                    request_id: *request_id,
+                    headers,
+                }))
+            }
+            
+            gatt::EdgeSyncMessage::BootstrapProofRequest { request_id, current_height } => {
+                info!("📥 BLE BootstrapProofRequest from {}: current height {}", 
+                    peer_address, current_height);
+                
+                let network_height = provider.get_current_height().await?;
+                let proof_height = network_height.saturating_sub(100); // Proof up to 100 blocks ago
+                
+                // Get ZK proof for chain up to proof_height
+                let chain_proof = provider.get_chain_proof(proof_height).await?;
+                let proof_data = bincode::serialize(&chain_proof)
+                    .map_err(|e| anyhow!("Failed to serialize chain proof: {}", e))?;
+                
+                // Get recent 100 headers after the proof
+                let headers_from = proof_height + 1;
+                let headers_count = network_height - proof_height;
+                let headers = provider.get_headers(headers_from, headers_count).await?;
+                
+                info!("📤 Sending bootstrap proof ({} bytes) + {} headers via BLE to {}", 
+                    proof_data.len(), headers.len(), peer_address);
+                
+                Ok(Some(gatt::EdgeSyncMessage::BootstrapProofResponse {
+                    request_id: *request_id,
+                    proof_data,
+                    proof_height,
+                    headers,
+                }))
+            }
+            
+            gatt::EdgeSyncMessage::HeadersResponse { .. } | 
+            gatt::EdgeSyncMessage::BootstrapProofResponse { .. } => {
+                // These are responses from a full node - edge node would process them
+                debug!("Received edge sync response (this node is likely edge node)");
+                Ok(None)
+            }
+        }
+    }
+    
+    /// Send edge sync message via BLE (with fragmentation if needed)
+    pub async fn send_edge_sync_message(
+        &self,
+        peer_address: &str,
+        message: &gatt::EdgeSyncMessage,
+    ) -> Result<()> {
+        // Serialize the message
+        let data = gatt::GattMessage::serialize_edge_sync(message)?;
+        
+        // Check if fragmentation needed (>500 bytes = needs fragmentation)
+        if data.len() > 500 {
+            info!("📦 Message {} bytes, fragmenting for BLE MTU", data.len());
+            let message_id = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_millis() as u64;
+            
+            let fragments = gatt::fragment_large_message(message_id, &data, 512);
+            info!("📤 Sending {} fragments to {}", fragments.len(), peer_address);
+            
+            for (i, fragment) in fragments.iter().enumerate() {
+                self.write_gatt_characteristic_with_discovery(
+                    peer_address,
+                    "6ba7b813-9dad-11d1-80b4-00c04fd430ca", // Mesh data characteristic
+                    fragment
+                ).await?;
+                debug!("   Fragment {}/{} sent ({} bytes)", i+1, fragments.len(), fragment.len());
+            }
+            
+            info!("✅ All {} fragments sent to {}", fragments.len(), peer_address);
+        } else {
+            // Send as single message
+            self.write_gatt_characteristic_with_discovery(
+                peer_address,
+                "6ba7b813-9dad-11d1-80b4-00c04fd430ca",
+                &data
+            ).await?;
+            info!("✅ Sent edge sync message ({} bytes) to {}", data.len(), peer_address);
+        }
+        
+        Ok(())
     }
     
     // Note: MAC address functions moved to bluetooth::common module
