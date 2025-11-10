@@ -866,6 +866,14 @@ impl BluetoothMeshProtocol {
                                     warn!("Failed to send handshake to {}: {}", peer.address, e);
                                 } else {
                                     info!("📤 Sent MeshHandshake to {}", peer.address);
+                                    
+                                    // TODO: After handshake completes, check if we should initiate edge sync
+                                    // This requires:
+                                    // 1. Access to sync_coordinator from unified_server
+                                    // 2. Access to edge_sync_manager (if edge node)
+                                    // 3. Call sync_coordinator.register_peer_protocol() 
+                                    // 4. If returns true, create and send EdgeSyncMessage
+                                    // This will be wired in unified_server's BLE peer handler
                                 }
                                 // Reacquire lock for next iteration
                                 conns = connections.write().await;
@@ -3512,7 +3520,7 @@ Value=00
         bt_ops.connect_device(peer_address).await?;
         
         // Write handshake data
-        bt_ops.write_characteristic(peer_address, char_uuid, data).await?;
+        bt_ops.write_gatt_characteristic(peer_address, char_uuid, data).await?;
         
         info!("✅ Linux: Handshake written successfully");
         Ok(())

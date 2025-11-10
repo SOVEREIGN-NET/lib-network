@@ -240,6 +240,22 @@ impl SyncCoordinator {
         }
     }
 
+    /// Find peer by sync request ID
+    /// Returns the peer's public key and sync type if found
+    pub async fn find_peer_by_sync_id(&self, sync_id: u64) -> Option<(PublicKey, SyncType)> {
+        let syncs = self.peer_syncs.read().await;
+        
+        for (peer_id, state) in syncs.iter() {
+            if state.active_sync_id == Some(sync_id) {
+                if let Some(sync_type) = state.sync_type {
+                    return Some((peer_id.clone(), sync_type));
+                }
+            }
+        }
+        
+        None
+    }
+
     /// Get sync statistics
     pub async fn get_stats(&self) -> SyncStats {
         let syncs = self.peer_syncs.read().await;
