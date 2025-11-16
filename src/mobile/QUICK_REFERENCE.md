@@ -1,6 +1,6 @@
 # Mobile FFI Quick Reference
 
-## 🚀 Quick Start
+##  Quick Start
 
 ### Android (5 minutes)
 ```bash
@@ -31,7 +31,7 @@ let nodeId = try ZhtpClient.initNode()
 try ZhtpClient.startNode()
 ```
 
-## 📋 Core Functions (Both Platforms)
+##  Core Functions (Both Platforms)
 
 | Function | Android (Kotlin) | iOS (Swift) | Returns |
 |----------|-----------------|-------------|---------|
@@ -101,7 +101,7 @@ chmod +x build_xcframework.sh
 target/ios-framework/ZhtpFramework.xcframework
 ```
 
-## 📝 Required Permissions
+##  Required Permissions
 
 ### Android (AndroidManifest.xml)
 ```xml
@@ -124,7 +124,7 @@ target/ios-framework/ZhtpFramework.xcframework
 <array><string>_zhtp._tcp</string></array>
 ```
 
-## 📊 JSON Response Format
+##  JSON Response Format
 
 ### Success Response
 ```json
@@ -170,7 +170,7 @@ target/ios-framework/ZhtpFramework.xcframework
 ]
 ```
 
-## 🔧 Common Issues & Solutions
+##  Common Issues & Solutions
 
 | Issue | Platform | Solution |
 |-------|----------|----------|
@@ -201,7 +201,7 @@ lib-network/src/mobile/
         └── build_xcframework.sh # 150 lines - XCFramework builder
 ```
 
-## 🎯 What's Next?
+##  What's Next?
 
 1. **Test the FFI layer** - Build and test on both platforms
 2. **Create mobile UIs** - Android (Jetpack Compose) + iOS (SwiftUI)
@@ -227,4 +227,4 @@ lib-network/src/mobile/
 
 ---
 
-**Everything is ready! Start building your mobile mesh networking app now! 🚀**
+**Everything is ready! Start building your mobile mesh networking app now! **

@@ -58,7 +58,7 @@ fn generate_node_id() -> [u8; 32] {
 }
 ```
 
-## 🔧 Advanced Configuration
+##  Advanced Configuration
 
 ### Network Configuration Structure
 
@@ -234,7 +234,7 @@ server.configure_payments(PaymentConfig {
 }).await?;
 ```
 
-## 🔍 Discovery Configuration
+##  Discovery Configuration
 
 ### Hardware Detection
 
@@ -394,7 +394,7 @@ let macos_config = MacOSConfig {
 };
 ```
 
-## 🔄 Dynamic Configuration
+##  Dynamic Configuration
 
 ### Runtime Configuration Updates
 
@@ -538,4 +538,4 @@ fn relay_node_config() -> NetworkConfig {
 
 ---
 
-This configuration guide covers all aspects of setting up and tuning ZHTP lib-network for various use cases. Adjust settings based on your specific hardware, network conditions, and performance requirements. 🚀
+This configuration guide covers all aspects of setting up and tuning ZHTP lib-network for various use cases. Adjust settings based on your specific hardware, network conditions, and performance requirements. 

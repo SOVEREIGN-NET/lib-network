@@ -23,14 +23,14 @@ impl LinuxBluetoothOps {
     pub fn new() -> Self {
         #[cfg(feature = "linux-dbus")]
         {
-            info!("🔵 Initializing Linux Bluetooth with D-Bus support");
+            info!(" Initializing Linux Bluetooth with D-Bus support");
             let dbus_client = match BlueZDBusClient::new() {
                 Ok(client) => {
-                    info!("✅ D-Bus BlueZ client initialized");
+                    info!(" D-Bus BlueZ client initialized");
                     Some(client)
                 }
                 Err(e) => {
-                    warn!("⚠️ Failed to initialize D-Bus client: {}", e);
+                    warn!(" Failed to initialize D-Bus client: {}", e);
                     warn!("   Falling back to CLI tools (bluetoothctl, hcitool)");
                     None
                 }
@@ -41,7 +41,7 @@ impl LinuxBluetoothOps {
         
         #[cfg(not(feature = "linux-dbus"))]
         {
-            info!("📝 Using CLI-only Bluetooth (no D-Bus support compiled in)");
+            info!(" Using CLI-only Bluetooth (no D-Bus support compiled in)");
             Self {}
         }
     }
@@ -131,7 +131,7 @@ impl LinuxBluetoothOps {
         }
         
         // Fallback: CLI notifications (limited support)
-        warn!("⚠️ GATT notifications not supported via CLI tools");
+        warn!(" GATT notifications not supported via CLI tools");
         Ok(())
     }
     
@@ -139,7 +139,7 @@ impl LinuxBluetoothOps {
     
     #[cfg(feature = "linux-dbus")]
     async fn dbus_scan_mesh_peers(&self, client: &BlueZDBusClient) -> Result<Vec<MeshPeer>> {
-        info!("🔍 Scanning for ZHTP mesh peers via D-Bus");
+        info!(" Scanning for ZHTP mesh peers via D-Bus");
         
         client.start_discovery()?;
         
@@ -167,13 +167,13 @@ impl LinuxBluetoothOps {
                         services: vec!["ZHTP-MESH".to_string()],
                         quantum_secure: true,
                     };
-                    info!("🔗 Found ZHTP mesh peer: {} ({})", peer.peer_id, device.address);
+                    info!(" Found ZHTP mesh peer: {} ({})", peer.peer_id, device.address);
                     peers.push(peer);
                 }
             }
         }
         
-        info!("✅ Found {} ZHTP mesh peers via D-Bus", peers.len());
+        info!(" Found {} ZHTP mesh peers via D-Bus", peers.len());
         Ok(peers)
     }
     
@@ -182,7 +182,7 @@ impl LinuxBluetoothOps {
     async fn cli_start_discovery(&self) -> Result<()> {
         use std::process::Command;
         
-        debug!("📝 Starting discovery via bluetoothctl");
+        debug!(" Starting discovery via bluetoothctl");
         
         let _ = Command::new("bluetoothctl")
             .args(&["scan", "on"])
@@ -194,7 +194,7 @@ impl LinuxBluetoothOps {
     async fn cli_scan_mesh_peers(&self) -> Result<Vec<MeshPeer>> {
         use std::process::Command;
         
-        info!("📝 Scanning for ZHTP mesh peers via CLI tools");
+        info!(" Scanning for ZHTP mesh peers via CLI tools");
         
         // Start BLE scan
         let scan_output = Command::new("timeout")
@@ -226,14 +226,14 @@ impl LinuxBluetoothOps {
             }
         }
         
-        info!("✅ Found {} ZHTP mesh peers via CLI", peers.len());
+        info!(" Found {} ZHTP mesh peers via CLI", peers.len());
         Ok(peers)
     }
     
     async fn cli_connect_device(&self, address: &str) -> Result<()> {
         use std::process::Command;
         
-        info!("📝 Connecting to device {} via bluetoothctl", address);
+        info!(" Connecting to device {} via bluetoothctl", address);
         
         let connect_output = Command::new("bluetoothctl")
             .args(&["connect", address])
@@ -241,7 +241,7 @@ impl LinuxBluetoothOps {
         
         let output = String::from_utf8_lossy(&connect_output.stdout);
         if output.contains("Connection successful") {
-            info!("✅ Connected to {}", address);
+            info!(" Connected to {}", address);
             Ok(())
         } else {
             Err(anyhow!("Failed to connect: {}", output))
@@ -251,7 +251,7 @@ impl LinuxBluetoothOps {
     async fn cli_disconnect_device(&self, address: &str) -> Result<()> {
         use std::process::Command;
         
-        debug!("📝 Disconnecting from device {} via bluetoothctl", address);
+        debug!(" Disconnecting from device {} via bluetoothctl", address);
         
         let _ = Command::new("bluetoothctl")
             .args(&["disconnect", address])
@@ -263,10 +263,10 @@ impl LinuxBluetoothOps {
     async fn cli_read_gatt_characteristic(&self, device_address: &str, char_uuid: &str) -> Result<Vec<u8>> {
         use std::process::Command;
         
-        debug!("📝 Reading GATT characteristic {} via gatttool", char_uuid);
+        debug!(" Reading GATT characteristic {} via gatttool", char_uuid);
         
         // Note: gatttool requires handle, not UUID - this is a limitation
-        warn!("⚠️ gatttool requires characteristic handle, not UUID");
+        warn!(" gatttool requires characteristic handle, not UUID");
         warn!("   Production systems should use D-Bus for proper GATT operations");
         
         Err(anyhow!("GATT read via CLI requires characteristic handle"))
@@ -275,10 +275,10 @@ impl LinuxBluetoothOps {
     async fn cli_write_gatt_characteristic(&self, device_address: &str, char_uuid: &str, data: &[u8]) -> Result<()> {
         use std::process::Command;
         
-        debug!("📝 Writing GATT characteristic {} via gatttool", char_uuid);
+        debug!(" Writing GATT characteristic {} via gatttool", char_uuid);
         
         // Note: gatttool requires handle, not UUID - this is a limitation
-        warn!("⚠️ gatttool requires characteristic handle, not UUID");
+        warn!(" gatttool requires characteristic handle, not UUID");
         warn!("   Production systems should use D-Bus for proper GATT operations");
         
         Err(anyhow!("GATT write via CLI requires characteristic handle"))

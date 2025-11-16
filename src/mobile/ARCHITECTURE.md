@@ -204,7 +204,7 @@ Java/Kotlin Heap                       Swift ARC
                                            ▼
                                    zhtp_free_string()
 
- ✅ Automatic cleanup         ⚠️  Manual cleanup required!
+  Automatic cleanup           Manual cleanup required!
 ```
 
 ## Thread Safety Model
@@ -245,10 +245,10 @@ Java/Kotlin Heap                       Swift ARC
                     │ • service_daemon │
                     └──────────────────┘
 
-✅ Multiple threads can safely call FFI functions
-✅ Mutex ensures exclusive access to shared state
-✅ Arc enables shared ownership across threads
-✅ Tokio runtime handles async operations
+ Multiple threads can safely call FFI functions
+ Mutex ensures exclusive access to shared state
+ Arc enables shared ownership across threads
+ Tokio runtime handles async operations
 ```
 
 ## Build Output Structure
@@ -279,4 +279,4 @@ app/src/main/jniLibs/                     Drag & drop .xcframework
 
 ---
 
-**This diagram shows the complete end-to-end architecture from mobile UI to native protocols! 🎯**
+**This diagram shows the complete end-to-end architecture from mobile UI to native protocols! **

@@ -33,7 +33,7 @@ pub unsafe fn register_delegate_classes() {
         register_central_manager_delegate();
         register_peripheral_manager_delegate();
         register_peripheral_delegate();
-        info!("✅ Core Bluetooth delegate classes registered");
+        info!(" Core Bluetooth delegate classes registered");
     });
 }
 
@@ -73,7 +73,7 @@ unsafe fn register_central_manager_delegate() {
             _ => BluetoothState::Unknown,
         };
         
-        debug!("🔵 Delegate: centralManagerDidUpdateState: {:?}", bt_state);
+        debug!(" Delegate: centralManagerDidUpdateState: {:?}", bt_state);
         
         // Get event sender from ivar and send event
         let sender_ptr: usize = *this.get_ivar::<usize>("event_sender_ptr");
@@ -141,7 +141,7 @@ unsafe fn register_central_manager_delegate() {
             }
         }
         
-        info!("🔍 Delegate: Discovered {} ({}), RSSI: {}", 
+        info!(" Delegate: Discovered {} ({}), RSSI: {}", 
                name.as_deref().unwrap_or("Unknown"), identifier, rssi_value);
         
         // Send event
@@ -176,7 +176,7 @@ unsafe fn register_central_manager_delegate() {
         let id_cstr: *const i8 = msg_send![id_string, UTF8String];
         let identifier = std::ffi::CStr::from_ptr(id_cstr).to_string_lossy().to_string();
         
-        debug!("✅ Delegate: Connected to {}", identifier);
+        debug!(" Delegate: Connected to {}", identifier);
         
         let sender_ptr: usize = *this.get_ivar::<usize>("event_sender_ptr");
         if sender_ptr != 0 {
@@ -208,12 +208,12 @@ unsafe fn register_central_manager_delegate() {
         if let Some(error_info) = parse_nserror(error) {
             // Log with appropriate level based on error type
             if error_info.cb_error.is_some() {
-                warn!("❌ Delegate: Disconnected from {} - {}", identifier, error_info.to_error_message());
+                warn!(" Delegate: Disconnected from {} - {}", identifier, error_info.to_error_message());
             } else {
-                warn!("❌ Delegate: Disconnected from {} - {}", identifier, error_info.localized_description);
+                warn!(" Delegate: Disconnected from {} - {}", identifier, error_info.localized_description);
             }
         } else {
-            debug!("✅ Delegate: Clean disconnect from {}", identifier);
+            debug!(" Delegate: Clean disconnect from {}", identifier);
         }
         
         let sender_ptr: usize = *this.get_ivar::<usize>("event_sender_ptr");
@@ -244,7 +244,7 @@ unsafe fn register_central_manager_delegate() {
         
         // Use comprehensive error parsing
         if let Some(error_info) = parse_nserror(error) {
-            error!("❌ Delegate: Failed to connect to {} - {}", identifier, error_info.to_error_message());
+            error!(" Delegate: Failed to connect to {} - {}", identifier, error_info.to_error_message());
             
             // Send ConnectionFailed event with detailed error information
             let sender_ptr: usize = *this.get_ivar::<usize>("event_sender_ptr");
@@ -258,7 +258,7 @@ unsafe fn register_central_manager_delegate() {
                 });
             }
         } else {
-            error!("❌ Delegate: Failed to connect to {} - Unknown error", identifier);
+            error!(" Delegate: Failed to connect to {} - Unknown error", identifier);
             
             // Send generic failure event
             let sender_ptr: usize = *this.get_ivar::<usize>("event_sender_ptr");
@@ -316,7 +316,7 @@ unsafe fn register_peripheral_manager_delegate() {
             _ => BluetoothState::Unknown,
         };
         
-        debug!("🔵 Delegate: peripheralManagerDidUpdateState: {:?}", bt_state);
+        debug!(" Delegate: peripheralManagerDidUpdateState: {:?}", bt_state);
         
         let sender_ptr: usize = *this.get_ivar::<usize>("event_sender_ptr");
         if sender_ptr != 0 {
@@ -341,14 +341,14 @@ unsafe fn register_peripheral_manager_delegate() {
         let this = &*this;
         // Use comprehensive error parsing
         if let Some(error_info) = parse_nserror(error) {
-            error!("❌ Delegate: Failed to add service - {}", error_info.to_error_message());
+            error!(" Delegate: Failed to add service - {}", error_info.to_error_message());
         } else {
             let service_uuid_obj: *mut AnyObject = msg_send![service, UUID];
             let uuid_string: *mut AnyObject = msg_send![service_uuid_obj, UUIDString];
             let uuid_cstr: *const i8 = msg_send![uuid_string, UTF8String];
             let uuid = std::ffi::CStr::from_ptr(uuid_cstr).to_string_lossy().to_string();
             
-            debug!("✅ Delegate: Added service: {}", uuid);
+            debug!(" Delegate: Added service: {}", uuid);
             
             let sender_ptr: usize = *this.get_ivar::<usize>("event_sender_ptr");
             if sender_ptr != 0 {
@@ -373,9 +373,9 @@ unsafe fn register_peripheral_manager_delegate() {
         let this = &*this;
         // Use comprehensive error parsing
         if let Some(error_info) = parse_nserror(error) {
-            error!("❌ Delegate: Failed to start advertising - {}", error_info.to_error_message());
+            error!(" Delegate: Failed to start advertising - {}", error_info.to_error_message());
         } else {
-            debug!("📢 Delegate: Started advertising");
+            debug!(" Delegate: Started advertising");
             
             let sender_ptr: usize = *this.get_ivar::<usize>("event_sender_ptr");
             if sender_ptr != 0 {
@@ -402,7 +402,7 @@ unsafe fn register_peripheral_manager_delegate() {
         
         // Get count of requests
         let count: usize = msg_send![requests, count];
-        info!("📝 Delegate: Received {} write request(s)", count);
+        info!(" Delegate: Received {} write request(s)", count);
         
         // Process each write request
         for i in 0..count {
@@ -430,7 +430,7 @@ unsafe fn register_peripheral_manager_delegate() {
             let central_uuid_cstr: *const i8 = msg_send![central_uuid_string, UTF8String];
             let peer_id = std::ffi::CStr::from_ptr(central_uuid_cstr).to_string_lossy().to_string();
             
-            info!("📝 Write request: char={}, peer={}, bytes={}", char_uuid, peer_id, length);
+            info!(" Write request: char={}, peer={}, bytes={}", char_uuid, peer_id, length);
             
             // Extract data bytes - wrapped in catch_unwind to prevent Objective-C callback crashes
             let mut data = Vec::new();
@@ -448,14 +448,14 @@ unsafe fn register_peripheral_manager_delegate() {
                     Ok(extracted_data) => {
                         data = extracted_data;
                         if !data.is_empty() {
-                            info!("📦 Data: {} bytes: {:?}", length, &data[..std::cmp::min(20, length)]);
+                            info!(" Data: {} bytes: {:?}", length, &data[..std::cmp::min(20, length)]);
                         } else {
-                            warn!("⚠️ Received null bytes pointer for {} byte write request", length);
+                            warn!(" Received null bytes pointer for {} byte write request", length);
                         }
                     }
                     Err(e) => {
-                        error!("❌ CRITICAL: Failed to extract NSData bytes: {:?}", e);
-                        warn!("⚠️ Attempting safe fallback for {} byte write request", length);
+                        error!(" CRITICAL: Failed to extract NSData bytes: {:?}", e);
+                        warn!(" Attempting safe fallback for {} byte write request", length);
                         // Leave data empty - will still send response to avoid Windows hanging
                     }
                 }
@@ -480,9 +480,9 @@ unsafe fn register_peripheral_manager_delegate() {
             let first_request: *mut AnyObject = msg_send![requests, objectAtIndex:0usize];
             let result_code: i64 = 0; // CBATTErrorSuccess
             let _: () = msg_send![peripheral, respondToRequest:first_request withResult:result_code];
-            info!("✅ Responded to {} write request(s) with success", count);
+            info!(" Responded to {} write request(s) with success", count);
         } else {
-            info!("⚠️ No write requests to respond to");
+            info!(" No write requests to respond to");
         }
     }
     
@@ -513,7 +513,7 @@ unsafe fn register_peripheral_manager_delegate() {
         let char_uuid_cstr: *const i8 = msg_send![char_uuid_str, UTF8String];
         let char_uuid = std::ffi::CStr::from_ptr(char_uuid_cstr).to_string_lossy().to_string();
         
-        info!("🔔 Delegate: Central {} subscribed to characteristic {}", central_id, char_uuid);
+        info!(" Delegate: Central {} subscribed to characteristic {}", central_id, char_uuid);
         
         let sender_ptr: usize = *this.get_ivar::<usize>("event_sender_ptr");
         if sender_ptr != 0 {
@@ -564,12 +564,12 @@ unsafe fn register_peripheral_manager_delegate() {
     );
     
     decl.register();
-    info!("✅ Registered ZhtpCBPeripheralManagerDelegate with 6 methods:");
+    info!(" Registered ZhtpCBPeripheralManagerDelegate with 6 methods:");
     info!("   1. peripheralManagerDidUpdateState:");
     info!("   2. peripheralManager:didAddService:error:");
     info!("   3. peripheralManagerDidStartAdvertising:error:");
     info!("   4. peripheralManager:didReceiveWriteRequests: 🔥");
-    info!("   5. peripheralManager:central:didSubscribeToCharacteristic: 🔔");
+    info!("   5. peripheralManager:central:didSubscribeToCharacteristic: ");
     info!("   6. peripheralManager:central:didUnsubscribeFromCharacteristic: 🔕");
 }
 
@@ -606,7 +606,7 @@ unsafe fn register_peripheral_delegate() {
         
         // Use comprehensive error parsing
         if let Some(error_info) = parse_nserror(error) {
-            error!("❌ Delegate: Service discovery failed for {} - {}", identifier, error_info.to_error_message());
+            error!(" Delegate: Service discovery failed for {} - {}", identifier, error_info.to_error_message());
             
             // Send error event
             let sender_ptr: usize = *this.get_ivar::<usize>("event_sender_ptr");
@@ -634,7 +634,7 @@ unsafe fn register_peripheral_delegate() {
                     service_uuids.push(uuid);
                 }
                 
-                debug!("🔍 Delegate: Discovered {} services for {}", service_uuids.len(), identifier);
+                debug!(" Delegate: Discovered {} services for {}", service_uuids.len(), identifier);
                 
                 let sender_ptr: usize = *this.get_ivar::<usize>("event_sender_ptr");
                 if sender_ptr != 0 {
@@ -674,7 +674,7 @@ unsafe fn register_peripheral_delegate() {
         
         // Use comprehensive error parsing
         if let Some(error_info) = parse_nserror(error) {
-            error!("❌ Delegate: Characteristic discovery failed for service {} - {}", 
+            error!(" Delegate: Characteristic discovery failed for service {} - {}", 
                    service_uuid, error_info.to_error_message());
             
             let sender_ptr: usize = *this.get_ivar::<usize>("event_sender_ptr");
@@ -703,7 +703,7 @@ unsafe fn register_peripheral_delegate() {
                     char_uuids.push(uuid);
                 }
                 
-                debug!("🔍 Delegate: Discovered {} characteristics for service {}", 
+                debug!(" Delegate: Discovered {} characteristics for service {}", 
                        char_uuids.len(), service_uuid);
                 
                 let sender_ptr: usize = *this.get_ivar::<usize>("event_sender_ptr");
@@ -745,7 +745,7 @@ unsafe fn register_peripheral_delegate() {
         
         // Use comprehensive error parsing
         if let Some(error_info) = parse_nserror(error) {
-            error!("❌ Delegate: Read failed for characteristic {} - {}", 
+            error!(" Delegate: Read failed for characteristic {} - {}", 
                    char_uuid, error_info.to_error_message());
             
             let sender_ptr: usize = *this.get_ivar::<usize>("event_sender_ptr");
@@ -809,7 +809,7 @@ unsafe fn register_peripheral_delegate() {
         
         // Use comprehensive error parsing
         if let Some(error_info) = parse_nserror(error) {
-            error!("❌ Delegate: Write failed for characteristic {} - {}", 
+            error!(" Delegate: Write failed for characteristic {} - {}", 
                    char_uuid, error_info.to_error_message());
             
             let sender_ptr: usize = *this.get_ivar::<usize>("event_sender_ptr");
@@ -823,7 +823,7 @@ unsafe fn register_peripheral_delegate() {
                 });
             }
         } else {
-            debug!("✅ Delegate: Write completed for characteristic {}", char_uuid);
+            debug!(" Delegate: Write completed for characteristic {}", char_uuid);
             
             let sender_ptr: usize = *this.get_ivar::<usize>("event_sender_ptr");
             if sender_ptr != 0 {
@@ -862,7 +862,7 @@ unsafe fn register_peripheral_delegate() {
         
         // Use comprehensive error parsing
         if let Some(error_info) = parse_nserror(error) {
-            error!("❌ Delegate: Notification state update failed for {} - {}", 
+            error!(" Delegate: Notification state update failed for {} - {}", 
                    char_uuid, error_info.to_error_message());
             
             let sender_ptr: usize = *this.get_ivar::<usize>("event_sender_ptr");
@@ -879,7 +879,7 @@ unsafe fn register_peripheral_delegate() {
             // Check if notifications are now enabled or disabled
             let is_notifying: bool = msg_send![characteristic, isNotifying];
             
-            debug!("🔔 Delegate: Notification {} for characteristic {}", 
+            debug!(" Delegate: Notification {} for characteristic {}", 
                    if is_notifying { "enabled" } else { "disabled" }, char_uuid);
             
             let sender_ptr: usize = *this.get_ivar::<usize>("event_sender_ptr");
@@ -929,7 +929,7 @@ pub unsafe fn create_central_manager_delegate_instance(
         std::ptr::write(ivar_ptr as *mut usize, sender_ptr);
     }
     
-    info!("✅ Created CBCentralManagerDelegate instance");
+    info!(" Created CBCentralManagerDelegate instance");
     delegate
 }
 
@@ -958,7 +958,7 @@ pub unsafe fn create_peripheral_manager_delegate_instance(
         std::ptr::write(ivar_ptr as *mut usize, sender_ptr);
     }
     
-    info!("✅ Created CBPeripheralManagerDelegate instance");
+    info!(" Created CBPeripheralManagerDelegate instance");
     delegate
 }
 
@@ -987,6 +987,6 @@ pub unsafe fn create_peripheral_delegate_instance(
         std::ptr::write(ivar_ptr as *mut usize, sender_ptr);
     }
     
-    info!("✅ Created CBPeripheralDelegate instance");
+    info!(" Created CBPeripheralDelegate instance");
     delegate
 }

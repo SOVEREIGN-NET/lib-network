@@ -30,7 +30,7 @@ impl EdgeNodeSyncManager {
     /// # Arguments
     /// * `max_headers` - Rolling window size (recommended: 500 for ~100KB storage)
     pub fn new(max_headers: usize) -> Self {
-        info!("🔧 Initializing EdgeNodeSyncManager with {} header capacity", max_headers);
+        info!(" Initializing EdgeNodeSyncManager with {} header capacity", max_headers);
         Self {
             edge_state: Arc::new(RwLock::new(EdgeNodeState::new(max_headers))),
             network_height: Arc::new(RwLock::new(0)),
@@ -45,7 +45,7 @@ impl EdgeNodeSyncManager {
         if !addresses.contains(&address) {
             addresses.push(address.clone());
             self.edge_state.write().await.add_address(address);
-            info!("📝 Added address to edge node tracking");
+            info!(" Added address to edge node tracking");
         }
     }
 
@@ -54,7 +54,7 @@ impl EdgeNodeSyncManager {
         let mut current = self.network_height.write().await;
         if height > *current {
             *current = height;
-            debug!("📊 Network height updated to {}", height);
+            debug!(" Network height updated to {}", height);
         }
     }
 
@@ -112,7 +112,7 @@ impl EdgeNodeSyncManager {
             added_count += 1;
         }
 
-        info!("✅ Processed {} headers, current height: {}", 
+        info!(" Processed {} headers, current height: {}", 
             added_count, edge_state.current_height);
         Ok(())
     }
@@ -124,7 +124,7 @@ impl EdgeNodeSyncManager {
         proof_height: u64,
         headers: Vec<BlockHeader>,
     ) -> Result<()> {
-        info!("🔐 Processing bootstrap proof up to height {}", proof_height);
+        info!(" Processing bootstrap proof up to height {}", proof_height);
         
         // TODO: Verify ZK proof using lib-proofs ChainRecursiveProof
         // For now, trust the proof and add headers
@@ -134,7 +134,7 @@ impl EdgeNodeSyncManager {
             edge_state.add_header(header);
         }
 
-        info!("✅ Bootstrap complete at height {}", edge_state.current_height);
+        info!(" Bootstrap complete at height {}", edge_state.current_height);
         Ok(())
     }
 

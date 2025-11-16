@@ -379,7 +379,7 @@ pub unsafe fn check_nserror(error: *mut AnyObject) -> Result<()> {
 pub unsafe fn log_nserror(error: *mut AnyObject, context: &str) -> bool {
     if let Some(error_info) = parse_nserror(error) {
         use tracing::error;
-        error!("❌ {} - {}", context, error_info.to_error_message());
+        error!(" {} - {}", context, error_info.to_error_message());
         true
     } else {
         false

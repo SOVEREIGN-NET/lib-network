@@ -13,7 +13,7 @@ use lib_proofs::ZeroKnowledgeProof;
 use lib_identity::ZhtpIdentity;
 use lib_storage::{UnifiedStorageSystem, UploadRequest, AccessControlSettings, ContentStorageRequirements};
 
-use crate::dht::DHTClient;
+use crate::dht::ZkDHTIntegration;
 use super::types::*;
 use super::content_publisher::ContentPublisher;
 use lib_blockchain;
@@ -23,7 +23,7 @@ pub struct DomainRegistry {
     /// Domain records storage
     domain_records: Arc<RwLock<HashMap<String, DomainRecord>>>,
     /// DHT client for direct storage
-    dht_client: Arc<RwLock<Option<DHTClient>>>,
+    dht_client: Arc<RwLock<Option<ZkDHTIntegration>>>,
     /// Storage backend for persistence
     storage_system: Arc<RwLock<UnifiedStorageSystem>>,
     /// Content cache (hash -> bytes)
@@ -62,7 +62,7 @@ impl DomainRegistry {
     }
 
     /// Create new domain registry with optional existing DHT client
-    pub async fn new_with_dht(dht_client: Option<DHTClient>) -> Result<Self> {
+    pub async fn new_with_dht(dht_client: Option<ZkDHTIntegration>) -> Result<Self> {
         let storage_config = lib_storage::UnifiedStorageConfig::default();
         let storage_system = UnifiedStorageSystem::new(storage_config).await?;
         
@@ -456,12 +456,11 @@ impl DomainRegistry {
 
     /// Store domain content in DHT
     async fn store_domain_content(&self, domain: &str, path: &str, content: Vec<u8>) -> Result<String> {
-        // Calculate full content hash (32 bytes) for DHT storage
+        // Calculate original content hash for logging only
         let hash_bytes = hash_blake3(&content);
-        let full_content_hash = hex::encode(&hash_bytes[..32]);
         let short_hash = hex::encode(&hash_bytes[..8]); // For logging only
 
-        info!(" Storing content for domain {} at path {} (hash: {}..., size: {} bytes)", 
+        info!(" Storing content for domain {} at path {} (original hash: {}..., size: {} bytes)", 
               domain, path, short_hash, content.len());
 
         // Store content in DHT using UnifiedStorageSystem
@@ -520,24 +519,28 @@ impl DomainRegistry {
             };
             
             // Create uploader identity (use domain owner or anonymous)
+            // Use the original content hash for the proof (before compression)
+            let proof_hash = hash_blake3(&content);
             let uploader = lib_identity::ZhtpIdentity::new(
                 lib_identity::types::identity_types::IdentityType::Human,
                 format!("web4_publisher_{}", domain).as_bytes().to_vec(),
                 lib_proofs::ZeroKnowledgeProof {
                     proof_system: "Plonky2".to_string(),
-                    proof_data: full_content_hash.as_bytes().to_vec(),
+                    proof_data: proof_hash.to_vec(),
                     public_inputs: domain.as_bytes().to_vec(),
                     verification_key: domain.as_bytes().to_vec(),
                     plonky2_proof: None,
-                    proof: full_content_hash.as_bytes().to_vec(),
+                    proof: proof_hash.to_vec(),
                 }
             ).map_err(|e| anyhow!("Failed to create uploader identity: {}", e))?;
             
             // Store in DHT via UnifiedStorageSystem (NO CACHE FALLBACK - DHT ONLY)
             let actual_storage_hash = match storage.upload_content(upload_request, uploader).await {
                 Ok(storage_hash) => {
-                    info!(" Stored in DHT: short_hash={}, storage_hash={:?}", 
-                          short_hash, storage_hash);
+                    info!("  Stored in DHT successfully");
+                    info!("    Original hash: {}", short_hash);
+                    info!("    DHT storage hash: {}", hex::encode(storage_hash.as_bytes()));
+                    info!("    (Different due to compression)");
                     storage_hash
                 }
                 Err(e) => {
@@ -549,14 +552,15 @@ impl DomainRegistry {
             // Convert storage_hash to hex string for content_mappings
             let storage_hash_hex = hex::encode(actual_storage_hash.as_bytes());
             
-            // Store in cache using the STORAGE hash (what's actually in DHT)
+            // Store in cache using the ACTUAL DHT STORAGE hash (compressed content hash)
             {
                 let mut cache = self.content_cache.write().await;
-                cache.insert(storage_hash_hex.clone(), content);
-                info!(" Cached content with storage hash: {}", storage_hash_hex);
+                cache.insert(storage_hash_hex.clone(), content.clone());
+                info!(" Cached content with DHT storage hash: {}", storage_hash_hex);
             }
             
-            // Return the storage hash (compressed) for proper DHT retrieval
+            // CRITICAL: Return the ACTUAL DHT storage hash (after compression/encryption)
+            // This is the hash that can be used to retrieve the content from DHT
             Ok(storage_hash_hex)
         }
     }
@@ -758,7 +762,7 @@ impl Web4Manager {
     }
 
     /// Create new Web4 manager with optional existing DHT client
-    pub async fn new_with_dht(dht_client: Option<DHTClient>) -> Result<Self> {
+    pub async fn new_with_dht(dht_client: Option<ZkDHTIntegration>) -> Result<Self> {
         let registry = DomainRegistry::new_with_dht(dht_client).await?;
         let registry_arc = Arc::new(registry);
         let content_publisher = super::content_publisher::ContentPublisher::new(registry_arc.clone()).await?;

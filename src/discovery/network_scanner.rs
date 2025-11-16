@@ -66,7 +66,7 @@ pub async fn start_network_scanner(_mesh_port: u16, local_node_id: uuid::Uuid, l
                                 // Skip if this is our own IP
                                 if let Some(local) = local_ip {
                                     if r.ip == local {
-                                        debug!("⏭️ Skipping self-connection to {}", r.ip);
+                                        debug!(" Skipping self-connection to {}", r.ip);
                                         return false;
                                     }
                                 }
@@ -320,7 +320,7 @@ async fn attempt_auto_connect(node: &ScanResult, local_node_id: uuid::Uuid, loca
     
     let addr = format!("{}:{}", node.ip, node.port);
     
-    info!("🔗 Auto-connecting to discovered ZHTP node at {}", addr);
+    info!(" Auto-connecting to discovered ZHTP node at {}", addr);
     
     // Connect to node
     let mut stream = timeout(

@@ -136,13 +136,13 @@ impl FragmentReassembler {
             self.fragments.remove(&message_id);
             self.total_fragments.remove(&message_id);
             
-            info!("✅ Reassembled message {} from {} fragments ({} bytes)", 
+            info!(" Reassembled message {} from {} fragments ({} bytes)", 
                 message_id, total_fragments, complete_data.len());
             
             return Ok(Some(complete_data));
         }
         
-        debug!("📦 Fragment {}/{} received for message {}", 
+        debug!(" Fragment {}/{} received for message {}", 
             received_count, total_fragments, message_id);
         
         Ok(None)

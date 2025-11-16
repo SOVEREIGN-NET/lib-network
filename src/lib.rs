@@ -22,7 +22,7 @@ pub use crate::blockchain_sync::{BlockchainSyncManager, EdgeNodeSyncManager};
 
 
 // Native binary DHT protocol with lib-storage backend
-pub use crate::dht::{DHTClient, initialize_dht_client, serve_web4_page, call_native_dht_client};
+pub use crate::dht::{initialize_dht_client, serve_web4_page, call_native_dht_client, ZkDHTIntegration, DHTNetworkStatus};
 
 // Web4 domain registry and content publishing
 pub use crate::web4::{Web4Manager, DomainRegistry, ContentPublisher, initialize_web4_system, initialize_web4_system_with_storage};
@@ -127,28 +127,32 @@ pub async fn get_latency_statistics() -> Result<LatencyStatistics> {
 }
 
 /// Initialize complete mesh network with DHT client integration
-pub async fn initialize_mesh_with_dht(identity: lib_identity::ZhtpIdentity) -> Result<(ZhtpMeshServer, DHTClient)> {
+pub async fn initialize_mesh_with_dht(identity: lib_identity::ZhtpIdentity) -> Result<(ZhtpMeshServer, ())> {
     info!("Initializing complete mesh network with DHT integration...");
     
     // Initialize mesh server
     let mesh_server = crate::testing::test_utils::create_test_mesh_server().await?;
     
     // Initialize DHT client with lib-storage backend
-    let dht_client = initialize_dht_client(identity).await?;
+    initialize_dht_client().await?;
     
     info!("Mesh network with DHT client integration ready");
-    Ok((mesh_server, dht_client))
+    Ok((mesh_server, ()))
 }
 
 /// Serve a Web4 page through the integrated mesh network and DHT
 pub async fn serve_web4_page_through_mesh(
-    dht_client: &mut DHTClient, 
     url: &str
-) -> Result<serde_json::Value> {
+) -> Result<String> {
     info!("Serving Web4 page through integrated mesh+DHT: {}", url);
     
+    // Parse URL to get domain and path
+    let parts: Vec<&str> = url.split('/').collect();
+    let domain = parts.get(0).unwrap_or(&"");
+    let path = if parts.len() > 1 { parts[1..].join("/") } else { String::new() };
+    
     // Use the DHT client to serve the page through lib-storage backend
-    serve_web4_page(dht_client, url).await
+    serve_web4_page(domain, &path).await
 }
 
 // Constants

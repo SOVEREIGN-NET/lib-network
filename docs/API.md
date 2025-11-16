@@ -182,7 +182,7 @@ pub enum NetworkProtocol {
 }
 ```
 
-## 🔍 Hardware Discovery API
+##  Hardware Discovery API
 
 ### HardwareCapabilities
 
@@ -220,7 +220,7 @@ pub struct HardwareDevice {
 }
 ```
 
-## 📡 DHT Protocol API
+##  DHT Protocol API
 
 ### DhtProtocolHandler
 
@@ -432,7 +432,7 @@ pub async fn scan_macos_bluetooth() -> Result<Vec<String>>
 pub async fn get_macos_interfaces() -> Result<Vec<String>>
 ```
 
-## 🔄 Message Types
+##  Message Types
 
 ### ZhtpMeshMessage
 
@@ -535,7 +535,7 @@ mod tests {
 }
 ```
 
-## 🔧 Configuration
+##  Configuration
 
 ### Environment Variables
 
@@ -557,4 +557,4 @@ security-enhancements = []
 
 ---
 
-This API documentation covers the complete lib-network interface for building mesh networking applications with ZHTP. 🚀
+This API documentation covers the complete lib-network interface for building mesh networking applications with ZHTP. 

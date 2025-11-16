@@ -145,6 +145,30 @@ impl MeshMessageHandler {
             ZhtpMeshMessage::HeadersResponse { request_id, headers, start_height } => {
                 self.handle_headers_response(request_id, headers, start_height).await?;
             },
+            ZhtpMeshMessage::DhtStore { requester, request_id, key, value, ttl, signature } => {
+                self.handle_dht_store(requester, request_id, key, value, ttl, signature).await?;
+            },
+            ZhtpMeshMessage::DhtStoreAck { request_id, success, stored_count } => {
+                self.handle_dht_store_ack(request_id, success, stored_count).await?;
+            },
+            ZhtpMeshMessage::DhtFindValue { requester, request_id, key, max_hops } => {
+                self.handle_dht_find_value(requester, request_id, key, max_hops).await?;
+            },
+            ZhtpMeshMessage::DhtFindValueResponse { request_id, found, value, closer_nodes } => {
+                self.handle_dht_find_value_response(request_id, found, value, closer_nodes).await?;
+            },
+            ZhtpMeshMessage::DhtFindNode { requester, request_id, target_id, max_hops } => {
+                self.handle_dht_find_node(requester, request_id, target_id, max_hops).await?;
+            },
+            ZhtpMeshMessage::DhtFindNodeResponse { request_id, closer_nodes } => {
+                self.handle_dht_find_node_response(request_id, closer_nodes).await?;
+            },
+            ZhtpMeshMessage::DhtPing { requester, request_id, timestamp } => {
+                self.handle_dht_ping(requester, request_id, timestamp).await?;
+            },
+            ZhtpMeshMessage::DhtPong { request_id, timestamp } => {
+                self.handle_dht_pong(request_id, timestamp).await?;
+            },
         }
         Ok(())
     }
@@ -204,7 +228,7 @@ impl MeshMessageHandler {
         info!("📞 P2P mesh routing request: {} kbps for {} minutes", 
               bandwidth_needed_kbps, duration_minutes);
         
-        // ZHTP provides direct peer-to-peer mesh routing without ISP bypass
+        // ZHTP provides direct peer-to-peer mesh routing without 
         let relays = self.long_range_relays.read().await;
         if !relays.is_empty() {
             info!("Mesh relay capacity available for P2P routing");
@@ -302,21 +326,69 @@ impl MeshMessageHandler {
         info!("UBI distribution: {} tokens to recipient (round {})", 
               amount_tokens, distribution_round);
         
-        // TODO: Implement actual ZK proof verification using lib-proofs
-        // For now, reject if proof is empty
+        // Verify ZK proof using lib-proofs
         if proof.is_empty() {
-            warn!("❌ Empty ZK proof for UBI distribution - rejecting");
+            warn!(" Empty ZK proof for UBI distribution - rejecting");
             return Err(anyhow::anyhow!("UBI distribution requires valid ZK proof"));
         }
         
-        // Placeholder: actual verification would use lib-proofs
-        // verification_result = lib_proofs::verify_ubi_proof(&proof, &recipient, amount_tokens, distribution_round)?;
-        let verification_result = true; // TODO: Replace with actual verification
+        // Deserialize and verify the proof
+        // The proof format depends on the UBI distribution circuit implementation
+        let verification_result = match bincode::deserialize::<lib_proofs::ZkProof>(&proof) {
+            Ok(zk_proof) => {
+                // Use the recursive verifier for chain proofs (UBI is a chain operation)
+                let verifier = lib_proofs::verifiers::RecursiveProofAggregator::new()?;
+                
+                // For UBI distribution, we need to verify:
+                // 1. The recipient is eligible (identity proof)
+                // 2. The amount matches the current round distribution
+                // 3. The distribution round hasn't been claimed before (replay protection)
+                
+                // Note: The actual proof structure depends on the circuit implementation
+                // For now, we perform basic verification
+                match bincode::deserialize::<lib_proofs::ChainRecursiveProof>(&proof) {
+                    Ok(chain_proof) => {
+                        match verifier.verify_recursive_chain_proof(&chain_proof) {
+                            Ok(result) => result,
+                            Err(e) => {
+                                warn!("ZK proof verification error: {}", e);
+                                false
+                            }
+                        }
+                    },
+                    Err(_) => {
+                        // Try identity proof verification as fallback
+                        let identity_verifier = lib_proofs::verifiers::IdentityVerifier::new();
+                        match bincode::deserialize::<lib_proofs::ZkIdentityProof>(&proof) {
+                            Ok(identity_proof) => {
+                                match identity_verifier.verify_identity(&identity_proof) {
+                                    Ok(result) => result.is_valid(),
+                                    Err(e) => {
+                                        warn!("Identity proof verification error: {}", e);
+                                        false
+                                    }
+                                }
+                            },
+                            Err(e) => {
+                                warn!("Failed to deserialize proof: {}", e);
+                                false
+                            }
+                        }
+                    }
+                }
+            },
+            Err(e) => {
+                warn!("Failed to deserialize ZK proof: {}", e);
+                false
+            }
+        };
         
         if !verification_result {
             warn!("Invalid ZK proof for UBI distribution - rejecting");
             return Err(anyhow::anyhow!("Invalid ZK proof for UBI distribution"));
         }
+        
+        info!(" ZK proof verified successfully for UBI distribution");
         
         // Validate distribution round to prevent replay attacks
         let mut pools = self.revenue_pools.write().await;
@@ -378,11 +450,11 @@ impl MeshMessageHandler {
         // Validate timestamp (replay protection)
         let now = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs();
         if now.abs_diff(timestamp) > 300 {  // 5 minute window
-            warn!("❌ Request timestamp too old/future: {} vs {}", timestamp, now);
+            warn!(" Request timestamp too old/future: {} vs {}", timestamp, now);
             return self.send_error_response(requester, 400, "Request timestamp invalid".to_string()).await;
         }
         
-        info!("✅ Timestamp valid, headers: {}, body: {} bytes", headers.len(), body.len());
+        info!(" Timestamp valid, headers: {}, body: {} bytes", headers.len(), body.len());
         
         // For Phase 3, we'll create a simplified ZHTP response
         // In production, this would forward to lib-protocols ZHTP server
@@ -431,7 +503,7 @@ impl MeshMessageHandler {
         info!("📤 Sending response {} {} back to requester", status, status_message);
         self.send_response_to_requester(requester, response_message).await?;
         
-        info!("✅ ZHTP Request processed: {} {}", method, uri);
+        info!(" ZHTP Request processed: {} {}", method, uri);
         
         Ok(())
     }
@@ -450,12 +522,12 @@ impl MeshMessageHandler {
                     response,
                     my_id.clone()
                 ).await?;
-                info!("✅ Response routed back to requester");
+                info!(" Response routed back to requester");
             } else {
-                warn!("⚠️ Node ID not set, cannot send response");
+                warn!(" Node ID not set, cannot send response");
             }
         } else {
-            warn!("⚠️ Message router not available, cannot send response");
+            warn!(" Message router not available, cannot send response");
         }
         Ok(())
     }
@@ -526,12 +598,12 @@ impl MeshMessageHandler {
         request_id: u64,
         request_type: crate::types::mesh_message::BlockchainRequestType,
     ) -> Result<()> {
-        info!("📦 Blockchain request from peer {:?} (request_id: {}, type: {:?})", 
+        info!(" Blockchain request from peer {:?} (request_id: {}, type: {:?})", 
               hex::encode(&requester.key_id[0..8]), request_id, request_type);
         
         // TODO: Implement blockchain integration at application layer
         // This functionality requires lib-blockchain which would create a circular dependency
-        warn!("⚠️ Blockchain integration not yet implemented (circular dependency issue)");
+        warn!(" Blockchain integration not yet implemented (circular dependency issue)");
         Ok(())
     }
     
@@ -570,7 +642,7 @@ impl MeshMessageHandler {
         let chunks: Vec<&[u8]> = data.chunks(chunk_size).collect();
         let total_chunks = chunks.len() as u32;
         
-        info!("📦 Chunking {} bytes into {} chunks of ~{} bytes", data.len(), total_chunks, chunk_size);
+        info!(" Chunking {} bytes into {} chunks of ~{} bytes", data.len(), total_chunks, chunk_size);
         
         // Create ZhtpMeshMessage for each chunk
         let messages: Vec<ZhtpMeshMessage> = chunks.into_iter().enumerate().map(|(i, chunk)| {
@@ -597,7 +669,7 @@ impl MeshMessageHandler {
         data: Vec<u8>,
         complete_data_hash: [u8; 32],
     ) -> Result<()> {
-        info!("📦 Blockchain data chunk {}/{} received ({} bytes, request_id: {})", 
+        info!(" Blockchain data chunk {}/{} received ({} bytes, request_id: {})", 
               chunk_index + 1, total_chunks, data.len(), request_id);
         
         // Add chunk to sync manager for reassembly
@@ -609,7 +681,7 @@ impl MeshMessageHandler {
                 // TODO: Forward complete blockchain data to application layer for import
                 // This requires lib-blockchain which would create a circular dependency
                 // The unified_server handles this properly in handle_udp_mesh()
-                info!("✅ Blockchain chunks reassembled successfully");
+                info!(" Blockchain chunks reassembled successfully");
                 info!("   Application layer should import this data via blockchain.evaluate_and_merge_chain()");
             }
             Ok(None) => {
@@ -633,11 +705,11 @@ impl MeshMessageHandler {
         height: u64,
         timestamp: u64,
     ) -> Result<()> {
-        info!("📦 New block announcement: height {} from {:?} ({} bytes)", 
+        info!(" New block announcement: height {} from {:?} ({} bytes)", 
               height, hex::encode(&sender.key_id[0..4]), block.len());
         
         // TODO: Implement blockchain integration at application layer
-        warn!("⚠️ Blockchain integration not yet implemented (circular dependency issue)");
+        warn!(" Blockchain integration not yet implemented (circular dependency issue)");
         
         Ok(())
     }
@@ -651,13 +723,13 @@ impl MeshMessageHandler {
         tx_hash: [u8; 32],
         fee: u64,
     ) -> Result<()> {
-        info!("💰 New transaction from {:?}: hash={}, fee={}", 
+        info!(" New transaction from {:?}: hash={}, fee={}", 
               hex::encode(&sender.key_id[0..4]), 
               hex::encode(&tx_hash[0..8]),
               fee);
         
         // TODO: Implement blockchain integration at application layer
-        warn!("⚠️ Blockchain integration not yet implemented (circular dependency issue)");
+        warn!(" Blockchain integration not yet implemented (circular dependency issue)");
         
         Ok(())
     }
@@ -676,30 +748,30 @@ impl MeshMessageHandler {
         request_id: u64,
         current_height: u64,
     ) -> Result<()> {
-        info!("🔐 Bootstrap proof request from edge node {:?} at height {}", 
+        info!(" Bootstrap proof request from edge node {:?} at height {}", 
               hex::encode(&requester.key_id[0..4]), 
               current_height);
         
         // Check if blockchain is available
         if !self.blockchain_provider.is_available().await {
-            warn!("⚠️ Blockchain not available - cannot generate bootstrap proof");
+            warn!(" Blockchain not available - cannot generate bootstrap proof");
             return Err(anyhow!("Blockchain not available"));
         }
         
         // Get current blockchain height
         let chain_tip_height = self.blockchain_provider.get_current_height().await?;
-        info!("📊 Current chain height: {}, edge node at: {}", chain_tip_height, current_height);
+        info!(" Current chain height: {}, edge node at: {}", chain_tip_height, current_height);
         
         // Get the recursive chain proof (cached or generated)
         let chain_proof = self.blockchain_provider.get_chain_proof(chain_tip_height).await?;
-        info!("✅ Got chain proof for height {}", chain_proof.chain_tip_height);
+        info!(" Got chain proof for height {}", chain_proof.chain_tip_height);
         
         // Get recent headers for edge node (last 500 blocks or less)
         let headers_count = std::cmp::min(500, chain_tip_height.saturating_sub(current_height));
         let start_height = chain_tip_height.saturating_sub(headers_count) + 1;
         
         let headers = self.blockchain_provider.get_headers(start_height, headers_count).await?;
-        info!("📦 Fetched {} headers starting from height {}", headers.len(), start_height);
+        info!(" Fetched {} headers starting from height {}", headers.len(), start_height);
         
         // Serialize headers
         let serialized_headers: Vec<Vec<u8>> = headers.iter()
@@ -724,12 +796,12 @@ impl MeshMessageHandler {
             let router_lock = router.read().await;
             if let Some(sender_node_id) = &self.node_id {
                 router_lock.route_message(response_message, requester, sender_node_id.clone()).await?;
-                info!("✅ Bootstrap proof response sent to edge node");
+                info!(" Bootstrap proof response sent to edge node");
             } else {
-                warn!("⚠️ Node ID not set - cannot send response");
+                warn!(" Node ID not set - cannot send response");
             }
         } else {
-            warn!("⚠️ Message router not available - cannot send response");
+            warn!(" Message router not available - cannot send response");
         }
         
         Ok(())
@@ -752,7 +824,7 @@ impl MeshMessageHandler {
         proof_height: u64,
         headers: Vec<Vec<u8>>,
     ) -> Result<()> {
-        info!("🔐 Bootstrap proof response: {} headers at height {}", 
+        info!(" Bootstrap proof response: {} headers at height {}", 
               headers.len(), 
               proof_height);
         
@@ -760,7 +832,7 @@ impl MeshMessageHandler {
         let edge_sync = match &self.edge_sync_manager {
             Some(sync) => sync,
             None => {
-                warn!("⚠️ Edge sync manager not configured - ignoring bootstrap proof");
+                warn!(" Edge sync manager not configured - ignoring bootstrap proof");
                 return Ok(());
             }
         };
@@ -770,7 +842,7 @@ impl MeshMessageHandler {
         let chain_proof: ChainRecursiveProof = bincode::deserialize(&proof_data)
             .map_err(|e| anyhow!("Failed to deserialize chain proof: {}", e))?;
         
-        info!("📊 Chain proof: tip={}, genesis={}, txs={}", 
+        info!(" Chain proof: tip={}, genesis={}, txs={}", 
               chain_proof.chain_tip_height, 
               chain_proof.genesis_height,
               chain_proof.total_transaction_count);
@@ -780,10 +852,10 @@ impl MeshMessageHandler {
         let is_valid = aggregator.verify_recursive_chain_proof(&chain_proof)?;
         
         if !is_valid {
-            return Err(anyhow!("❌ Invalid bootstrap proof from validator!"));
+            return Err(anyhow!(" Invalid bootstrap proof from validator!"));
         }
         
-        info!("✅ Bootstrap proof VALID! Chain proven up to height {}", chain_proof.chain_tip_height);
+        info!(" Bootstrap proof VALID! Chain proven up to height {}", chain_proof.chain_tip_height);
         
         // Deserialize headers
         let block_headers: Vec<lib_blockchain::block::BlockHeader> = headers.iter()
@@ -794,7 +866,7 @@ impl MeshMessageHandler {
         // Process headers through edge node sync manager
         edge_sync.process_bootstrap_proof(proof_data, proof_height, block_headers).await?;
         
-        info!("✅ Edge node bootstrapped to height {} with {} headers", 
+        info!(" Edge node bootstrapped to height {} with {} headers", 
               proof_height, 
               headers.len());
         
@@ -817,14 +889,14 @@ impl MeshMessageHandler {
         start_height: u64,
         count: u32,
     ) -> Result<()> {
-        info!("📦 Headers request from {:?}: start={}, count={}", 
+        info!(" Headers request from {:?}: start={}, count={}", 
               hex::encode(&requester.key_id[0..4]), 
               start_height, 
               count);
         
         // Check if blockchain is available
         if !self.blockchain_provider.is_available().await {
-            warn!("⚠️ Blockchain not available - cannot fetch headers");
+            warn!(" Blockchain not available - cannot fetch headers");
             return Err(anyhow!("Blockchain not available"));
         }
         
@@ -833,7 +905,7 @@ impl MeshMessageHandler {
         
         // Fetch headers from blockchain
         let headers = self.blockchain_provider.get_headers(start_height, safe_count).await?;
-        info!("✅ Fetched {} headers starting at height {}", headers.len(), start_height);
+        info!(" Fetched {} headers starting at height {}", headers.len(), start_height);
         
         // Serialize headers
         let serialized_headers: Vec<Vec<u8>> = headers.iter()
@@ -855,10 +927,10 @@ impl MeshMessageHandler {
                 router_lock.route_message(response_message, requester, sender_node_id.clone()).await?;
                 info!("📤 Sent {} headers to edge node", headers.len());
             } else {
-                warn!("⚠️ Node ID not set - cannot send response");
+                warn!(" Node ID not set - cannot send response");
             }
         } else {
-            warn!("⚠️ Message router not available - cannot send response");
+            warn!(" Message router not available - cannot send response");
         }
         
         Ok(())
@@ -877,7 +949,7 @@ impl MeshMessageHandler {
         headers: Vec<Vec<u8>>,
         start_height: u64,
     ) -> Result<()> {
-        info!("📦 Headers response: {} headers from height {}", 
+        info!(" Headers response: {} headers from height {}", 
               headers.len(), 
               start_height);
         
@@ -885,7 +957,7 @@ impl MeshMessageHandler {
         let edge_sync = match &self.edge_sync_manager {
             Some(sync) => sync,
             None => {
-                warn!("⚠️ Edge sync manager not configured - ignoring headers");
+                warn!(" Edge sync manager not configured - ignoring headers");
                 return Ok(());
             }
         };
@@ -900,7 +972,7 @@ impl MeshMessageHandler {
         edge_sync.process_headers(block_headers).await?;
         
         let current_height = edge_sync.current_height().await;
-        info!("✅ Edge node synced {} headers, now at height {}", 
+        info!(" Edge node synced {} headers, now at height {}", 
               headers.len(), 
               current_height);
         
@@ -908,12 +980,96 @@ impl MeshMessageHandler {
         if self.blockchain_provider.is_available().await {
             if let Ok(network_height) = self.blockchain_provider.get_current_height().await {
                 if network_height.saturating_sub(current_height) > 100 {
-                    info!("🔄 Still {} blocks behind, may need more headers", 
+                    info!(" Still {} blocks behind, may need more headers", 
                           network_height - current_height);
                 }
             }
         }
         
+        Ok(())
+    }
+
+    // DHT message handlers
+    // Note: These are protocol-level handlers. Actual DHT logic is in lib-storage.
+    // The application layer (zhtp) should handle DHT operations through ZkDHTIntegration.
+    
+    async fn handle_dht_store(&self, requester: PublicKey, request_id: u64, key: Vec<u8>, value: Vec<u8>, ttl: u64, _signature: Vec<u8>) -> Result<()> {
+        info!("DHT Store request from {:?}: key={} bytes, value={} bytes, ttl={}", 
+              requester, key.len(), value.len(), ttl);
+        
+        // DHT storage operations should be implemented at the application layer
+        // through ZkDHTIntegration. This handler just logs the request.
+        // In a full implementation, this would forward to the local DHT node.
+        
+        warn!("DHT Store: Application layer should implement through ZkDHTIntegration");
+        Ok(())
+    }
+    
+    async fn handle_dht_store_ack(&self, request_id: u64, success: bool, stored_count: u32) -> Result<()> {
+        info!("DHT Store ACK: request_id={}, success={}, stored_count={}", 
+              request_id, success, stored_count);
+        
+        // This confirms a previous store request completed
+        // Application layer should track pending requests
+        Ok(())
+    }
+    
+    async fn handle_dht_find_value(&self, requester: PublicKey, request_id: u64, key: Vec<u8>, max_hops: u8) -> Result<()> {
+        info!("DHT Find Value from {:?}: key={} bytes, max_hops={}", 
+              requester, key.len(), max_hops);
+        
+        // DHT lookup operations should be implemented at the application layer
+        // This would query the local DHT storage and return the value or closer nodes
+        
+        warn!("DHT Find Value: Application layer should implement through ZkDHTIntegration");
+        Ok(())
+    }
+    
+    async fn handle_dht_find_value_response(&self, request_id: u64, found: bool, value: Option<Vec<u8>>, closer_nodes: Vec<PublicKey>) -> Result<()> {
+        info!("DHT Find Value Response: request_id={}, found={}, value={} bytes, closer_nodes={}", 
+              request_id, found, value.as_ref().map(|v| v.len()).unwrap_or(0), closer_nodes.len());
+        
+        // This is a response to a previous find_value request
+        // Application layer should match this with the pending request
+        Ok(())
+    }
+    
+    async fn handle_dht_find_node(&self, requester: PublicKey, request_id: u64, target_id: Vec<u8>, max_hops: u8) -> Result<()> {
+        info!("DHT Find Node from {:?}: target_id={} bytes, max_hops={}", 
+              requester, target_id.len(), max_hops);
+        
+        // DHT node discovery operations should be implemented at the application layer
+        // This would query the routing table for nodes closer to target_id
+        
+        warn!("DHT Find Node: Application layer should implement through ZkDHTIntegration");
+        Ok(())
+    }
+    
+    async fn handle_dht_find_node_response(&self, request_id: u64, closer_nodes: Vec<(PublicKey, String)>) -> Result<()> {
+        info!("DHT Find Node Response: request_id={}, closer_nodes={}", 
+              request_id, closer_nodes.len());
+        
+        // This is a response to a previous find_node request
+        // Application layer should use these nodes to continue the search
+        Ok(())
+    }
+    
+    async fn handle_dht_ping(&self, requester: PublicKey, request_id: u64, timestamp: u64) -> Result<()> {
+        debug!("DHT Ping from {:?}: request_id={}, timestamp={}", 
+               requester, request_id, timestamp);
+        
+        // DHT ping is used to keep nodes alive in the routing table
+        // Should respond with a pong message
+        
+        // In a full implementation, we would send a DhtPong response here
+        Ok(())
+    }
+    
+    async fn handle_dht_pong(&self, request_id: u64, timestamp: u64) -> Result<()> {
+        debug!("DHT Pong: request_id={}, timestamp={}", request_id, timestamp);
+        
+        // This confirms the peer is still alive
+        // Application layer should update the routing table's last_seen timestamp
         Ok(())
     }
 }

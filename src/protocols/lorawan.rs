@@ -400,7 +400,7 @@ impl LoRaWANMeshProtocol {
         // Send via existing send_mesh_message (handles fragmentation if needed)
         self.send_mesh_message(&target_address, &bytes).await?;
         
-        info!("✅ LoRaWAN mesh envelope sent successfully");
+        info!(" LoRaWAN mesh envelope sent successfully");
         
         Ok(())
     }

@@ -161,8 +161,10 @@ pub struct CoreBluetoothManager {
     central_manager: Arc<Mutex<Option<CBCentralManagerHandle>>>,
     /// Peripheral manager for advertising and GATT server
     peripheral_manager: Arc<Mutex<Option<CBPeripheralManagerHandle>>>,
-    /// Discovered peripherals cache
+    /// Discovered peripherals cache (when we act as central and scan)
     discovered_peripherals: Arc<RwLock<HashMap<String, CBPeripheralHandle>>>,
+    /// Connected centrals cache (when we act as peripheral and receive connections)
+    connected_centrals: Arc<RwLock<HashMap<String, usize>>>, // central_id -> CBCentral pointer
     /// GATT service cache
     services_cache: Arc<RwLock<HashMap<String, Vec<CBServiceHandle>>>>,
     /// Characteristic value cache for notifications
@@ -288,7 +290,7 @@ pub struct CBPeripheralManagerDelegate {
 impl CoreBluetoothManager {
     /// Create new Core Bluetooth manager
     pub fn new() -> Result<Self> {
-        info!("🔄 Initializing Core Bluetooth for macOS");
+        info!(" Initializing Core Bluetooth for macOS");
         
         // Create event channel for Core Bluetooth callbacks
         let (event_sender, event_receiver) = tokio::sync::mpsc::unbounded_channel();
@@ -297,6 +299,7 @@ impl CoreBluetoothManager {
             central_manager: Arc::new(Mutex::new(None)),
             peripheral_manager: Arc::new(Mutex::new(None)),
             discovered_peripherals: Arc::new(RwLock::new(HashMap::new())),
+            connected_centrals: Arc::new(RwLock::new(HashMap::new())),
             services_cache: Arc::new(RwLock::new(HashMap::new())),
             characteristic_values: Arc::new(RwLock::new(HashMap::new())),
             notification_handlers: Arc::new(RwLock::new(HashMap::new())),
@@ -310,7 +313,7 @@ impl CoreBluetoothManager {
     /// Set GATT message channel for forwarding GATT writes to unified server
     pub async fn set_gatt_message_channel(&self, tx: tokio::sync::mpsc::UnboundedSender<crate::protocols::bluetooth::GattMessage>) {
         *self.gatt_message_tx.write().await = Some(tx);
-        info!("✅ GATT message channel connected to CoreBluetoothManager");
+        info!(" GATT message channel connected to CoreBluetoothManager");
     }
     
     /// Start event processing loop (must be called after initialization)
@@ -328,10 +331,10 @@ impl CoreBluetoothManager {
             while let Some(event) = receiver.recv().await {
                 match event {
                     CoreBluetoothEvent::StateChanged(state) => {
-                        info!("📡 Bluetooth state: {:?}", state);
+                        info!(" Bluetooth state: {:?}", state);
                     }
                     CoreBluetoothEvent::PeripheralDiscovered { identifier, name, rssi, advertisement_data, peripheral_ptr } => {
-                        info!("🔍 Discovered: {} ({}), RSSI: {}", 
+                        info!(" Discovered: {} ({}), RSSI: {}", 
                               name.as_deref().unwrap_or("Unknown"), identifier, rssi);
                         
                         let mut cache = peripherals.write().await;
@@ -345,13 +348,13 @@ impl CoreBluetoothManager {
                         });
                     }
                     CoreBluetoothEvent::PeripheralConnected(id) => {
-                        info!("✅ Connected: {}", id);
+                        info!(" Connected: {}", id);
                     }
                     CoreBluetoothEvent::PeripheralDisconnected(id) => {
-                        info!("❌ Disconnected: {}", id);
+                        info!(" Disconnected: {}", id);
                     }
                     CoreBluetoothEvent::ServicesDiscovered { peripheral_id, service_uuids } => {
-                        info!("📋 Services discovered for {}: {} services", peripheral_id, service_uuids.len());
+                        info!(" Services discovered for {}: {} services", peripheral_id, service_uuids.len());
                         let mut cache = services_cache.write().await;
                         // Convert Vec<String> to Vec<CBServiceHandle>
                         let service_handles: Vec<CBServiceHandle> = service_uuids.into_iter()
@@ -382,12 +385,12 @@ impl CoreBluetoothManager {
                         debug!("✍️ Write completed: {} / {}", peripheral_id, characteristic_uuid);
                     }
                     CoreBluetoothEvent::NotificationStateChanged { peripheral_id, characteristic_uuid, enabled } => {
-                        info!("🔔 Notifications {} for {} / {}", 
+                        info!(" Notifications {} for {} / {}", 
                               if enabled { "enabled" } else { "disabled" }, 
                               peripheral_id, characteristic_uuid);
                     }
                     CoreBluetoothEvent::AdvertisingStarted => {
-                        info!("📢 Advertising started");
+                        info!(" Advertising started");
                     }
                     CoreBluetoothEvent::ServiceAdded(uuid) => {
                         info!("➕ Service added: {}", uuid);
@@ -398,6 +401,16 @@ impl CoreBluetoothManager {
                     CoreBluetoothEvent::WriteRequest { central_id, characteristic_uuid, value } => {
                         info!("✍️ Write request from {} for {} ({} bytes)", 
                                central_id, characteristic_uuid, value.len());
+                        
+                        // Store this central in connected_centrals for future transmissions
+                        {
+                            let mut centrals = manager_ref.connected_centrals.write().await;
+                            if !centrals.contains_key(&central_id) {
+                                // Store with dummy pointer (0) - we use peripheral manager for sending
+                                centrals.insert(central_id.clone(), 0);
+                                info!("    Cached connected central: {}", central_id);
+                            }
+                        }
                         
                         // Try to deserialize as MeshHandshake
                         if value.len() >= 20 { // Minimum handshake size
@@ -447,12 +460,12 @@ impl CoreBluetoothManager {
                                             drop(subscriptions);
                                             
                                             if subscriber_count > 0 {
-                                                info!("   ✅ Found {} subscriber(s) after {}ms", subscriber_count, waited_ms);
+                                                info!("    Found {} subscriber(s) after {}ms", subscriber_count, waited_ms);
                                                 break;
                                             }
                                             
                                             if waited_ms >= max_wait_ms {
-                                                warn!("   ⚠️ No subscribers found after {}ms - sending anyway", waited_ms);
+                                                warn!("    No subscribers found after {}ms - sending anyway", waited_ms);
                                                 break;
                                             }
                                             
@@ -461,16 +474,16 @@ impl CoreBluetoothManager {
                                         }
                                         
                                         if let Err(e) = mgr.send_notification(&char_uuid_for_task, &response).await {
-                                            warn!("⚠️ Failed to send handshake response notification: {}", e);
+                                            warn!(" Failed to send handshake response notification: {}", e);
                                         } else {
-                                            info!("✅ Handshake response notification sent");
+                                            info!(" Handshake response notification sent");
                                         }
                                     });
                                     
-                                    info!("✅ MeshHandshake successfully processed from peer {}", handshake.node_id);
+                                    info!(" MeshHandshake successfully processed from peer {}", handshake.node_id);
                                 }
                                 Err(e) => {
-                                    warn!("⚠️ Not a MeshHandshake: {} ({} bytes received)", e, value.len());
+                                    warn!(" Not a MeshHandshake: {} ({} bytes received)", e, value.len());
                                     debug!("   Forwarding raw data to unified server for ZhtpMeshMessage parsing");
                                     
                                     // Forward non-handshake messages (HeadersRequest, HeadersResponse, etc.) to unified server
@@ -513,7 +526,7 @@ impl CoreBluetoothManager {
                         }
                     }
                     CoreBluetoothEvent::CentralSubscribed { central_id, characteristic_uuid } => {
-                        info!("🔔 Central {} subscribed to characteristic {}", central_id, characteristic_uuid);
+                        info!(" Central {} subscribed to characteristic {}", central_id, characteristic_uuid);
                         
                         // Track subscription
                         let mut subscriptions = manager_ref.subscribed_centrals.write().await;
@@ -557,7 +570,7 @@ impl CoreBluetoothManager {
         let manager = self.create_central_manager(delegate).await?;
         *central = Some(manager);
         
-        info!("✅ Core Bluetooth central manager initialized");
+        info!(" Core Bluetooth central manager initialized");
         Ok(())
     }
     
@@ -573,7 +586,7 @@ impl CoreBluetoothManager {
         let manager = self.create_peripheral_manager(delegate).await?;
         *peripheral = Some(manager);
         
-        info!("✅ Core Bluetooth peripheral manager initialized");
+        info!(" Core Bluetooth peripheral manager initialized");
         Ok(())
     }
     
@@ -582,7 +595,7 @@ impl CoreBluetoothManager {
         let central = self.central_manager.lock().await;
         
         if let Some(manager) = central.as_ref() {
-            info!("🔍 Starting BLE scan with Core Bluetooth");
+            info!(" Starting BLE scan with Core Bluetooth");
             
             // Check current state
             unsafe {
@@ -603,7 +616,7 @@ impl CoreBluetoothManager {
             // Call native CBCentralManager scanForPeripheralsWithServices
             self.native_start_scan(manager, service_uuids).await?;
             
-            info!("📡 BLE scan started successfully - waiting for delegate callbacks...");
+            info!(" BLE scan started successfully - waiting for delegate callbacks...");
             Ok(())
         } else {
             Err(anyhow!("Central manager not initialized"))
@@ -629,11 +642,11 @@ impl CoreBluetoothManager {
         let peripherals = self.discovered_peripherals.read().await;
         
         if let (Some(manager), Some(peripheral)) = (central.as_ref(), peripherals.get(identifier)) {
-            info!("🔗 Connecting to peripheral: {}", identifier);
+            info!(" Connecting to peripheral: {}", identifier);
             
             self.native_connect_peripheral(manager, peripheral).await?;
             
-            info!("✅ Connection initiated to: {}", identifier);
+            info!(" Connection initiated to: {}", identifier);
             Ok(())
         } else {
             Err(anyhow!("Central manager not initialized or peripheral not found"))
@@ -647,7 +660,7 @@ impl CoreBluetoothManager {
         
         if let (Some(manager), Some(peripheral)) = (central.as_ref(), peripherals.get(identifier)) {
             self.native_disconnect_peripheral(manager, peripheral).await?;
-            info!("❌ Disconnected from: {}", identifier);
+            info!(" Disconnected from: {}", identifier);
             Ok(())
         } else {
             Err(anyhow!("Central manager not initialized or peripheral not found"))
@@ -659,7 +672,7 @@ impl CoreBluetoothManager {
         let peripherals = self.discovered_peripherals.read().await;
         
         if let Some(peripheral) = peripherals.get(identifier) {
-            info!("🔍 Discovering services for: {}", identifier);
+            info!(" Discovering services for: {}", identifier);
             
             let services = self.native_discover_services(peripheral).await?;
             
@@ -668,7 +681,7 @@ impl CoreBluetoothManager {
             cache.insert(identifier.to_string(), services.clone());
             
             let service_uuids: Vec<String> = services.iter().map(|s| s.uuid.clone()).collect();
-            info!("✅ Discovered {} services for {}", service_uuids.len(), identifier);
+            info!(" Discovered {} services for {}", service_uuids.len(), identifier);
             
             Ok(service_uuids)
         } else {
@@ -702,6 +715,12 @@ impl CoreBluetoothManager {
         }
     }
     
+    /// Check if identifier is a connected central (incoming connection)
+    pub async fn is_connected_central(&self, identifier: &str) -> bool {
+        let centrals = self.connected_centrals.read().await;
+        centrals.contains_key(identifier)
+    }
+    
     /// Write to GATT characteristic
     pub async fn write_characteristic(&self, identifier: &str, service_uuid: &str, char_uuid: &str, data: &[u8]) -> Result<()> {
         let peripherals = self.discovered_peripherals.read().await;
@@ -723,7 +742,7 @@ impl CoreBluetoothManager {
         if let Some(_peripheral) = peripherals.get(identifier) {
             self.native_enable_notifications(identifier, char_uuid).await?;
             
-            info!("🔔 Enabled notifications for characteristic: {}", char_uuid);
+            info!(" Enabled notifications for characteristic: {}", char_uuid);
             Ok(())
         } else {
             Err(anyhow!("Peripheral not found: {}", identifier))
@@ -735,7 +754,7 @@ impl CoreBluetoothManager {
         let peripheral = self.peripheral_manager.lock().await;
         
         if let Some(manager) = peripheral.as_ref() {
-            info!("📢 Starting GATT server advertising");
+            info!(" Starting GATT server advertising");
             
             // Wait for peripheral manager to be ready (powered on)
             // Core Bluetooth needs time to initialize after creation
@@ -744,7 +763,7 @@ impl CoreBluetoothManager {
             
             self.native_start_advertising(manager, service_uuid, characteristics).await?;
             
-            info!("✅ GATT advertising started with service: {}", service_uuid);
+            info!(" GATT advertising started with service: {}", service_uuid);
             Ok(())
         } else {
             Err(anyhow!("Peripheral manager not initialized"))
@@ -784,7 +803,7 @@ impl CoreBluetoothManager {
     }
     
     async fn create_central_manager(&self, delegate: CBCentralManagerDelegate) -> Result<CBCentralManagerHandle> {
-        info!("🔄 Creating CBCentralManager via FFI");
+        info!(" Creating CBCentralManager via FFI");
         
         unsafe {
             // Register delegate classes if not already done
@@ -814,9 +833,9 @@ impl CoreBluetoothManager {
             let dispatch_queue = dispatch_queue_create(queue_label.as_ptr(), std::ptr::null());
             
             if dispatch_queue.is_null() {
-                warn!("⚠️  Failed to create dispatch queue, using default queue");
+                warn!("  Failed to create dispatch queue, using default queue");
             } else {
-                info!("✅ Created dedicated dispatch queue for Core Bluetooth");
+                info!(" Created dedicated dispatch queue for Core Bluetooth");
             }
             
             // Allocate and initialize CBCentralManager with delegate and queue
@@ -834,7 +853,7 @@ impl CoreBluetoothManager {
                 return Err(anyhow!("Failed to create CBCentralManager"));
             }
             
-            info!("✅ CBCentralManager created successfully with delegate on dedicated queue");
+            info!(" CBCentralManager created successfully with delegate on dedicated queue");
             
             Ok(CBCentralManagerHandle {
                 manager_ptr: manager,
@@ -844,7 +863,7 @@ impl CoreBluetoothManager {
     }
     
     async fn create_peripheral_manager(&self, delegate: CBPeripheralManagerDelegate) -> Result<CBPeripheralManagerHandle> {
-        info!("🔄 Creating CBPeripheralManager via FFI");
+        info!(" Creating CBPeripheralManager via FFI");
         
         unsafe {
             // Register delegate classes if not already done
@@ -871,9 +890,9 @@ impl CoreBluetoothManager {
             let dispatch_queue = dispatch_queue_create(queue_label.as_ptr(), std::ptr::null());
             
             if dispatch_queue.is_null() {
-                warn!("⚠️  Failed to create dispatch queue for peripheral manager");
+                warn!("  Failed to create dispatch queue for peripheral manager");
             } else {
-                info!("✅ Created dedicated dispatch queue for peripheral manager");
+                info!(" Created dedicated dispatch queue for peripheral manager");
             }
             
             // Allocate and initialize with delegate and queue
@@ -888,7 +907,7 @@ impl CoreBluetoothManager {
                 return Err(anyhow!("Failed to create CBPeripheralManager"));
             }
             
-            info!("✅ CBPeripheralManager created successfully with delegate on dedicated queue");
+            info!(" CBPeripheralManager created successfully with delegate on dedicated queue");
             
             Ok(CBPeripheralManagerHandle {
                 manager_ptr: manager,
@@ -898,7 +917,7 @@ impl CoreBluetoothManager {
     }
     
     async fn native_start_scan(&self, manager: &CBCentralManagerHandle, service_uuids: Option<&[&str]>) -> Result<()> {
-        info!("📡 FFI: Starting peripheral scan");
+        info!(" FFI: Starting peripheral scan");
         
         unsafe {
             // Check manager state first
@@ -911,7 +930,7 @@ impl CoreBluetoothManager {
             
             // Build service UUID array if provided
             let ns_array = if let Some(uuids) = service_uuids {
-                info!("🎯 Scanning for services: {:?}", uuids);
+                info!(" Scanning for services: {:?}", uuids);
                 
                 // Get CBUUID class
                 let cbuuid_cls = AnyClass::get(c"CBUUID").ok_or_else(|| {
@@ -933,7 +952,7 @@ impl CoreBluetoothManager {
                 let array: *mut AnyObject = msg_send![array_cls, arrayWithObjects:uuid_objects.as_ptr() count:uuid_objects.len()];
                 Some(array)
             } else {
-                info!("🌐 Scanning for all peripherals");
+                info!(" Scanning for all peripherals");
                 None
             };
             
@@ -943,7 +962,7 @@ impl CoreBluetoothManager {
                 None => msg_send![manager.manager_ptr, scanForPeripheralsWithServices:std::ptr::null_mut::<Object>() options:std::ptr::null_mut::<Object>()],
             };
             
-            info!("✅ Scan started successfully");
+            info!(" Scan started successfully");
         }
         
         Ok(())
@@ -961,7 +980,7 @@ impl CoreBluetoothManager {
     }
     
     async fn native_connect_peripheral(&self, manager: &CBCentralManagerHandle, peripheral: &CBPeripheralHandle) -> Result<()> {
-        info!("🔗 FFI: Connecting to peripheral {}", peripheral.identifier);
+        info!(" FFI: Connecting to peripheral {}", peripheral.identifier);
         
         unsafe {
             // Get the peripheral object pointer
@@ -971,7 +990,7 @@ impl CoreBluetoothManager {
                 // [centralManager connectPeripheral:peripheral options:nil]
                 let _: () = msg_send![manager.manager_ptr, connectPeripheral:peripheral_obj options:std::ptr::null_mut::<Object>()];
                 
-                info!("✅ Connection initiated");
+                info!(" Connection initiated");
             } else {
                 return Err(anyhow!("Peripheral object pointer not available"));
             }
@@ -981,7 +1000,7 @@ impl CoreBluetoothManager {
     }
     
     async fn native_disconnect_peripheral(&self, manager: &CBCentralManagerHandle, peripheral: &CBPeripheralHandle) -> Result<()> {
-        info!("❌ FFI: Disconnecting from peripheral {}", peripheral.identifier);
+        info!(" FFI: Disconnecting from peripheral {}", peripheral.identifier);
         
         unsafe {
             if let Some(peripheral_ptr) = peripheral.peripheral_ptr {
@@ -990,7 +1009,7 @@ impl CoreBluetoothManager {
                 // [centralManager cancelPeripheralConnection:peripheral]
                 let _: () = msg_send![manager.manager_ptr, cancelPeripheralConnection:peripheral_obj];
                 
-                info!("✅ Disconnection initiated");
+                info!(" Disconnection initiated");
             } else {
                 return Err(anyhow!("Peripheral object pointer not available"));
             }
@@ -1000,7 +1019,7 @@ impl CoreBluetoothManager {
     }
     
     async fn native_discover_services(&self, peripheral: &CBPeripheralHandle) -> Result<Vec<CBServiceHandle>> {
-        info!("🔍 FFI: Discovering services for {}", peripheral.identifier);
+        info!(" FFI: Discovering services for {}", peripheral.identifier);
         
         unsafe {
             if let Some(peripheral_ptr) = peripheral.peripheral_ptr {
@@ -1014,13 +1033,13 @@ impl CoreBluetoothManager {
                 let services: *mut AnyObject = msg_send![peripheral_obj, services];
                 
                 if services.is_null() {
-                    info!("⚠️ No services discovered yet");
+                    info!(" No services discovered yet");
                     return Ok(Vec::new());
                 }
                 
                 // Get NSArray count
                 let count: usize = msg_send![services, count];
-                info!("📋 Found {} services", count);
+                info!(" Found {} services", count);
                 
                 let mut service_handles = Vec::new();
                 
@@ -1133,7 +1152,7 @@ impl CoreBluetoothManager {
                 let mut data = vec![0u8; length];
                 std::ptr::copy_nonoverlapping(bytes, data.as_mut_ptr(), length);
                 
-                info!("✅ Read {} bytes", data.len());
+                info!(" Read {} bytes", data.len());
                 Ok(data)
             } else {
                 Err(anyhow!("Peripheral object pointer not available"))
@@ -1212,7 +1231,7 @@ impl CoreBluetoothManager {
                 let write_type: i32 = 0; // With response
                 let _: () = msg_send![peripheral_obj, writeValue:ns_data forCharacteristic:characteristic type:write_type];
                 
-                info!("✅ Write initiated");
+                info!(" Write initiated");
                 Ok(())
             } else {
                 Err(anyhow!("Peripheral object pointer not available"))
@@ -1221,7 +1240,7 @@ impl CoreBluetoothManager {
     }
     
     async fn native_enable_notifications(&self, identifier: &str, char_uuid: &str) -> Result<()> {
-        info!("🔔 FFI: Enabling notifications for characteristic {}", char_uuid);
+        info!(" FFI: Enabling notifications for characteristic {}", char_uuid);
         
         unsafe {
             // Get peripheral from cache
@@ -1264,7 +1283,7 @@ impl CoreBluetoothManager {
                             let yes: bool = true;
                             let _: () = msg_send![peripheral_obj, setNotifyValue:yes forCharacteristic:characteristic];
                             
-                            info!("✅ Notifications enabled");
+                            info!(" Notifications enabled");
                             return Ok(());
                         }
                     }
@@ -1279,7 +1298,7 @@ impl CoreBluetoothManager {
     
     /// Register GATT service WITHOUT starting advertising (advertising started separately later)
     pub async fn register_service(&self, service_uuid: &str, characteristics: &[(&str, &[u8])]) -> Result<()> {
-        info!("📝 Registering GATT service {} (without advertising)", service_uuid);
+        info!(" Registering GATT service {} (without advertising)", service_uuid);
         
         let manager = self.peripheral_manager.lock().await;
         if let Some(ref mgr) = *manager {
@@ -1292,13 +1311,13 @@ impl CoreBluetoothManager {
     
     /// Register GATT service only (without advertising) - called before mesh advertising is started
     async fn native_register_service_only(&self, manager: &CBPeripheralManagerHandle, service_uuid: &str, characteristics: &[(&str, &[u8])]) -> Result<()> {
-        info!("📝 Registering GATT service {} without advertising", service_uuid);
+        info!(" Registering GATT service {} without advertising", service_uuid);
         
         // CRITICAL FIX: Remove all previously cached services before adding new one
         unsafe {
             info!("🧹 Removing all cached GATT services from CBPeripheralManager");
             let _: () = msg_send![manager.manager_ptr, removeAllServices];
-            info!("✅ All old services cleared - ready for fresh service registration");
+            info!(" All old services cleared - ready for fresh service registration");
         }
         
         // Wait for services to be fully removed
@@ -1345,7 +1364,7 @@ impl CoreBluetoothManager {
                     // Permissions: Readable | Writeable (0x01 | 0x02)
                     let permissions: u64 = 0x01 | 0x02;
                     
-                    info!("🔧 Creating characteristic {} with properties=0x{:X}, permissions=0x{:X}", char_uuid, properties, permissions);
+                    info!(" Creating characteristic {} with properties=0x{:X}, permissions=0x{:X}", char_uuid, properties, permissions);
                     
                     // Create characteristic
                     let characteristic: *mut AnyObject = msg_send![mutable_char_cls, alloc];
@@ -1373,26 +1392,26 @@ impl CoreBluetoothManager {
             }
             
             // Add service to peripheral manager
-            info!("🔄 Adding GATT service to peripheral manager");
+            info!(" Adding GATT service to peripheral manager");
             let _: () = msg_send![manager.manager_ptr, addService:service];
         }
         
         // Wait for service to be added
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
         
-        info!("✅ GATT service registered successfully (advertising to be started separately)");
+        info!(" GATT service registered successfully (advertising to be started separately)");
         Ok(())
     }
     
     async fn native_start_advertising(&self, manager: &CBPeripheralManagerHandle, service_uuid: &str, characteristics: &[(&str, &[u8])]) -> Result<()> {
-        info!("📢 FFI: Starting GATT advertising for service {}", service_uuid);
+        info!(" FFI: Starting GATT advertising for service {}", service_uuid);
         
         // CRITICAL FIX: Remove all previously cached services before adding new one
         // This clears old service UUIDs (C8, C9) from Core Bluetooth's persistent cache
         unsafe {
             info!("🧹 Removing all cached GATT services from CBPeripheralManager");
             let _: () = msg_send![manager.manager_ptr, removeAllServices];
-            info!("✅ All old services cleared - ready for fresh service registration");
+            info!(" All old services cleared - ready for fresh service registration");
         }
         
         // Wait a moment for services to be fully removed
@@ -1446,7 +1465,7 @@ impl CoreBluetoothManager {
                     // Mesh security is handled at application layer with ZK proofs
                     let permissions: u64 = 0x01 | 0x02; // Readable | Writeable (NO encryption required)
                     
-                    info!("🔧 Creating characteristic {} with properties=0x{:X} (Read|Write|Notify), permissions=0x{:X} (Readable|Writeable, NO encryption)", char_uuid, properties, permissions);
+                    info!(" Creating characteristic {} with properties=0x{:X} (Read|Write|Notify), permissions=0x{:X} (Readable|Writeable, NO encryption)", char_uuid, properties, permissions);
                     
                     // Create characteristic: [[CBMutableCharacteristic alloc] initWithType:UUID properties:props value:nil permissions:perms]
                     let characteristic: *mut AnyObject = msg_send![mutable_char_cls, alloc];
@@ -1477,7 +1496,7 @@ impl CoreBluetoothManager {
             }
             
             // Add service to peripheral manager: [peripheralManager addService:service]
-            info!("🔄 Adding GATT service to peripheral manager");
+            info!(" Adding GATT service to peripheral manager");
             let _: () = msg_send![manager.manager_ptr, addService:service];
         } // End unsafe block - NSString objects are dropped here
         
@@ -1509,10 +1528,10 @@ impl CoreBluetoothManager {
             let _: () = msg_send![ad_data, setObject:&*local_name forKey:&*name_key];
             
             // [peripheralManager startAdvertising:advertisementData]
-            info!("🔄 Starting BLE advertising");
+            info!(" Starting BLE advertising");
             let _: () = msg_send![manager.manager_ptr, startAdvertising:ad_data];
             
-            info!("✅ GATT advertising started");
+            info!(" GATT advertising started");
         } // End unsafe block
         
         Ok(())
@@ -1520,7 +1539,7 @@ impl CoreBluetoothManager {
     
     /// Start ZHTP mesh advertising with the provided advertisement data
     pub async fn start_mesh_advertising(&self, adv_data: &[u8]) -> Result<()> {
-        info!("📢 macOS: Starting ZHTP mesh advertising via Core Bluetooth");
+        info!(" macOS: Starting ZHTP mesh advertising via Core Bluetooth");
         
         // Check if we have a peripheral manager
         let manager_guard = self.peripheral_manager.lock().await;
@@ -1562,13 +1581,13 @@ impl CoreBluetoothManager {
                 // Start advertising: [peripheralManager startAdvertising:adDict]
                 let _: () = msg_send![manager.manager_ptr, startAdvertising:ad_dict];
                 
-                info!("✅ macOS: ZHTP mesh advertising started with {} bytes", adv_data.len());
+                info!(" macOS: ZHTP mesh advertising started with {} bytes", adv_data.len());
                 info!("   Service UUID: {}", service_uuid_str);
                 info!("   Local Name: ZHTP-MESH");
                 return Ok(());
             }
         } else {
-            warn!("❌ macOS: Peripheral manager not initialized, cannot start advertising");
+            warn!(" macOS: Peripheral manager not initialized, cannot start advertising");
             return Err(anyhow!("Peripheral manager not available"));
         }
     }
@@ -1681,10 +1700,10 @@ impl CoreBluetoothManager {
                 ];
                 
                 if success {
-                    info!("✅ Notification sent successfully to subscribed centrals");
+                    info!(" Notification sent successfully to subscribed centrals");
                     Ok(())
                 } else {
-                    warn!("⚠️ Failed to send notification (queue may be full - will retry on didUpdateValueForCharacteristic callback)");
+                    warn!(" Failed to send notification (queue may be full - will retry on didUpdateValueForCharacteristic callback)");
                     // Note: iOS docs say this can fail if transmission queue is full,
                     // in which case you should wait for peripheralManagerIsReadyToUpdateSubscribers callback
                     Ok(()) // Return success anyway, iOS will handle retries

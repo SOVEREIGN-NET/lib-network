@@ -88,7 +88,7 @@ impl BlockchainSyncManager {
             request_type,
         };
 
-        info!("📦 Created blockchain request (ID: {})", request_id);
+        info!(" Created blockchain request (ID: {})", request_id);
         Ok((request_id, message))
     }
 

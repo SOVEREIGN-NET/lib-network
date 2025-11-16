@@ -1029,7 +1029,7 @@ impl ZhtpMeshServer {
     ) -> Result<Self> {
         let server_id = Uuid::new_v4();
         
-        // Initialize mesh networking with ISP bypass capabilities
+        // Initialize mesh networking with  capabilities
         let network_config = NetworkConfig {
             node_id,
             listen_port: 0, // No TCP port needed for pure mesh
@@ -1311,7 +1311,7 @@ impl ZhtpMeshServer {
     
     /// Start mesh protocol message handler (UPDATED - Phase 4)
     async fn start_mesh_message_handler(&self) -> Result<()> {
-        info!("🚀 Initializing mesh message forwarding system (Phase 4)...");
+        info!(" Initializing mesh message forwarding system (Phase 4)...");
         
         // Initialize message forwarding components
         self.initialize_message_forwarding().await?;
@@ -1327,7 +1327,7 @@ impl ZhtpMeshServer {
     
     /// Initialize message forwarding system (NEW - Phase 4)
     pub async fn initialize_message_forwarding(&self) -> Result<()> {
-        info!("📡 Initializing message forwarding components...");
+        info!(" Initializing message forwarding components...");
         
         // Create message handler
         let message_handler = Arc::new(RwLock::new(
@@ -1400,7 +1400,7 @@ impl ZhtpMeshServer {
             (*server_mut).message_handler = Some(message_handler);
         }
         
-        info!("✅ Message forwarding system initialized successfully");
+        info!(" Message forwarding system initialized successfully");
         
         Ok(())
     }
@@ -1497,19 +1497,19 @@ impl ZhtpMeshServer {
             .as_secs();
         
         if now > credentials.timestamp + 300 { // 5 minute expiry
-            warn!("🔒 Credential verification failed: timestamp expired (age: {} seconds)", now - credentials.timestamp);
+            warn!(" Credential verification failed: timestamp expired (age: {} seconds)", now - credentials.timestamp);
             return Ok(false);
         }
         
         // Verify nonce is present
         if credentials.nonce.is_empty() {
-            warn!("🔒 Credential verification failed: empty nonce");
+            warn!(" Credential verification failed: empty nonce");
             return Ok(false);
         }
         
         // Verify signature is present
         if credentials.signature.is_empty() {
-            warn!("🔒 Credential verification failed: empty signature");
+            warn!(" Credential verification failed: empty signature");
             return Ok(false);
         }
         
@@ -1533,14 +1533,14 @@ impl ZhtpMeshServer {
         match credentials.wallet_key.verify(message.as_bytes(), &signature) {
             Ok(is_valid) => {
                 if is_valid {
-                    info!("✅ Credential verification successful for operation: {}", operation);
+                    info!(" Credential verification successful for operation: {}", operation);
                 } else {
-                    warn!("🔒 Credential verification failed: invalid signature for operation: {}", operation);
+                    warn!(" Credential verification failed: invalid signature for operation: {}", operation);
                 }
                 Ok(is_valid)
             }
             Err(e) => {
-                error!("🔒 Credential verification error for operation {}: {}", operation, e);
+                error!(" Credential verification error for operation {}: {}", operation, e);
                 Ok(false) // Return false on verification error rather than propagating error
             }
         }
@@ -2014,10 +2014,10 @@ impl ZhtpMeshServer {
         info!("Serving Web4 content: {}{}", domain, path);
         
         // Resolve content hash via DHT
-        let content_hash = self.dht.read().await
+        let content_hash = self.dht.write().await
             .resolve_content(domain, path).await?;
         
-        info!("Resolved content hash: {}", content_hash);
+        info!("Resolved content hash: {:?}", content_hash);
         
         // Use native binary DHT protocol instead of JavaScript
         let response = crate::dht::call_native_dht_client("loadPage", &serde_json::json!({
@@ -2036,11 +2036,10 @@ impl ZhtpMeshServer {
     /// Get DHT network status
     pub async fn get_dht_status(&self) -> DHTNetworkStatus {
         self.dht.read().await.get_network_status().await.unwrap_or(DHTNetworkStatus {
-            connected: false,
-            peer_count: 0,
-            cache_size: 0,
-            storage_available: 0,
-            network_health: 0.0,
+            total_nodes: 0,
+            connected_nodes: 0,
+            storage_used_bytes: 0,
+            total_keys: 0,
         })
     }
     
@@ -2180,7 +2179,7 @@ impl ZhtpMeshServer {
         stats.theoretical_tokens_earned = 0;
         
         if previous > 0 {
-            info!("🔄 Routing reward counter reset: {} ZHTP claimed", previous);
+            info!(" Routing reward counter reset: {} ZHTP claimed", previous);
         }
     }
     
@@ -2236,7 +2235,7 @@ impl ZhtpMeshServer {
         stats.successful_storage_ops += 1;
         
         info!(
-            "📦 Storage recorded: {} bytes, {} hours, {} ZHTP earned",
+            " Storage recorded: {} bytes, {} hours, {} ZHTP earned",
             content_size, duration_hours, tokens_earned
         );
     }
@@ -2267,7 +2266,7 @@ impl ZhtpMeshServer {
         stats.theoretical_tokens_earned = 0;
         
         if previous > 0 {
-            info!("🔄 Storage reward counter reset: {} ZHTP claimed", previous);
+            info!(" Storage reward counter reset: {} ZHTP claimed", previous);
         }
     }
     

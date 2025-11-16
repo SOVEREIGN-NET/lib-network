@@ -39,7 +39,7 @@ pub struct BlueZDBusClient {
 impl BlueZDBusClient {
     /// Create a new BlueZ D-Bus client
     pub fn new() -> Result<Self> {
-        info!("🔵 Initializing BlueZ D-Bus client");
+        info!(" Initializing BlueZ D-Bus client");
         
         let connection = Connection::new_system()
             .map_err(|e| anyhow!("Failed to connect to system D-Bus: {}", e))?;
@@ -47,7 +47,7 @@ impl BlueZDBusClient {
         // Default adapter path (usually hci0)
         let adapter_path = "/org/bluez/hci0".to_string();
         
-        info!("✅ BlueZ D-Bus client initialized on {}", adapter_path);
+        info!(" BlueZ D-Bus client initialized on {}", adapter_path);
         Ok(Self {
             connection,
             adapter_path,
@@ -56,7 +56,7 @@ impl BlueZDBusClient {
     
     /// Start device discovery
     pub fn start_discovery(&self) -> Result<()> {
-        info!("🔍 Starting BlueZ device discovery via D-Bus");
+        info!(" Starting BlueZ device discovery via D-Bus");
         
         let proxy = self.connection.with_proxy(
             BLUEZ_SERVICE,
@@ -67,7 +67,7 @@ impl BlueZDBusClient {
         proxy.method_call(ADAPTER_INTERFACE, "StartDiscovery", ())
             .map_err(|e| anyhow!("Failed to start discovery: {}", e))?;
         
-        info!("✅ Discovery started");
+        info!(" Discovery started");
         Ok(())
     }
     
@@ -89,7 +89,7 @@ impl BlueZDBusClient {
     
     /// Get list of discovered devices
     pub fn get_devices(&self) -> Result<Vec<DeviceInfo>> {
-        debug!("📋 Getting device list via D-Bus");
+        debug!(" Getting device list via D-Bus");
         
         let proxy = self.connection.with_proxy(
             BLUEZ_SERVICE,
@@ -137,13 +137,13 @@ impl BlueZDBusClient {
             }
         }
         
-        debug!("📋 Found {} devices", devices.len());
+        debug!(" Found {} devices", devices.len());
         Ok(devices)
     }
     
     /// Connect to a device by address
     pub fn connect_device(&self, device_address: &str) -> Result<()> {
-        info!("🔗 Connecting to device {} via D-Bus", device_address);
+        info!(" Connecting to device {} via D-Bus", device_address);
         
         let device_path = self.get_device_path(device_address)?;
         
@@ -156,7 +156,7 @@ impl BlueZDBusClient {
         proxy.method_call(DEVICE_INTERFACE, "Connect", ())
             .map_err(|e| anyhow!("Failed to connect to device: {}", e))?;
         
-        info!("✅ Connected to {}", device_address);
+        info!(" Connected to {}", device_address);
         Ok(())
     }
     
@@ -175,7 +175,7 @@ impl BlueZDBusClient {
         proxy.method_call(DEVICE_INTERFACE, "Disconnect", ())
             .map_err(|e| anyhow!("Failed to disconnect from device: {}", e))?;
         
-        info!("✅ Disconnected from {}", device_address);
+        info!(" Disconnected from {}", device_address);
         Ok(())
     }
     
@@ -217,13 +217,13 @@ impl BlueZDBusClient {
         proxy.method_call(GATT_CHARACTERISTIC_INTERFACE, "WriteValue", (data.to_vec(), options))
             .map_err(|e| anyhow!("Failed to write characteristic: {}", e))?;
         
-        debug!("✅ Wrote {} bytes to characteristic {}", data.len(), char_uuid);
+        debug!(" Wrote {} bytes to characteristic {}", data.len(), char_uuid);
         Ok(())
     }
     
     /// Enable notifications on a characteristic
     pub fn enable_notifications(&self, device_address: &str, char_uuid: &str) -> Result<()> {
-        info!("🔔 Enabling notifications for characteristic {} via D-Bus", char_uuid);
+        info!(" Enabling notifications for characteristic {} via D-Bus", char_uuid);
         
         let char_path = self.get_characteristic_path(device_address, char_uuid)?;
         
@@ -236,7 +236,7 @@ impl BlueZDBusClient {
         proxy.method_call(GATT_CHARACTERISTIC_INTERFACE, "StartNotify", ())
             .map_err(|e| anyhow!("Failed to enable notifications: {}", e))?;
         
-        info!("✅ Notifications enabled for {}", char_uuid);
+        info!(" Notifications enabled for {}", char_uuid);
         Ok(())
     }
     
@@ -277,7 +277,7 @@ impl BlueZDBusClient {
         // This is a simplified version - real implementation would use GetManagedObjects
         // to find the actual characteristic path
         
-        warn!("⚠️ Using simplified characteristic path resolution - production code should enumerate services");
+        warn!(" Using simplified characteristic path resolution - production code should enumerate services");
         
         // Return a generic path that needs to be resolved
         Ok(format!("{}/service0001/char0001", device_path))
@@ -324,7 +324,7 @@ impl BlueZDBusClient {
         proxy.set(ADAPTER_INTERFACE, "Powered", true)
             .map_err(|e| anyhow!("Failed to power on adapter: {}", e))?;
         
-        info!("✅ Adapter powered on");
+        info!(" Adapter powered on");
         Ok(())
     }
 }

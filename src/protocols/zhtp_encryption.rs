@@ -230,7 +230,7 @@ impl ZhtpEncryptionSession {
     
     /// Rotate session (generate new keypair, invalidate old shared secret)
     pub fn rotate_session(&mut self) -> Result<()> {
-        info!("🔄 Rotating ZHTP encryption session");
+        info!(" Rotating ZHTP encryption session");
         
         // Generate new Kyber keypair
         let (kyber_public, kyber_secret) = kyber512_keypair();

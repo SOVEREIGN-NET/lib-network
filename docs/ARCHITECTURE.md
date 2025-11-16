@@ -58,7 +58,7 @@ The `ZhtpMeshServer` is the heart of the mesh networking system, coordinating al
 - **Hardware Abstraction**: Cross-platform hardware detection and optimization
 
 **Features:**
-- **ISP Bypass**: Direct peer-to-peer mesh networking without internet dependency
+- ****: Direct peer-to-peer mesh networking without internet dependency
 - **Earning While Connected**: Users automatically earn tokens for network participation
 - **Global Coverage**: Local mesh with satellite uplinks for worldwide reach
 - **Post-Quantum Security**: Future-proof cryptographic protection
@@ -127,7 +127,7 @@ pub struct WiFiDirectMeshProtocol {
 }
 ```
 
-#### 📡 LoRaWAN Protocol
+####  LoRaWAN Protocol
 - **Purpose**: Long-range, low-power regional mesh
 - **Range**: ~15 kilometers
 - **Bandwidth**: ~50 kbps
@@ -371,7 +371,7 @@ sequenceDiagram
     RoutingWallet->>UserA: Available for withdrawal
 ```
 
-## 🔄 State Management
+##  State Management
 
 ### Connection State Machine
 
@@ -414,7 +414,7 @@ pub struct ProtocolState {
 - **Distributed DHT**: No single point of failure
 - **Economic Incentives**: Self-sustaining network growth
 
-## 🔧 Extension Architecture
+##  Extension Architecture
 
 ### Plugin System
 ```rust
@@ -432,7 +432,7 @@ New protocols can be added by implementing the `MeshProtocol` trait and register
 ### Web4 Extension
 The DHT system natively supports Web4 domain resolution and content serving, enabling decentralized websites.
 
-## 🚀 Future Architecture Evolution
+##  Future Architecture Evolution
 
 ### Planned Enhancements
 

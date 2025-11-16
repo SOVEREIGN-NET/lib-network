@@ -12,7 +12,7 @@ use lib_proofs::ZeroKnowledgeProof;
 use lib_identity::ZhtpIdentity;
 use lib_storage::UnifiedStorageSystem;
 
-use crate::dht::DHTClient;
+use crate::dht::ZkDHTIntegration;
 use super::types::*;
 use super::domain_registry::DomainRegistry;
 
@@ -21,7 +21,7 @@ pub struct ContentPublisher {
     /// Domain registry for ownership verification
     domain_registry: Arc<DomainRegistry>,
     /// DHT client for content storage and retrieval (optional - uses registry's DHT if None)
-    dht_client: Arc<RwLock<Option<DHTClient>>>,
+    dht_client: Arc<RwLock<Option<ZkDHTIntegration>>>,
     /// Storage backend
     storage_system: Arc<RwLock<UnifiedStorageSystem>>,
     /// Content statistics
@@ -108,12 +108,15 @@ impl ContentPublisher {
         // Store content in DHT if available, otherwise use storage system
         let content_hash = {
             let dht_client_guard = self.dht_client.read().await;
-            if let Some(dht_client) = dht_client_guard.as_ref() {
+            if let Some(_dht_client) = dht_client_guard.as_ref() {
                 // Use DHT for storage
                 drop(dht_client_guard);
                 let mut dht_client_mut = self.dht_client.write().await;
                 if let Some(dht) = dht_client_mut.as_mut() {
-                    dht.store_content(&request.domain, &request.path, request.content.clone()).await?
+                    dht.store_content(&request.domain, &request.path, request.content.clone()).await?;
+                    // Return content hash after storing
+                    let hash = lib_crypto::hash_blake3(&request.content);
+                    hex::encode(hash)
                 } else {
                     // Fallback to hash-based storage
                     let hash = lib_crypto::hash_blake3(&request.content);

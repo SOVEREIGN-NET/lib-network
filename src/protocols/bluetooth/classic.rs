@@ -534,7 +534,7 @@ impl BluetoothClassicProtocol {
     /// Enable Bluetooth Classic (can be called from config/API)
     pub fn enable(&self) {
         self.enabled.store(true, std::sync::atomic::Ordering::SeqCst);
-        info!("✅ Bluetooth Classic RFCOMM enabled");
+        info!(" Bluetooth Classic RFCOMM enabled");
     }
     
     /// Disable Bluetooth Classic (can be called from config/API)
@@ -552,7 +552,7 @@ impl BluetoothClassicProtocol {
             }
         }
         
-        info!("❌ Bluetooth Classic RFCOMM disabled");
+        info!(" Bluetooth Classic RFCOMM disabled");
         Ok(())
     }
     
@@ -652,7 +652,7 @@ impl BluetoothClassicProtocol {
             Storage::Streams::*,
         };
         
-        info!("🪟 Windows: Registering RFCOMM service provider...");
+        info!(" Windows: Registering RFCOMM service provider...");
         
         // Create RFCOMM service provider for ZHTP Mesh
         let service_id = RfcommServiceId::FromUuid(self.parse_service_uuid_to_guid()?)
@@ -786,7 +786,7 @@ impl BluetoothClassicProtocol {
                 Storage::Streams::*,
             };
             
-            info!("🪟 Windows: Waiting for RFCOMM connection...");
+            info!(" Windows: Waiting for RFCOMM connection...");
             
             // Get service provider from storage
             let provider_guard = self.service_provider.read().await;
@@ -852,7 +852,7 @@ impl BluetoothClassicProtocol {
         
         #[cfg(not(feature = "windows-gatt"))]
         {
-            info!("🪟 Windows: RFCOMM accept requires windows-gatt feature");
+            info!(" Windows: RFCOMM accept requires windows-gatt feature");
             Err(anyhow!("Windows RFCOMM support requires --features windows-gatt"))
         }
     }
@@ -1120,7 +1120,7 @@ impl BluetoothClassicProtocol {
         // Send via existing send_mesh_message
         self.send_mesh_message(&target_address, &bytes).await?;
         
-        info!("✅ Mesh envelope sent successfully");
+        info!(" Mesh envelope sent successfully");
         
         Ok(())
     }
@@ -1263,7 +1263,7 @@ impl BluetoothClassicProtocol {
         }
         
         self.discovery_active.store(true, std::sync::atomic::Ordering::SeqCst);
-        info!("🔍 Bluetooth Classic discovery started");
+        info!(" Bluetooth Classic discovery started");
         Ok(())
     }
     
@@ -1383,7 +1383,7 @@ impl BluetoothClassicProtocol {
                 Devices::Enumeration::{DeviceInformation, DeviceInformationCollection},
             };
             
-            info!("🪟 Windows: Discovering paired Bluetooth devices...");
+            info!(" Windows: Discovering paired Bluetooth devices...");
             
             // Query for paired Bluetooth devices
             let selector = WinBluetoothDevice::GetDeviceSelectorFromPairingState(true)
@@ -1477,7 +1477,7 @@ impl BluetoothClassicProtocol {
                 Devices::Bluetooth::{BluetoothDevice, Rfcomm::RfcommDeviceService},
             };
             
-            info!("🪟 Windows: Querying RFCOMM services on {}", device_address);
+            info!(" Windows: Querying RFCOMM services on {}", device_address);
             
             // Convert address to u64 for Windows API
             let address_u64 = Self::parse_bluetooth_address_to_u64(device_address)?;
@@ -1556,7 +1556,7 @@ impl BluetoothClassicProtocol {
                 Storage::Streams::{DataReader, DataWriter},
             };
             
-            info!("🪟 Windows: Connecting to RFCOMM service on {} channel {}", device_address, channel);
+            info!(" Windows: Connecting to RFCOMM service on {} channel {}", device_address, channel);
             
             // Convert address to u64
             let address_u64 = Self::parse_bluetooth_address_to_u64(device_address)?;
@@ -2125,7 +2125,7 @@ impl BluetoothClassicProtocol {
                 match stream_guard.read(&mut buffer).await {
                     Ok(n) => n,
                     Err(e) => {
-                        warn!("⚠️ Read error from {}: {}", peer_addr, e);
+                        warn!(" Read error from {}: {}", peer_addr, e);
                         break;
                     }
                 }
@@ -2166,10 +2166,10 @@ impl BluetoothClassicProtocol {
                     }
                 },
                 Some(msg_type) => {
-                    warn!("⚠️ Unknown message type from {}: 0x{:02X}", peer_addr, msg_type);
+                    warn!(" Unknown message type from {}: 0x{:02X}", peer_addr, msg_type);
                 },
                 None => {
-                    warn!("⚠️ Empty message from {}", peer_addr);
+                    warn!(" Empty message from {}", peer_addr);
                 }
             }
             
@@ -2192,7 +2192,7 @@ impl BluetoothClassicProtocol {
     
     /// Handle ZK authentication message
     async fn handle_zk_auth_message(&self, data: &[u8], peer_addr: &str) -> Result<()> {
-        info!("🔐 Processing ZK auth message from {} ({} bytes)", peer_addr, data.len());
+        info!(" Processing ZK auth message from {} ({} bytes)", peer_addr, data.len());
         
         // Try to parse as ZhtpAuthChallenge or ZhtpAuthResponse
         if let Ok(challenge) = serde_json::from_slice::<crate::protocols::zhtp_auth::ZhtpAuthChallenge>(data) {
@@ -2231,7 +2231,7 @@ impl BluetoothClassicProtocol {
                                 verification,
                             );
                         } else {
-                            warn!("⚠️ Peer {} failed authentication", peer_addr);
+                            warn!(" Peer {} failed authentication", peer_addr);
                         }
                     }
                     Err(e) => {
@@ -2240,7 +2240,7 @@ impl BluetoothClassicProtocol {
                 }
             }
         } else {
-            warn!("⚠️ Invalid ZK auth message format from {}", peer_addr);
+            warn!(" Invalid ZK auth message format from {}", peer_addr);
         }
         
         Ok(())
@@ -2259,7 +2259,7 @@ impl BluetoothClassicProtocol {
     
     /// Handle mesh data message
     async fn handle_mesh_data_message(&self, data: &[u8], peer_addr: &str) -> Result<()> {
-        info!("📦 Received mesh data message from {} ({} bytes)", peer_addr, data.len());
+        info!(" Received mesh data message from {} ({} bytes)", peer_addr, data.len());
         
         // Deserialize envelope
         let envelope = match MeshMessageEnvelope::from_bytes(data) {
@@ -2282,19 +2282,19 @@ impl BluetoothClassicProtocol {
         
         // Check if message is for me
         if envelope.is_for_me(&my_id) {
-            info!("✅ Message is for me, processing locally");
+            info!(" Message is for me, processing locally");
             return self.process_local_message(envelope).await;
         }
         
         // Check if should forward
         if envelope.should_drop(&my_id) {
-            warn!("❌ Message TTL expired or loop detected, dropping");
+            warn!(" Message TTL expired or loop detected, dropping");
             return Ok(());
         }
         
         // Check for loops
         if envelope.contains_in_route(&my_id) {
-            warn!("❌ Loop detected in route, dropping message");
+            warn!(" Loop detected in route, dropping message");
             return Ok(());
         }
         
@@ -2369,7 +2369,7 @@ impl BluetoothClassicProtocol {
             
             match router_guard.find_next_hop_for_destination(&envelope.destination).await {
                 Ok(next_hop) => {
-                    info!("📍 Next hop: {:?}", hex::encode(&next_hop.key_id[0..4]));
+                    info!(" Next hop: {:?}", hex::encode(&next_hop.key_id[0..4]));
                     
                     // Send to next hop
                     self.send_mesh_envelope(&next_hop, &envelope).await?;
@@ -2385,10 +2385,10 @@ impl BluetoothClassicProtocol {
                         ).await?;
                     }
                     
-                    info!("✅ Message forwarded successfully");
+                    info!(" Message forwarded successfully");
                 }
                 Err(e) => {
-                    warn!("❌ Failed to find route: {}", e);
+                    warn!(" Failed to find route: {}", e);
                     return Err(e);
                 }
             }
@@ -2402,7 +2402,7 @@ impl BluetoothClassicProtocol {
     
     /// Handle coordination message
     async fn handle_coordination_message(&self, data: &[u8], peer_addr: &str) -> Result<()> {
-        info!("🎯 Processing coordination message from {} ({} bytes)", peer_addr, data.len());
+        info!(" Processing coordination message from {} ({} bytes)", peer_addr, data.len());
         
         // TODO: Implement coordination handling (DHT queries, mesh topology updates, etc.)
         // For now, just log the message
@@ -2424,7 +2424,7 @@ impl BluetoothClassicProtocol {
                 match self_clone.accept_connection_on_channel(channel).await {
                     Ok(stream) => {
                         let peer_addr = stream.peer_addr().to_string();
-                        info!("✅ RFCOMM connection accepted on channel {}: {}", channel, peer_addr);
+                        info!(" RFCOMM connection accepted on channel {}: {}", channel, peer_addr);
                         
                         // Store connection metadata
                         let connection = RfcommConnection {
@@ -2458,7 +2458,7 @@ impl BluetoothClassicProtocol {
                         });
                     }
                     Err(e) => {
-                        warn!("⚠️ Accept error on channel {}: {}", channel, e);
+                        warn!(" Accept error on channel {}: {}", channel, e);
                         tokio::time::sleep(std::time::Duration::from_secs(1)).await;
                     }
                 }
@@ -2478,7 +2478,7 @@ impl BluetoothClassicProtocol {
     
     /// Start full RFCOMM service with all 4 channels
     pub async fn start_full_service(&self) -> Result<()> {
-        info!("🚀 Starting full RFCOMM service with all 4 ZHTP channels");
+        info!(" Starting full RFCOMM service with all 4 ZHTP channels");
         
         // Start advertising
         self.start_advertising().await?;
@@ -2496,7 +2496,7 @@ impl BluetoothClassicProtocol {
         self.listen_on_channel(rfcomm_channels::COORDINATION).await?;
         info!(" Channel {} (COORDINATION) listening", rfcomm_channels::COORDINATION);
         
-        info!("✅ Full RFCOMM service started - accepting connections on 4 channels");
+        info!(" Full RFCOMM service started - accepting connections on 4 channels");
         Ok(())
     }
     
@@ -2510,7 +2510,7 @@ impl BluetoothClassicProtocol {
             debug!("   Channel: {}, MTU: {}, Outgoing: {}", 
                    removed_conn.channel, removed_conn.mtu, removed_conn.is_outgoing);
         } else {
-            warn!("⚠️ No active connection found for {}", peer_address);
+            warn!(" No active connection found for {}", peer_address);
         }
         
         // Remove from active streams (this will close the socket)
@@ -2520,7 +2520,7 @@ impl BluetoothClassicProtocol {
             // The stream will be dropped here, closing the socket
             drop(removed_stream);
         } else {
-            warn!("⚠️ No active stream found for {}", peer_address);
+            warn!(" No active stream found for {}", peer_address);
         }
         
         // Remove from authenticated peers
@@ -2528,7 +2528,7 @@ impl BluetoothClassicProtocol {
             info!(" Removed authentication for {}", peer_address);
         }
         
-        info!("✅ Disconnected from {}", peer_address);
+        info!(" Disconnected from {}", peer_address);
         Ok(())
     }
     
@@ -2548,7 +2548,7 @@ impl BluetoothClassicProtocol {
             }
         }
         
-        info!("✅ Disconnected from {} peers", disconnect_count);
+        info!(" Disconnected from {} peers", disconnect_count);
         Ok(())
     }
 }

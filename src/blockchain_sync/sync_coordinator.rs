@@ -87,7 +87,7 @@ impl SyncCoordinator {
         if let Some(active_sync_start) = peer_state.sync_start_time {
             // Check if sync has timed out
             if active_sync_start.elapsed() > self.sync_timeout {
-                warn!("⚠️ Sync with peer {} timed out (type: {:?}, protocol: {:?}), allowing new sync", 
+                warn!(" Sync with peer {} timed out (type: {:?}, protocol: {:?}), allowing new sync", 
                       hex::encode(&peer_id.key_id[..8]), 
                       peer_state.sync_type,
                       peer_state.sync_protocol);
@@ -102,7 +102,7 @@ impl SyncCoordinator {
                 if let Some(active_sync_type) = peer_state.sync_type {
                     if active_sync_type != sync_type {
                         // Different sync type - allow both (edge and full can coexist)
-                        info!("🔄 Allowing {:?} sync alongside existing {:?} sync with peer {}",
+                        info!(" Allowing {:?} sync alongside existing {:?} sync with peer {}",
                               sync_type,
                               active_sync_type,
                               hex::encode(&peer_id.key_id[..8]));
@@ -110,7 +110,7 @@ impl SyncCoordinator {
                     }
                 }
                 
-                info!("🔄 Already syncing {:?} with peer {} via {:?}, skipping duplicate on {:?}",
+                info!(" Already syncing {:?} with peer {} via {:?}, skipping duplicate on {:?}",
                       peer_state.sync_type.unwrap_or(sync_type),
                       hex::encode(&peer_id.key_id[..8]),
                       peer_state.sync_protocol,
@@ -137,7 +137,7 @@ impl SyncCoordinator {
             let current_priority = protocol_priority(current_protocol);
             
             if new_priority > current_priority {
-                info!("🔄 Upgrading sync protocol from {:?} to {:?} (higher bandwidth)",
+                info!(" Upgrading sync protocol from {:?} to {:?} (higher bandwidth)",
                       current_protocol, new_protocol);
                 return true;
             }
@@ -162,7 +162,7 @@ impl SyncCoordinator {
             peer_state.sync_protocol = Some(protocol.clone());
             peer_state.sync_start_time = Some(Instant::now());
             
-            info!("✅ {:?} sync started with peer {} (ID: {}, protocol: {:?})",
+            info!(" {:?} sync started with peer {} (ID: {}, protocol: {:?})",
                   sync_type,
                   hex::encode(&peer_id.key_id[..8]), 
                   sync_id, 
@@ -179,7 +179,7 @@ impl SyncCoordinator {
             if peer_state.active_sync_id == Some(sync_id) && peer_state.sync_type == Some(sync_type) {
                 let duration = peer_state.sync_start_time.map(|t| t.elapsed());
                 
-                info!("✅ {:?} sync completed with peer {} (ID: {}, duration: {:?})",
+                info!(" {:?} sync completed with peer {} (ID: {}, duration: {:?})",
                       sync_type,
                       hex::encode(&peer_id.key_id[..8]), 
                       sync_id,
@@ -200,7 +200,7 @@ impl SyncCoordinator {
         if let Some(peer_state) = syncs.get_mut(peer_id) {
             // Only clear if this is the active sync
             if peer_state.active_sync_id == Some(sync_id) && peer_state.sync_type == Some(sync_type) {
-                warn!("⚠️ {:?} sync failed with peer {} (ID: {})",
+                warn!(" {:?} sync failed with peer {} (ID: {})",
                       sync_type,
                       hex::encode(&peer_id.key_id[..8]), 
                       sync_id);

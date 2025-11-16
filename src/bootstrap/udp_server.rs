@@ -316,13 +316,13 @@ fn create_wallet_balance_response(uri: &str) -> String {
                 "id": "primary-wallet",
                 "type": "primary",
                 "balance": 500.0,
-                "currency": "ZHTP"
+                "currency": "SOV"
             },
             {
                 "id": "ubi-wallet", 
                 "type": "ubi",
                 "balance": 750.0,
-                "currency": "ZHTP",
+                "currency": "SOV",
                 "daily_ubi": 50.0
             }
         ],

@@ -33,7 +33,7 @@ async fn diagnose_mesh_health(server: &ZhtpMeshServer) -> Result<()> {
     
     // 4. Check hardware capabilities
     let capabilities = HardwareCapabilities::detect().await?;
-    println!("🔧 Hardware Status:");
+    println!(" Hardware Status:");
     for protocol in capabilities.get_enabled_protocols() {
         println!("    {}", protocol);
     }
@@ -55,7 +55,7 @@ netstat -an | grep 33444
 ps aux | grep zhtp
 ```
 
-## 🔧 Common Issues and Solutions
+##  Common Issues and Solutions
 
 ### 1. Server Won't Start
 
@@ -152,7 +152,7 @@ async fn test_discovery(server: &ZhtpMeshServer) -> Result<()> {
     use lib_network::discovery::{get_discovery_statistics};
     
     let stats = get_discovery_statistics().await?;
-    println!("🔍 Discovery Statistics:");
+    println!(" Discovery Statistics:");
     println!("   Local peers: {}", stats.local_peers);
     println!("   Regional peers: {}", stats.regional_peers);
     println!("   Global peers: {}", stats.global_peers);
@@ -397,7 +397,7 @@ match result {
 }
 ```
 
-## 🔍 Advanced Debugging
+##  Advanced Debugging
 
 ### Enable Detailed Logging
 
@@ -548,4 +548,4 @@ For enterprise deployments and critical issues:
 
 ---
 
-This troubleshooting guide covers the most common issues encountered when deploying ZHTP mesh networking. For additional help, consult the community resources or professional support options. 🚀
+This troubleshooting guide covers the most common issues encountered when deploying ZHTP mesh networking. For additional help, consult the community resources or professional support options. 

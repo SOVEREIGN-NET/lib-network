@@ -17,7 +17,7 @@ async fn test_wifi_direct_protocol_creation() -> Result<()> {
     // Test protocol creation
     match protocol {
         Ok(p) => {
-            println!("✓ WiFi Direct protocol created successfully");
+            println!(" WiFi Direct protocol created successfully");
             println!("  - Node ID: {:?}", &p.node_id[..8]); // Show first 8 bytes
             println!("  - Max devices: {}", p.max_devices);
             println!("  - Discovery active: {}", p.discovery_active);
@@ -39,7 +39,7 @@ async fn test_wifi_direct_peer_discovery() -> Result<()> {
     // Test peer discovery (method is private, so we test conceptually)
     println!("Testing WiFi Direct P2P peer discovery concept...");
     
-    println!("✓ P2P peer discovery functionality exists in WiFiDirectMeshProtocol");
+    println!(" P2P peer discovery functionality exists in WiFiDirectMeshProtocol");
     println!("  Note: Actual discovery requires access to private methods");
     
     // Simulate the result that would come from discovery
@@ -47,7 +47,7 @@ async fn test_wifi_direct_peer_discovery() -> Result<()> {
     
     match simulated_peers {
         Ok(peers) => {
-            println!("✓ WiFi Direct peer discovery simulation completed");
+            println!(" WiFi Direct peer discovery simulation completed");
             println!("  Found {} potential P2P peers", peers.len());
             
             if peers.is_empty() {
@@ -70,7 +70,7 @@ async fn test_wifi_direct_group_operations() -> Result<()> {
     let node_id = [0u8; 32];
     
     println!("Testing WiFi Direct P2P group operations concept...");
-    println!("✓ Group formation functionality exists in WiFiDirectMeshProtocol");
+    println!(" Group formation functionality exists in WiFiDirectMeshProtocol");
     println!("  - Group owner election algorithm implemented");
     println!("  - P2P connection establishment supported");
     println!("  - Group credentials and security handled");
@@ -109,7 +109,7 @@ async fn test_wifi_direct_data_transmission() -> Result<()> {
     println!("  Device type: {:?}", mock_device.device_type);
     println!("  Connection time: {}", mock_device.connection_time);
     
-    println!("✓ WiFi Direct data transmission setup completed");
+    println!(" WiFi Direct data transmission setup completed");
     println!("  Note: Actual transmission requires WiFi Direct devices");
     
     Ok(())
@@ -125,18 +125,18 @@ async fn test_wifi_direct_platform_support() -> Result<()> {
         println!("  Windows WiFi Direct support detected");
         println!("  - WinRT API integration available");
         println!("  - netsh wlan commands supported");
-        println!("✓ Windows WiFi Direct support available");
+        println!(" Windows WiFi Direct support available");
         
     } else if cfg!(unix) {
         println!("Running on Unix-like platform");
         println!("  Linux WiFi Direct support detected");
         println!("  - wpa_supplicant P2P support available");  
         println!("  - nl80211 kernel interface supported");
-        println!("✓ Unix WiFi Direct support available");
+        println!(" Unix WiFi Direct support available");
         
     } else {
         println!("Running on other platform");
-        println!("✓ Generic WiFi Direct support available");
+        println!(" Generic WiFi Direct support available");
     }
     
     Ok(())
@@ -153,11 +153,11 @@ async fn test_wifi_direct_connection_management() -> Result<()> {
         Ok(protocol) => {
             // Test getting current mesh status
             let status = protocol.get_mesh_status().await;
-            println!("✓ Current mesh status retrieved");
+            println!(" Current mesh status retrieved");
             println!("  - Connected peers: {}", status.connected_peers);
             println!("  - Discovery active: {}", status.discovery_active);
             
-            println!("✓ Connection management testing completed");
+            println!(" Connection management testing completed");
             println!("  - Connection tracking functional");
             println!("  - Device list management working");
             println!("  - Connection monitoring ready");
@@ -177,7 +177,7 @@ async fn test_wifi_direct_tcp_transmission() -> Result<()> {
     
     // Test TCP transmission concepts
     println!("Testing TCP-based mesh data transmission...");
-    println!("✓ TCP transmission functionality exists in WiFiDirectMeshProtocol");
+    println!(" TCP transmission functionality exists in WiFiDirectMeshProtocol");
     println!("  - TCP socket creation and management");
     println!("  - Message fragmentation for large payloads");  
     println!("  - Connection quality monitoring");

@@ -601,7 +601,7 @@ impl MeshMessageRouter {
             ).await {
                 warn!("Failed to record routing activity: {}", e);
             } else {
-                info!("✅ Routing rewards recorded: {} bytes, {} hops, avg {}ms latency", 
+                info!(" Routing rewards recorded: {} bytes, {} hops, avg {}ms latency", 
                       message_size, hop_count, avg_latency);
             }
         }
@@ -750,14 +750,14 @@ impl MeshMessageRouter {
         // Check for direct connection first
         let connections = self.mesh_connections.read().await;
         if connections.contains_key(destination) {
-            info!("✅ Direct connection to destination available");
+            info!(" Direct connection to destination available");
             return Ok(destination.clone());
         }
         
         // Check cached route
         if let Some(cached) = self.get_cached_route(destination).await {
             if let Some(first_hop) = cached.hops.first() {
-                info!("📍 Using cached route, next hop: {:?}", hex::encode(&first_hop.peer_id.key_id[0..4]));
+                info!(" Using cached route, next hop: {:?}", hex::encode(&first_hop.peer_id.key_id[0..4]));
                 return Ok(first_hop.peer_id.clone());
             }
         }
@@ -776,7 +776,7 @@ impl MeshMessageRouter {
         
         // Return first hop
         let first_hop = full_route.first().unwrap();
-        info!("🔍 Calculated new route, first hop: {:?}", hex::encode(&first_hop.peer_id.key_id[0..4]));
+        info!(" Calculated new route, first hop: {:?}", hex::encode(&first_hop.peer_id.key_id[0..4]));
         Ok(first_hop.peer_id.clone())
     }
     
@@ -802,7 +802,7 @@ impl MeshMessageRouter {
         message: ZhtpMeshMessage,
         origin: PublicKey,
     ) -> Result<u64> {
-        info!("🚀 Routing message to {:?}", hex::encode(&destination.key_id[0..4]));
+        info!(" Routing message to {:?}", hex::encode(&destination.key_id[0..4]));
         
         // Create envelope
         let message_id = self.generate_message_id().await;
@@ -813,7 +813,7 @@ impl MeshMessageRouter {
             message,
         );
         
-        info!("📦 Created envelope {} (TTL: {})", message_id, envelope.ttl);
+        info!(" Created envelope {} (TTL: {})", message_id, envelope.ttl);
         
         // Find next hop
         let next_hop = self.find_next_hop_for_destination(&destination).await?;
@@ -826,7 +826,7 @@ impl MeshMessageRouter {
         // Track delivery
         self.track_delivery(envelope).await;
         
-        info!("✅ Message routing initiated successfully");
+        info!(" Message routing initiated successfully");
         
         Ok(message_id)
     }
@@ -846,7 +846,7 @@ impl MeshMessageRouter {
                 if let Some(bt_handler) = &self.bluetooth_handler {
                     let handler = bt_handler.read().await;
                     handler.send_mesh_envelope(peer_id, envelope).await?;
-                    info!("📡 Sent via Bluetooth");
+                    info!(" Sent via Bluetooth");
                 } else {
                     return Err(anyhow!("Bluetooth handler not available"));
                 }
@@ -856,7 +856,7 @@ impl MeshMessageRouter {
                 if let Some(ref wifi_handler) = self.wifi_handler {
                     let handler = wifi_handler.read().await;
                     handler.send_mesh_envelope(peer_id, envelope).await?;
-                    info!("📡 Sent via WiFi Direct");
+                    info!(" Sent via WiFi Direct");
                 } else {
                     return Err(anyhow!("WiFi Direct handler not configured"));
                 }
@@ -866,7 +866,7 @@ impl MeshMessageRouter {
                 if let Some(ref lora_handler) = self.lora_handler {
                     let handler = lora_handler.read().await;
                     handler.send_mesh_envelope(peer_id, envelope).await?;
-                    info!("📡 Sent via LoRaWAN");
+                    info!(" Sent via LoRaWAN");
                 } else {
                     return Err(anyhow!("LoRa handler not configured"));
                 }
@@ -895,7 +895,7 @@ impl MeshMessageRouter {
         let mut tracking = self.delivery_tracking.write().await;
         tracking.insert(envelope.message_id, status);
         
-        debug!("📊 Tracking message {}", envelope.message_id);
+        debug!(" Tracking message {}", envelope.message_id);
     }
     
     /// Generate unique message ID - Phase 2

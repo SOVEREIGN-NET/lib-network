@@ -50,7 +50,7 @@ pub struct HandshakeCapabilities {
 
 /// Start local network discovery service
 pub async fn start_local_discovery(node_id: Uuid, mesh_port: u16, public_key: lib_crypto::PublicKey) -> Result<()> {
-    info!("🔷 Starting UDP Multicast discovery...");
+    info!(" Starting UDP Multicast discovery...");
     info!("   Multicast address: {}:{}", ZHTP_MULTICAST_ADDR, ZHTP_MULTICAST_PORT);
     info!("   Node ID: {}", node_id);
     info!("   Mesh port: {}", mesh_port);
@@ -59,7 +59,7 @@ pub async fn start_local_discovery(node_id: Uuid, mesh_port: u16, public_key: li
     let announce_node_id = node_id;
     tokio::spawn(async move {
         if let Err(e) = broadcast_announcements(announce_node_id, mesh_port).await {
-            error!("❌ Local announcement broadcaster failed: {}", e);
+            error!(" Local announcement broadcaster failed: {}", e);
         }
     });
     
@@ -68,11 +68,11 @@ pub async fn start_local_discovery(node_id: Uuid, mesh_port: u16, public_key: li
     let listen_public_key = public_key.clone();
     tokio::spawn(async move {
         if let Err(e) = listen_for_announcements(listen_node_id, listen_public_key).await {
-            error!("❌ Local discovery listener failed: {}", e);
+            error!(" Local discovery listener failed: {}", e);
         }
     });
     
-    info!("✅ UDP Multicast discovery active on {}:{}", ZHTP_MULTICAST_ADDR, ZHTP_MULTICAST_PORT);
+    info!(" UDP Multicast discovery active on {}:{}", ZHTP_MULTICAST_ADDR, ZHTP_MULTICAST_PORT);
     info!("   Broadcasting announcements every 30 seconds");
     info!("   Listening for peer announcements");
     Ok(())
@@ -88,7 +88,7 @@ async fn broadcast_announcements(node_id: Uuid, mesh_port: u16) -> Result<()> {
     // Get local IP address
     let local_ip = get_local_ip().await.unwrap_or(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)));
     
-    info!("📢 Broadcasting from local IP: {}", local_ip);
+    info!(" Broadcasting from local IP: {}", local_ip);
     
     let mut interval = interval(Duration::from_secs(30)); // Announce every 30 seconds
     
@@ -111,7 +111,7 @@ async fn broadcast_announcements(node_id: Uuid, mesh_port: u16) -> Result<()> {
             Ok(announcement_json) => {
                 announcement_count += 1;
                 if announcement_count == 1 || announcement_count % 10 == 0 {
-                    info!("📢 Broadcasting announcement #{} to {}", announcement_count, multicast_addr);
+                    info!(" Broadcasting announcement #{} to {}", announcement_count, multicast_addr);
                 } else {
                     debug!("Broadcasting ZHTP node announcement to {}", multicast_addr);
                 }
@@ -135,7 +135,7 @@ async fn listen_for_announcements(our_node_id: Uuid, our_public_key: lib_crypto:
     let multicast_addr: Ipv4Addr = ZHTP_MULTICAST_ADDR.parse()?;
     socket.join_multicast_v4(multicast_addr, Ipv4Addr::UNSPECIFIED)?;
     
-    info!("👂 Listening for ZHTP node announcements on multicast {}:{}", ZHTP_MULTICAST_ADDR, ZHTP_MULTICAST_PORT);
+    info!(" Listening for ZHTP node announcements on multicast {}:{}", ZHTP_MULTICAST_ADDR, ZHTP_MULTICAST_PORT);
     info!("   Joined multicast group successfully");
     
     let mut buf = [0; 1024];
@@ -149,7 +149,7 @@ async fn listen_for_announcements(our_node_id: Uuid, our_public_key: lib_crypto:
                 
                 // Log every packet received for debugging
                 if packet_count == 1 || packet_count % 10 == 0 {
-                    debug!("📦 Received multicast packet #{} from {} ({} bytes)", packet_count, addr, len);
+                    debug!(" Received multicast packet #{} from {} ({} bytes)", packet_count, addr, len);
                 }
                 
                 let announcement_str = String::from_utf8_lossy(&buf[..len]);
@@ -160,7 +160,7 @@ async fn listen_for_announcements(our_node_id: Uuid, our_public_key: lib_crypto:
                         // Ignore our own announcements
                         if announcement.node_id != our_node_id {
                             discovery_count += 1;
-                            info!("🎉 PEER DISCOVERED #{}: Node {} at {}:{}", 
+                            info!(" PEER DISCOVERED #{}: Node {} at {}:{}", 
                                 discovery_count,
                                 announcement.node_id, 
                                 announcement.local_ip, 
@@ -189,7 +189,7 @@ async fn listen_for_announcements(our_node_id: Uuid, our_public_key: lib_crypto:
 /// Attempt to connect to a newly discovered peer
 async fn attempt_connect_to_discovered_peer(announcement: &NodeAnnouncement, our_public_key: &lib_crypto::PublicKey) {
     let peer_addr = format!("{}:{}", announcement.local_ip, announcement.mesh_port);
-    info!("🔗 Connecting to discovered ZHTP peer at {}", peer_addr);
+    info!(" Connecting to discovered ZHTP peer at {}", peer_addr);
     
     // Connect via TCP to the peer's mesh port
     match tokio::net::TcpStream::connect(&peer_addr).await {

@@ -179,6 +179,14 @@ pub struct WiFiDirectMeshProtocol {
     /// WiFi Direct advertisement publisher (Windows only) - must be kept alive
     #[cfg(target_os = "windows")]
     pub wifi_direct_publisher: Arc<RwLock<Option<windows::Devices::WiFiDirect::WiFiDirectAdvertisementPublisher>>>,
+    /// ZHTP authentication manager for blockchain-based auth
+    pub auth_manager: Arc<RwLock<Option<crate::protocols::zhtp_auth::ZhtpAuthManager>>>,
+    /// Authenticated peers (device_id -> verification)
+    pub authenticated_peers: Arc<RwLock<HashMap<String, crate::protocols::zhtp_auth::ZhtpAuthVerification>>>,
+    /// Hidden SSID (don't broadcast publicly)
+    pub hidden_ssid: bool,
+    /// WiFi Direct enabled state (starts OFF by default for security)
+    pub enabled: Arc<RwLock<bool>>,
 }
 
 /// Persistent P2P Group information
@@ -283,11 +291,87 @@ impl WiFiDirectMeshProtocol {
             peer_discovery_tx,
             #[cfg(target_os = "windows")]
             wifi_direct_publisher: Arc::new(RwLock::new(None)),
+            auth_manager: Arc::new(RwLock::new(None)),
+            authenticated_peers: Arc::new(RwLock::new(HashMap::new())),
+            hidden_ssid: true, // SECURITY: Hidden SSID by default to prevent non-ZHTP connections
+            enabled: Arc::new(RwLock::new(false)), // SECURITY: WiFi Direct starts OFF for privacy/security
         })
+    }
+    
+    /// Enable WiFi Direct protocol
+    /// SECURITY: WiFi Direct is disabled by default and must be explicitly enabled
+    pub async fn enable(&self) -> Result<()> {
+        let mut enabled = self.enabled.write().await;
+        if *enabled {
+            info!("  WiFi Direct already enabled");
+            return Ok(());
+        }
+        
+        info!("🔓 Enabling WiFi Direct protocol...");
+        *enabled = true;
+        info!(" WiFi Direct protocol ENABLED");
+        info!("    Hidden SSID mode active");
+        info!("    ZHTP authentication required");
+        
+        Ok(())
+    }
+    
+    /// Disable WiFi Direct protocol
+    /// Stops all WiFi Direct activity and tears down connections
+    pub async fn disable(&self) -> Result<()> {
+        let mut enabled = self.enabled.write().await;
+        if !*enabled {
+            info!("  WiFi Direct already disabled");
+            return Ok(());
+        }
+        
+        info!(" Disabling WiFi Direct protocol...");
+        
+        // Stop Windows WiFi Direct publisher if active
+        #[cfg(target_os = "windows")]
+        {
+            let mut publisher_guard = self.wifi_direct_publisher.write().await;
+            if let Some(publisher) = publisher_guard.take() {
+                use windows::Devices::WiFiDirect::WiFiDirectAdvertisementPublisherStatus;
+                if publisher.Status().unwrap_or(WiFiDirectAdvertisementPublisherStatus::Aborted) 
+                    == WiFiDirectAdvertisementPublisherStatus::Started {
+                    publisher.Stop().ok();
+                    info!("   Stopped WiFi Direct advertisement");
+                }
+            }
+        }
+        
+        // Clear connected devices
+        self.connected_devices.write().await.clear();
+        
+        // Clear discovered peers
+        self.discovered_peers.write().await.clear();
+        
+        // Clear authenticated peers
+        self.authenticated_peers.write().await.clear();
+        
+        *enabled = false;
+        info!(" WiFi Direct protocol DISABLED");
+        info!("    No longer discoverable via WiFi Direct");
+        info!("    All connections closed");
+        
+        Ok(())
+    }
+    
+    /// Check if WiFi Direct is enabled
+    pub async fn is_enabled(&self) -> bool {
+        *self.enabled.read().await
     }
     
     /// Start WiFi Direct discovery
     pub async fn start_discovery(&mut self) -> Result<()> {
+        // Check if WiFi Direct is enabled
+        if !self.is_enabled().await {
+            warn!("  WiFi Direct is DISABLED - cannot start discovery");
+            warn!("   Call enable() first to activate WiFi Direct protocol");
+            return Err(anyhow::anyhow!("WiFi Direct is disabled"));
+        }
+        
         info!("Starting WiFi Direct mesh discovery...");
         
         // Initialize WiFi Direct adapter
@@ -295,38 +379,82 @@ impl WiFiDirectMeshProtocol {
         
         // Start mDNS service discovery and registration
         if let Err(e) = self.start_mdns_service_discovery().await {
-            warn!("⚠️  mDNS service discovery failed: {}", e);
+            warn!("  mDNS service discovery failed: {}", e);
             warn!("   Continuing without mDNS/Bonjour support");
         } else {
-            info!("✅ mDNS/Bonjour service discovery active");
+            info!(" mDNS service discovery active");
         }
-        
-        // Start P2P device discovery
-        self.start_p2p_discovery().await?;
-        
-        // CRITICAL: Wait for mDNS discovery to find peers before deciding group owner role
-        // The mDNS browser runs in background, give it time to discover services
-        info!("⏱️  Waiting 3 seconds for mDNS peer discovery...");
-        tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
-        
-        // Determine if we should be group owner
-        if self.should_become_group_owner().await? {
-            self.create_group().await?;
-            
-            // NOTE: WiFi Direct server is now consolidated in unified_server.rs
-            // The unified server TCP listener handles both HTTP API and WiFi Direct mesh
-            // No separate server needed here - prevents port conflict
-            info!("WiFi Direct P2P group created - mesh messages handled by unified_server");
-        } else {
-            self.join_existing_groups().await?;
-        }
-        
-        // Start connection quality monitoring
-        self.start_connection_monitoring().await?;
         
         self.discovery_active = true;
-        info!("WiFi Direct mesh discovery started");
+        info!(" WiFi Direct discovery started");
+        
         Ok(())
+    }
+    
+    /// Initialize ZHTP authentication for WiFi Direct
+    /// SECURITY: Prevents non-ZHTP nodes from connecting
+    pub async fn initialize_auth(&self, blockchain_pubkey: lib_crypto::PublicKey) -> Result<()> {
+        use crate::protocols::zhtp_auth::ZhtpAuthManager;
+        
+        info!(" Initializing ZHTP authentication for WiFi Direct");
+        info!("   Post-quantum Dilithium2 signatures enabled");
+        info!("   Only ZHTP nodes with blockchain identity can connect");
+        
+        let auth_manager = ZhtpAuthManager::new(blockchain_pubkey)?;
+        *self.auth_manager.write().await = Some(auth_manager);
+        
+        info!(" WiFi Direct authentication initialized");
+        info!("    Non-ZHTP devices will be rejected");
+        
+        Ok(())
+    }
+    
+    /// Verify a connecting peer is a legitimate ZHTP node
+    /// Returns true if authenticated, false otherwise
+    pub async fn authenticate_peer(&self, device_id: &str, peer_data: &[u8]) -> Result<bool> {
+        use crate::protocols::zhtp_auth::{ZhtpAuthChallenge, ZhtpAuthResponse};
+        
+        let auth_guard = self.auth_manager.read().await;
+        let auth_manager = match auth_guard.as_ref() {
+            Some(mgr) => mgr,
+            None => {
+                warn!("  WiFi Direct authentication not initialized - rejecting connection from {}", device_id);
+                return Ok(false);
+            }
+        };
+        
+        // Try to parse peer data as auth response
+        if let Ok(response) = serde_json::from_slice::<ZhtpAuthResponse>(peer_data) {
+            info!(" Verifying ZHTP authentication from WiFi Direct peer {}", &device_id[..16.min(device_id.len())]);
+            
+            match auth_manager.verify_response(&response).await {
+                Ok(verification) => {
+                    if verification.authenticated {
+                        info!(" WiFi Direct peer {} authenticated successfully", &device_id[..16.min(device_id.len())]);
+                        info!("   Blockchain identity verified with Dilithium2 signature");
+                        info!("   Trust score: {:.2}", verification.trust_score);
+                        
+                        // Store authenticated peer
+                        self.authenticated_peers.write().await.insert(device_id.to_string(), verification);
+                        
+                        return Ok(true);
+                    } else {
+                        warn!(" WiFi Direct peer {} authentication FAILED", &device_id[..16.min(device_id.len())]);
+                        warn!("   Invalid blockchain signature - rejecting connection");
+                        return Ok(false);
+                    }
+                }
+                Err(e) => {
+                    warn!(" WiFi Direct peer {} authentication error: {}", &device_id[..16.min(device_id.len())], e);
+                    return Ok(false);
+                }
+            }
+        }
+        
+        // No valid auth response - reject
+        warn!(" WiFi Direct device {} did not provide ZHTP authentication", &device_id[..16.min(device_id.len())]);
+        warn!("   Rejecting non-ZHTP connection attempt");
+        Ok(false)
     }
     
     /// Initialize WiFi Direct adapter
@@ -368,7 +496,7 @@ impl WiFiDirectMeshProtocol {
     
     #[cfg(target_os = "windows")]
     async fn init_windows_wifi_direct(&self) -> Result<()> {
-        info!("🪟 Initializing Windows WiFi Direct (WinRT API)...");
+        info!(" Initializing Windows WiFi Direct (WinRT API)...");
         
 
         {
@@ -380,24 +508,24 @@ impl WiFiDirectMeshProtocol {
             // Check if WiFi Direct is supported using modern WinRT APIs
             match WiFiDirectDevice::GetDeviceSelector() {
                 Ok(selector) => {
-                    info!("✅ WiFi Direct supported via WinRT API");
+                    info!(" WiFi Direct supported via WinRT API");
                     info!("   Device selector: {}", selector);
                     
                     // Check if we can create an advertisement publisher
                     match WiFiDirectAdvertisementPublisher::new() {
                         Ok(_publisher) => {
-                            info!("✅ WiFi Direct advertisement publisher created");
+                            info!(" WiFi Direct advertisement publisher created");
                             info!("   Your WiFi adapter supports WiFi Direct!");
                             Ok(())
                         }
                         Err(e) => {
-                            warn!("⚠️  Could not create advertisement publisher: {:?}", e);
+                            warn!("  Could not create advertisement publisher: {:?}", e);
                             Err(anyhow::anyhow!("WiFi Direct publisher creation failed: {:?}", e))
                         }
                     }
                 }
                 Err(e) => {
-                    error!("❌ WiFi Direct not supported on this device: {:?}", e);
+                    error!(" WiFi Direct not supported on this device: {:?}", e);
                     Err(anyhow::anyhow!("WiFi Direct not available: {:?}", e))
                 }
             }
@@ -405,7 +533,7 @@ impl WiFiDirectMeshProtocol {
         
         #[cfg(not(target_os = "windows"))]
         {
-            warn!("⚠️  WiFi Direct WinRT APIs only available on Windows");
+            warn!("  WiFi Direct WinRT APIs only available on Windows");
             Err(anyhow::anyhow!("WinRT APIs require Windows platform"))
         }
     }
@@ -701,7 +829,7 @@ impl WiFiDirectMeshProtocol {
             };
             use std::time::Duration;
             
-            info!("🔍 Scanning for WiFi Direct devices using WinRT...");
+            info!(" Scanning for WiFi Direct devices using WinRT...");
             
             // Use a channel to collect devices from the event handler
             let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
@@ -773,14 +901,14 @@ impl WiFiDirectMeshProtocol {
             watcher.Stop()
                 .map_err(|e| anyhow::anyhow!("Failed to stop watcher: {:?}", e))?;
             
-            info!("✅ Found {} WiFi Direct devices", found_devices.len());
+            info!(" Found {} WiFi Direct devices", found_devices.len());
             
             return Ok(found_devices);
         }
         
         #[cfg(not(target_os = "windows"))]
         {
-            warn!("⚠️  WiFi Direct scanning only available on Windows with WinRT");
+            warn!("  WiFi Direct scanning only available on Windows with WinRT");
             return Ok(vec![]);
         }
     }
@@ -920,7 +1048,7 @@ impl WiFiDirectMeshProtocol {
         
         // If we discovered peers, we should JOIN them (not be group owner)
         // The first node on the network becomes group owner, subsequent nodes join
-        info!("📡 Discovered {} peer(s) - will join existing network instead of creating new group", peers.len());
+        info!(" Discovered {} peer(s) - will join existing network instead of creating new group", peers.len());
         for peer_addr in peers.keys() {
             info!("   → Peer: {}", peer_addr);
         }
@@ -1000,7 +1128,7 @@ impl WiFiDirectMeshProtocol {
     
     #[cfg(target_os = "windows")]
     async fn windows_create_p2p_group(&mut self) -> Result<()> {
-        info!("🪟 Creating Windows WiFi Direct group (WinRT API)...");
+        info!(" Creating Windows WiFi Direct group (WinRT API)...");
         
 
         {
@@ -1021,14 +1149,27 @@ impl WiFiDirectMeshProtocol {
             advertisement.SetIsAutonomousGroupOwnerEnabled(true)
                 .map_err(|e| anyhow::anyhow!("Failed to set autonomous GO: {:?}", e))?;
             
+            // SECURITY: Make SSID hidden to prevent non-ZHTP connections
+            if self.hidden_ssid {
+                info!(" SECURITY: WiFi Direct running in HIDDEN mode");
+                info!("   SSID will not broadcast publicly to prevent WiFi sharing");
+                info!("   Only ZHTP nodes with mDNS discovery can connect");
+                // Note: WinRT doesn't have direct "hidden" SSID API
+                // But we disable ListenState which prevents public discovery
+                advertisement.SetListenStateDiscoverability(
+                    windows::Devices::WiFiDirect::WiFiDirectAdvertisementListenStateDiscoverability::None
+                ).map_err(|e| anyhow::anyhow!("Failed to set hidden mode: {:?}", e))?;
+            }
+            
             // Note: Modern WinRT WiFi Direct API doesn't directly support setting custom SSID/passphrase
             // The system manages these automatically for WiFi Direct connections
             // Custom SSIDs are primarily a Windows 7/8 hosted network feature (deprecated)
             
-            info!("ℹ️  Note: Custom SSID '{}' requested but WinRT API manages names automatically", self.ssid);
+            info!("  Note: Custom SSID '{}' requested but WinRT API manages names automatically", self.ssid);
             info!("   WiFi Direct will use system-generated secure credentials");
+            info!("    ZHTP authentication will verify all connections");
             
-            // Start advertising to make this device discoverable
+            // Start advertising to make this device discoverable (only to other WiFi Direct devices)
             publisher.Start()
                 .map_err(|e| anyhow::anyhow!("Failed to start advertisement: {:?}", e))?;
             
@@ -1036,7 +1177,7 @@ impl WiFiDirectMeshProtocol {
             let status = publisher.Status()
                 .map_err(|e| anyhow::anyhow!("Failed to get publisher status: {:?}", e))?;
             
-            info!("✅ WiFi Direct group started successfully!");
+            info!(" WiFi Direct group started successfully!");
             info!("   Status: {:?}", status);
             info!("   This device is now discoverable to other WiFi Direct devices");
             info!("   Other devices can now discover and connect to this node");
@@ -1047,14 +1188,14 @@ impl WiFiDirectMeshProtocol {
             *publisher_guard = Some(publisher);
             drop(publisher_guard);
             
-            info!("🔒 WiFi Direct publisher stored - advertisement will remain active");
+            info!(" WiFi Direct publisher stored - advertisement will remain active");
             
             return Ok(());
         }
         
         #[cfg(not(target_os = "windows"))]
         {
-            warn!("⚠️  WiFi Direct connection only available on Windows with WinRT");
+            warn!("  WiFi Direct connection only available on Windows with WinRT");
             return Err(anyhow::anyhow!("WinRT APIs require Windows platform"));
         }
     }
@@ -1096,17 +1237,17 @@ impl WiFiDirectMeshProtocol {
     
     /// Join existing WiFi Direct groups
     async fn join_existing_groups(&self) -> Result<()> {
-        info!("🔗 Joining existing ZHTP network via discovered peers...");
+        info!(" Joining existing ZHTP network via discovered peers...");
         
         // Get the discovered peers from mDNS
         let peers = self.discovered_peers.read().await;
         
         if peers.is_empty() {
-            warn!("⚠️  No peers to join - this shouldn't happen!");
+            warn!("  No peers to join - this shouldn't happen!");
             return Ok(());
         }
         
-        info!("📋 Found {} discovered peer(s) to connect to:", peers.len());
+        info!(" Found {} discovered peer(s) to connect to:", peers.len());
         for peer_addr in peers.keys() {
             info!("   → {}", peer_addr);
         }
@@ -1114,7 +1255,7 @@ impl WiFiDirectMeshProtocol {
         // NOTE: Actual TCP connections are handled by the UnifiedServer mesh router
         // The discovered_peers HashMap is now accessible via get_discovered_peer_addresses()
         // The unified server will establish TCP connections to these peers
-        info!("✅ Peer addresses registered for mesh routing via UnifiedServer");
+        info!(" Peer addresses registered for mesh routing via UnifiedServer");
         info!("   UnifiedServer will establish TCP connections to discovered peers on port 9333");
         
         Ok(())
@@ -1491,7 +1632,7 @@ impl WiFiDirectMeshProtocol {
     // Windows WPS implementations  
     #[cfg(target_os = "windows")]
     async fn windows_wps_pbc(&self, peer_address: &str) -> Result<String> {
-        info!("🪟 Starting WPS Push Button Configuration for peer: {}", peer_address);
+        info!(" Starting WPS Push Button Configuration for peer: {}", peer_address);
         
 
         {
@@ -1539,7 +1680,7 @@ impl WiFiDirectMeshProtocol {
             let found_devices = devices.lock().unwrap().clone();
             
             if found_devices.is_empty() {
-                warn!("⚠️  Device {} not found", peer_address);
+                warn!("  Device {} not found", peer_address);
                 return Err(anyhow::anyhow!("Device not found"));
             }
             
@@ -1556,20 +1697,20 @@ impl WiFiDirectMeshProtocol {
             // Wait for connection (in async context)
             tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
             
-            info!("✅ WPS Push Button connection initiated");
+            info!(" WPS Push Button connection initiated");
             return Ok("WPS PBC connection established".to_string());
         }
         
         #[cfg(not(target_os = "windows"))]
         {
-            warn!("⚠️  WPS Push Button only available on Windows with WinRT");
+            warn!("  WPS Push Button only available on Windows with WinRT");
             return Err(anyhow::anyhow!("WinRT APIs require Windows platform"));
         }
     }
     
     #[cfg(target_os = "windows")]
     async fn windows_wps_pin_display(&self, peer_address: &str, pin: &str) -> Result<String> {
-        info!("🪟 Starting WPS PIN Display for peer: {} with PIN: {}", peer_address, pin);
+        info!(" Starting WPS PIN Display for peer: {} with PIN: {}", peer_address, pin);
         
 
         {
@@ -1615,7 +1756,7 @@ impl WiFiDirectMeshProtocol {
             let found_devices = devices.lock().unwrap().clone();
             
             if found_devices.is_empty() {
-                warn!("⚠️  Device {} not found", peer_address);
+                warn!("  Device {} not found", peer_address);
                 return Err(anyhow::anyhow!("Device not found"));
             }
             
@@ -1636,20 +1777,20 @@ impl WiFiDirectMeshProtocol {
             
             tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
             
-            info!("✅ WPS PIN Display connection initiated");
+            info!(" WPS PIN Display connection initiated");
             return Ok(format!("WPS PIN Display ready (PIN: {})", pin));
         }
         
         #[cfg(not(target_os = "windows"))]
         {
-            warn!("⚠️  WPS PIN Display only available on Windows with WinRT");
+            warn!("  WPS PIN Display only available on Windows with WinRT");
             return Err(anyhow::anyhow!("WinRT APIs require Windows platform"));
         }
     }
     
     #[cfg(target_os = "windows")]
     async fn windows_wps_pin_keypad(&self, peer_address: &str, pin: &str) -> Result<String> {
-        info!("🪟 Starting WPS PIN Keypad entry for peer: {}", peer_address);
+        info!(" Starting WPS PIN Keypad entry for peer: {}", peer_address);
         
 
         {
@@ -1695,7 +1836,7 @@ impl WiFiDirectMeshProtocol {
             let found_devices = devices.lock().unwrap().clone();
             
             if found_devices.is_empty() {
-                warn!("⚠️  Device {} not found", peer_address);
+                warn!("  Device {} not found", peer_address);
                 return Err(anyhow::anyhow!("Device not found"));
             }
             
@@ -1714,13 +1855,13 @@ impl WiFiDirectMeshProtocol {
             
             tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
             
-            info!("✅ WPS PIN Keypad connection initiated");
+            info!(" WPS PIN Keypad connection initiated");
             return Ok(format!("WPS PIN Keypad attempted (PIN: {})", pin));
         }
         
         #[cfg(not(target_os = "windows"))]
         {
-            warn!("⚠️  WPS PIN Keypad only available on Windows with WinRT");
+            warn!("  WPS PIN Keypad only available on Windows with WinRT");
             return Err(anyhow::anyhow!("WinRT APIs require Windows platform"));
         }
     }
@@ -2053,7 +2194,7 @@ impl WiFiDirectMeshProtocol {
     // Windows P2P invitation implementations
     #[cfg(target_os = "windows")]
     async fn windows_send_p2p_invitation(&self, invitation: &P2PInvitationRequest) -> Result<P2PInvitationResponse> {
-        info!("🪟 Windows sending P2P invitation to {}", invitation.invitee_address);
+        info!(" Windows sending P2P invitation to {}", invitation.invitee_address);
         
 
         {
@@ -2099,7 +2240,7 @@ impl WiFiDirectMeshProtocol {
             let found_devices = devices.lock().unwrap().clone();
             
             if found_devices.is_empty() {
-                warn!("⚠️  Device {} not found for invitation", invitation.invitee_address);
+                warn!("  Device {} not found for invitation", invitation.invitee_address);
                 return Ok(P2PInvitationResponse {
                     status: InvitationStatus::InvalidParameters,
                     config_timeout: invitation.config_timeout,
@@ -2118,7 +2259,7 @@ impl WiFiDirectMeshProtocol {
             let connect_async = WiFiDirectDevice::FromIdAsync(&device_id)
                 .map_err(|e| anyhow::anyhow!("Failed to send invitation: {:?}", e))?;
             
-            info!("✅ P2P invitation sent successfully");
+            info!(" P2P invitation sent successfully");
             
             return Ok(P2PInvitationResponse {
                 status: InvitationStatus::Success,
@@ -2130,7 +2271,7 @@ impl WiFiDirectMeshProtocol {
         
         #[cfg(not(target_os = "windows"))]
         {
-            warn!("⚠️  P2P invitation only available on Windows with WinRT");
+            warn!("  P2P invitation only available on Windows with WinRT");
             return Ok(P2PInvitationResponse {
                 status: InvitationStatus::Pending,
                 config_timeout: invitation.config_timeout,
@@ -2142,7 +2283,7 @@ impl WiFiDirectMeshProtocol {
     
     #[cfg(target_os = "windows")]
     async fn windows_join_active_group(&self, invitation: &P2PInvitationRequest) -> Result<()> {
-        info!("🪟 Windows joining active P2P group for channel {}", invitation.operating_channel);
+        info!(" Windows joining active P2P group for channel {}", invitation.operating_channel);
         
 
         {
@@ -2189,7 +2330,7 @@ impl WiFiDirectMeshProtocol {
             let found_devices = devices.lock().unwrap().clone();
             
             if found_devices.is_empty() {
-                warn!("⚠️  No matching P2P group found for {}", invitation.persistent_group_id);
+                warn!("  No matching P2P group found for {}", invitation.persistent_group_id);
                 return Err(anyhow::anyhow!("Group not found"));
             }
             
@@ -2203,20 +2344,20 @@ impl WiFiDirectMeshProtocol {
             let connect_async = WiFiDirectDevice::FromIdAsync(&device_id)
                 .map_err(|e| anyhow::anyhow!("Failed to join group: {:?}", e))?;
             
-            info!("✅ Joined P2P group successfully");
+            info!(" Joined P2P group successfully");
             return Ok(());
         }
         
         #[cfg(not(target_os = "windows"))]
         {
-            warn!("⚠️  Joining P2P group only available on Windows with WinRT");
+            warn!("  Joining P2P group only available on Windows with WinRT");
             return Err(anyhow::anyhow!("WinRT APIs require Windows platform"));
         }
     }
     
     #[cfg(target_os = "windows")]
     async fn windows_reinvoke_persistent_group(&self, group: &PersistentGroup) -> Result<()> {
-        info!("🪟 Windows reinvoking persistent group {}", group.group_id);
+        info!(" Windows reinvoking persistent group {}", group.group_id);
         
 
         {
@@ -2239,14 +2380,14 @@ impl WiFiDirectMeshProtocol {
             // Note: WinRT WiFi Direct API doesn't support custom SSID/passphrase for persistent groups
             // The system manages persistent group credentials automatically
             
-            info!("ℹ️  Reinvoking group '{}' (WinRT manages credentials automatically)", group.group_id);
+            info!("  Reinvoking group '{}' (WinRT manages credentials automatically)", group.group_id);
             info!("   Requested SSID: {}", group.ssid);
             
             // Start advertising the persistent group
             publisher.Start()
                 .map_err(|e| anyhow::anyhow!("Failed to start advertisement: {:?}", e))?;
             
-            info!("✅ Persistent group {} reinvoked successfully", group.group_id);
+            info!(" Persistent group {} reinvoked successfully", group.group_id);
             info!("   Group is now discoverable");
             
             return Ok(());
@@ -2254,7 +2395,7 @@ impl WiFiDirectMeshProtocol {
         
         #[cfg(not(target_os = "windows"))]
         {
-            warn!("⚠️  Persistent group reinvocation only available on Windows with WinRT");
+            warn!("  Persistent group reinvocation only available on Windows with WinRT");
             return Err(anyhow::anyhow!("WinRT APIs require Windows platform"));
         }
     }
@@ -2331,7 +2472,7 @@ impl WiFiDirectMeshProtocol {
     
     /// Register ZHTP service with mDNS
     async fn register_zhtp_service(&self) -> Result<()> {
-        info!("📢 Registering ZHTP service with mDNS");
+        info!(" Registering ZHTP service with mDNS");
         
         let service_name = format!("ZHTP-Node-{:x}", 
                                   u32::from_ne_bytes(self.node_id[0..4].try_into().unwrap()));
@@ -2388,7 +2529,7 @@ impl WiFiDirectMeshProtocol {
             )?;
             
             daemon.register(service_info)?;
-            info!("✅ mDNS service registered: {} on {}:{}", service_name, local_ip, service.port);
+            info!(" mDNS service registered: {} on {}:{}", service_name, local_ip, service.port);
             info!("   Service type: _zhtp._tcp.local");
             info!("   Discoverable via Bonjour/Zeroconf");
         } else {
@@ -2436,7 +2577,7 @@ impl WiFiDirectMeshProtocol {
     
     /// Browse for ZHTP services using mDNS
     async fn browse_zhtp_services(&self) -> Result<()> {
-        info!("🔍 Browsing for ZHTP routers via mDNS");
+        info!(" Browsing for ZHTP routers via mDNS");
         
         if let Some(daemon) = &self.mdns_daemon {
             // Browse for ZHTP services
@@ -2458,7 +2599,7 @@ impl WiFiDirectMeshProtocol {
                         Ok(Ok(event)) => {
                             match event {
                                 mdns_sd::ServiceEvent::ServiceResolved(info) => {
-                                    info!("🔍 mDNS service discovered: {}", info.get_fullname());
+                                    info!(" mDNS service discovered: {}", info.get_fullname());
                                     
                                     // Check if this is a ZHTP router (not a client)
                                     let is_router = info.get_properties()
@@ -2494,7 +2635,7 @@ impl WiFiDirectMeshProtocol {
                                     for addr in addresses {
                                         // Skip if this is our own IP address (self-discovery)
                                         if addr == own_ip {
-                                            info!("⏭️  Skipping self-discovery: {} is our own IP", addr);
+                                            info!("  Skipping self-discovery: {} is our own IP", addr);
                                             continue;
                                         }
                                         
@@ -2532,9 +2673,9 @@ impl WiFiDirectMeshProtocol {
                                             };
                                             
                                             peers.insert(peer_addr.clone(), peer_negotiation);
-                                            info!("✅ Added ZHTP peer {} to discovered peers", peer_addr);
+                                            info!(" Added ZHTP peer {} to discovered peers", peer_addr);
                                         } else {
-                                            info!("🔄 Rediscovered existing ZHTP peer {}", peer_addr);
+                                            info!(" Rediscovered existing ZHTP peer {}", peer_addr);
                                         }
                                         
                                         // Drop lock before sending notifications
@@ -2547,16 +2688,16 @@ impl WiFiDirectMeshProtocol {
                                                 warn!("Failed to send peer discovery notification: {}", e);
                                             } else {
                                                 if is_new_peer {
-                                                    info!("🔔 Sent peer discovery notification for new peer {}", peer_addr);
+                                                    info!(" Sent peer discovery notification for new peer {}", peer_addr);
                                                 } else {
-                                                    info!("🔔 Sent peer rediscovery notification for {} (triggers sync)", peer_addr);
+                                                    info!(" Sent peer rediscovery notification for {} (triggers sync)", peer_addr);
                                                 }
                                             }
                                         }
                                         
                                         // Automatically connect to discovered peer for mesh forwarding
                                         if is_new_peer {
-                                            info!("🔗 Attempting automatic connection to discovered peer {}...", peer_addr);
+                                            info!(" Attempting automatic connection to discovered peer {}...", peer_addr);
                                             // Note: Actual TCP connection will be established by UnifiedServer
                                             // when it receives messages destined for this peer.
                                             // For now, just log that the peer is available for routing.
@@ -2565,10 +2706,10 @@ impl WiFiDirectMeshProtocol {
                                     }
                                 },
                                 mdns_sd::ServiceEvent::ServiceFound(ty, fullname) => {
-                                    info!("🔍 mDNS ServiceFound event: {} (type: {})", fullname, ty);
+                                    info!(" mDNS ServiceFound event: {} (type: {})", fullname, ty);
                                 },
                                 mdns_sd::ServiceEvent::SearchStarted(ty) => {
-                                    info!("🔍 mDNS search started for: {}", ty);
+                                    info!(" mDNS search started for: {}", ty);
                                 },
                                 _ => {
                                     debug!("Other mDNS event: {:?}", event);
@@ -2819,7 +2960,7 @@ impl WiFiDirectMeshProtocol {
             
             // Deserialize the envelope to check destination
             if let Ok(envelope) = crate::types::mesh_message::MeshMessageEnvelope::from_bytes(payload) {
-                info!("📦 Envelope {} from {:?} to {:?} (hop {}/{})",
+                info!(" Envelope {} from {:?} to {:?} (hop {}/{})",
                     envelope.message_id,
                     hex::encode(&envelope.origin.key_id[0..4]),
                     hex::encode(&envelope.destination.key_id[0..4]),
@@ -2829,7 +2970,7 @@ impl WiFiDirectMeshProtocol {
                 
                 // Check if TTL exceeded
                 if envelope.hop_count >= envelope.ttl {
-                    warn!("⚠️  Message {} exceeded TTL, dropping", envelope.message_id);
+                    warn!("  Message {} exceeded TTL, dropping", envelope.message_id);
                     return;
                 }
                 
@@ -2865,7 +3006,7 @@ impl WiFiDirectMeshProtocol {
         // Send via existing send_mesh_message
         self.send_mesh_message(&target_address, &bytes).await?;
         
-        info!("✅ WiFi Direct mesh envelope sent successfully");
+        info!(" WiFi Direct mesh envelope sent successfully");
         
         Ok(())
     }

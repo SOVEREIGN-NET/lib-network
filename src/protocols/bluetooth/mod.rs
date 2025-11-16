@@ -179,7 +179,7 @@ impl BluetoothMeshProtocol {
     /// Set blockchain provider for serving edge node sync requests
     pub async fn set_blockchain_provider(&self, provider: Arc<dyn crate::blockchain_sync::BlockchainProvider>) {
         *self.blockchain_provider.write().await = Some(provider);
-        info!("📦 Blockchain provider configured for BLE edge sync");
+        info!(" Blockchain provider configured for BLE edge sync");
     }
     
     /// Set the GATT message channel for forwarding to unified server
@@ -202,7 +202,7 @@ impl BluetoothMeshProtocol {
     /// Initialize Core Bluetooth on macOS
     #[cfg(target_os = "macos")]
     pub async fn initialize_core_bluetooth(&self) -> Result<()> {
-        info!("🔄 Initializing Core Bluetooth for macOS");
+        info!(" Initializing Core Bluetooth for macOS");
         
         let core_bt_manager = Arc::new(CoreBluetoothManager::new()?);
         
@@ -216,20 +216,20 @@ impl BluetoothMeshProtocol {
         }
         
         // Start the event processing loop to handle delegate callbacks
-        info!("🔄 Starting Core Bluetooth event loop...");
+        info!(" Starting Core Bluetooth event loop...");
         core_bt_manager.start_event_loop().await?;
-        info!("✅ Event loop started - delegate callbacks will now be processed");
+        info!(" Event loop started - delegate callbacks will now be processed");
         
         // Store the Arc directly - need to update the field type
         *self.core_bluetooth.write().await = Some(Arc::clone(&core_bt_manager));
         
-        info!("✅ Core Bluetooth initialized successfully");
+        info!(" Core Bluetooth initialized successfully");
         Ok(())
     }
     
     /// Request authentication from a peer
     pub async fn authenticate_peer(&self, peer_address: &str) -> Result<ZhtpAuthVerification> {
-        info!("🔐 Starting ZHTP peer authentication with {}", peer_address);
+        info!(" Starting ZHTP peer authentication with {}", peer_address);
         
         let auth_manager = self.auth_manager.read().await;
         let auth_manager = auth_manager.as_ref()
@@ -237,7 +237,7 @@ impl BluetoothMeshProtocol {
         
         // Step 1: Create authentication challenge
         let challenge = auth_manager.create_challenge().await?;
-        info!("✅ Generated authentication challenge for {}", peer_address);
+        info!(" Generated authentication challenge for {}", peer_address);
         
         // Step 2: Send challenge via GATT characteristic
         let challenge_data = serde_json::to_vec(&challenge)
@@ -257,10 +257,10 @@ impl BluetoothMeshProtocol {
         let verification = auth_manager.verify_response(&response).await?;
         
         if verification.authenticated {
-            info!("✅ Authentication successful for {} - Trust score: {:.2}", 
+            info!(" Authentication successful for {} - Trust score: {:.2}", 
                   peer_address, verification.trust_score);
         } else {
-            warn!("❌ Authentication failed for {}", peer_address);
+            warn!(" Authentication failed for {}", peer_address);
         }
         
         Ok(verification)
@@ -440,7 +440,7 @@ impl BluetoothMeshProtocol {
         
         // Check if fragmentation needed (>500 bytes = needs fragmentation)
         if data.len() > 500 {
-            info!("📦 Message {} bytes, fragmenting for BLE MTU", data.len());
+            info!(" Message {} bytes, fragmenting for BLE MTU", data.len());
             let message_id = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
@@ -458,7 +458,7 @@ impl BluetoothMeshProtocol {
                 debug!("   Fragment {}/{} sent ({} bytes)", i+1, fragments.len(), fragment.len());
             }
             
-            info!("✅ All {} fragments sent to {}", fragments.len(), peer_address);
+            info!(" All {} fragments sent to {}", fragments.len(), peer_address);
         } else {
             // Send as single message
             self.write_gatt_characteristic_with_discovery(
@@ -466,7 +466,7 @@ impl BluetoothMeshProtocol {
                 "6ba7b813-9dad-11d1-80b4-00c04fd430ca",
                 &data
             ).await?;
-            info!("✅ Sent edge sync message ({} bytes) to {}", data.len(), peer_address);
+            info!(" Sent edge sync message ({} bytes) to {}", data.len(), peer_address);
         }
         
         Ok(())
@@ -562,7 +562,7 @@ impl BluetoothMeshProtocol {
         devices.insert(secure_id_str.clone(), device_info.clone());
         mapping.insert(secure_id_str.clone(), device_info.ephemeral_address.clone());
         
-        info!("✅ Tracking device with secure ID: {} -> {}", 
+        info!(" Tracking device with secure ID: {} -> {}", 
               &secure_id_str[..16], device_info.ephemeral_address);
         Ok(())
     }
@@ -673,13 +673,13 @@ impl BluetoothMeshProtocol {
         info!("Starting Bluetooth LE mesh discovery...");
         
         // Initialize Bluetooth stack for mesh networking
-        info!("🔧 DEBUG: About to initialize_bluetooth_stack...");
+        info!(" DEBUG: About to initialize_bluetooth_stack...");
         self.initialize_bluetooth_stack().await?;
-        info!("🔧 DEBUG: Bluetooth stack initialized, now setting up ZK mesh protocols...");
+        info!(" DEBUG: Bluetooth stack initialized, now setting up ZK mesh protocols...");
         
         // Setup quantum-resistant ZK mesh protocols  
         self.setup_zk_mesh_protocols().await?;
-        info!("🔧 DEBUG: ZK mesh protocols setup complete!");
+        info!(" DEBUG: ZK mesh protocols setup complete!");
         
         // Start advertising ZHTP mesh network
         self.start_real_mesh_advertising().await?;
@@ -716,7 +716,7 @@ impl BluetoothMeshProtocol {
     
     /// Setup quantum-resistant zero-knowledge mesh protocols
     async fn setup_zk_mesh_protocols(&self) -> Result<()> {
-        info!("🔧 DEBUG: setup_zk_mesh_protocols() ENTRY POINT");
+        info!(" DEBUG: setup_zk_mesh_protocols() ENTRY POINT");
         info!("Setting up quantum-resistant ZK mesh protocols...");
         
         // ZHTP Mesh Service UUID (v2 - changed to bypass macOS bluetoothd cache)
@@ -734,14 +734,14 @@ impl BluetoothMeshProtocol {
         // Mesh coordination characteristic
         let mesh_coord_char = "6ba7b814-9dad-11d1-80b4-00c04fd430ca";
         
-        info!("🔧 DEBUG: About to call register_mesh_gatt_service...");
+        info!(" DEBUG: About to call register_mesh_gatt_service...");
         self.register_mesh_gatt_service(lib_mesh_service, vec![
             zk_auth_char,
             quantum_routing_char,
             mesh_data_char,
             mesh_coord_char
         ]).await?;
-        info!("🔧 DEBUG: register_mesh_gatt_service completed!");
+        info!(" DEBUG: register_mesh_gatt_service completed!");
         
         info!("Quantum-resistant mesh protocols ready for peer-to-peer communication");
         Ok(())
@@ -755,7 +755,7 @@ impl BluetoothMeshProtocol {
         // No need for separate BLE advertisement publisher - it conflicts
         #[cfg(target_os = "windows")]
         {
-            info!("✅ Windows: Mesh advertising active via GATT service");
+            info!(" Windows: Mesh advertising active via GATT service");
             info!("   GATT Service UUID: 6ba7b810-9dad-11d1-80b4-00c04fd430ca(v2)");
             info!("   Mesh capabilities available through GATT characteristics");
         }
@@ -839,14 +839,14 @@ impl BluetoothMeshProtocol {
                 let scan_result = Self::scan_for_mesh_peers().await;
                 
                 if let Ok(peers) = scan_result {
-                    info!("🔍 DEBUG: Background scan found {} peers", peers.len());
+                    info!(" DEBUG: Background scan found {} peers", peers.len());
                     let mut conns = connections.write().await;
-                    info!("🔍 DEBUG: Currently {} active connections", conns.len());
+                    info!(" DEBUG: Currently {} active connections", conns.len());
                     
                     for peer in peers {
-                        info!("🔍 DEBUG: Checking peer {} (already connected: {})", peer.address, conns.contains_key(&peer.address));
+                        info!(" DEBUG: Checking peer {} (already connected: {})", peer.address, conns.contains_key(&peer.address));
                         if !conns.contains_key(&peer.address) {
-                            info!("🔗 Attempting to connect to mesh peer: {}", peer.address);
+                            info!(" Attempting to connect to mesh peer: {}", peer.address);
                             
                             #[cfg(target_os = "macos")]
                             let connect_result = Self::connect_mesh_peer(&peer, device_id, &core_bt).await;
@@ -856,7 +856,7 @@ impl BluetoothMeshProtocol {
                             
                             if let Ok(connection) = connect_result {
                                 conns.insert(peer.address.clone(), connection);
-                                info!("✅ Connected to mesh peer: {}", peer.address);
+                                info!(" Connected to mesh peer: {}", peer.address);
                                 
                                 // Send MeshHandshake to establish mesh connection
                                 drop(conns); // Release lock before async operations
@@ -935,7 +935,7 @@ impl BluetoothMeshProtocol {
         let handshake_data = bincode::serialize(&handshake)
             .map_err(|e| anyhow::anyhow!("Failed to serialize handshake: {}", e))?;
         
-        info!("📝 Sending {} byte handshake to {}", handshake_data.len(), peer_address);
+        info!(" Sending {} byte handshake to {}", handshake_data.len(), peer_address);
         
         // Write to mesh data characteristic (6ba7b813)
         let mesh_data_char = "6ba7b813-9dad-11d1-80b4-00c04fd430ca";
@@ -943,7 +943,7 @@ impl BluetoothMeshProtocol {
         // Use Core Bluetooth to write handshake
         Self::macos_write_handshake(peer_address, mesh_data_char, &handshake_data, core_bt).await?;
         
-        info!("✅ MeshHandshake sent successfully to {}", peer_address);
+        info!(" MeshHandshake sent successfully to {}", peer_address);
         Ok(())
     }
     
@@ -986,7 +986,7 @@ impl BluetoothMeshProtocol {
         let handshake_data = bincode::serialize(&handshake)
             .map_err(|e| anyhow::anyhow!("Failed to serialize handshake: {}", e))?;
         
-        info!("📝 Sending {} byte handshake to {}", handshake_data.len(), peer_address);
+        info!(" Sending {} byte handshake to {}", handshake_data.len(), peer_address);
         
         // Write to mesh data characteristic (6ba7b813)
         let mesh_data_char = "6ba7b813-9dad-11d1-80b4-00c04fd430ca";
@@ -1002,7 +1002,7 @@ impl BluetoothMeshProtocol {
             Self::linux_write_handshake(peer_address, mesh_data_char, &handshake_data).await?;
         }
         
-        info!("✅ MeshHandshake sent successfully to {}", peer_address);
+        info!(" MeshHandshake sent successfully to {}", peer_address);
         Ok(())
     }
     
@@ -1075,14 +1075,28 @@ impl BluetoothMeshProtocol {
         let manager = core_bt.as_ref()
             .ok_or_else(|| anyhow::anyhow!("Core Bluetooth not initialized"))?;
         
+        // Strip gatt:// prefix if present
+        let identifier = address.strip_prefix("gatt://").unwrap_or(address);
+        
         // ZHTP mesh service and characteristic UUIDs
         let service_uuid = "6ba7b810-9dad-11d1-80b4-00c04fd430ca";
         let mesh_data_char = "6ba7b813-9dad-11d1-80b4-00c04fd430ca";
         
-        // Write to characteristic
-        manager.write_characteristic(address, service_uuid, mesh_data_char, data).await?;
+        // Check if this is a connected central (incoming connection to our peripheral)
+        // vs a discovered peripheral (outgoing connection from our central)
+        let is_connected_central = manager.is_connected_central(identifier).await;
         
-        info!("✅ macOS: Successfully transmitted {} bytes to {}", data.len(), address);
+        if is_connected_central {
+            // Send via peripheral manager notification (we are the server)
+            info!(" macOS: Sending notification to connected central {}", identifier);
+            manager.send_notification(mesh_data_char, data).await?;
+        } else {
+            // Write via central manager (we are the client)
+            info!(" macOS: Writing to discovered peripheral {}", identifier);
+            manager.write_characteristic(identifier, service_uuid, mesh_data_char, data).await?;
+        }
+        
+        info!(" macOS: Successfully transmitted {} bytes to {}", data.len(), address);
         Ok(())
     }
     
@@ -1111,7 +1125,7 @@ impl BluetoothMeshProtocol {
     async fn init_bluez_bluetooth(&self) -> Result<()> {
         use std::process::Command;
         
-        info!("Configuring Linux BlueZ for ISP bypass...");
+        info!("Configuring Linux BlueZ for ...");
         
         // Start bluetooth service
         let _ = Command::new("sudo")
@@ -1128,18 +1142,18 @@ impl BluetoothMeshProtocol {
             .args(&["discoverable", "on"])
             .output();
         
-        info!("Linux BlueZ configured for ISP bypass");
+        info!("Linux BlueZ configured for ");
         Ok(())
     }
 
     #[cfg(target_os = "macos")]
     async fn init_corebluetooth(&self) -> Result<()> {
-        info!("macOS Core Bluetooth ready for ISP bypass");
+        info!("macOS Core Bluetooth ready for ");
         
         // Initialize Core Bluetooth manager
-        info!("🔄 Initializing Core Bluetooth managers...");
+        info!(" Initializing Core Bluetooth managers...");
         self.initialize_core_bluetooth().await?;
-        info!("✅ Core Bluetooth central and peripheral managers initialized");
+        info!(" Core Bluetooth central and peripheral managers initialized");
         
         Ok(())
     }
@@ -1217,7 +1231,7 @@ impl BluetoothMeshProtocol {
                                 services: vec!["6ba7b810-9dad-11d1-80b4-00c04fd430ca".to_string()],
                                 quantum_secure: true,
                             };
-                            info!("✅ Found ZHTP mesh peer: {} ({}) RSSI: {}", 
+                            info!(" Found ZHTP mesh peer: {} ({}) RSSI: {}", 
                                 name.as_deref().unwrap_or("Unknown"), 
                                 address, 
                                 rssi);
@@ -1233,7 +1247,7 @@ impl BluetoothMeshProtocol {
         
         gatt_manager.stop_discovery().await?;
         
-        info!("✅ Found {} ZHTP mesh peers on Windows", peers.len());
+        info!(" Found {} ZHTP mesh peers on Windows", peers.len());
         Ok(peers)
     }
 
@@ -1258,7 +1272,7 @@ impl BluetoothMeshProtocol {
             // Core Bluetooth only returns devices advertising that service.
             // Therefore, ALL discovered devices are ZHTP mesh peers!
             for device in devices {
-                info!("✅ Found ZHTP mesh peer: {} ({}) RSSI: {}", 
+                info!(" Found ZHTP mesh peer: {} ({}) RSSI: {}", 
                       device.device_name.as_deref().unwrap_or("Unknown"),
                       device.ephemeral_address,
                       device.signal_strength);
@@ -1275,10 +1289,10 @@ impl BluetoothMeshProtocol {
             }
             
             manager.stop_scan().await?;
-            info!("✅ macOS: Found {} ZHTP mesh peers", mesh_peers.len());
+            info!(" macOS: Found {} ZHTP mesh peers", mesh_peers.len());
             Ok(mesh_peers)
         } else {
-            warn!("❌ macOS: Core Bluetooth manager not initialized");
+            warn!(" macOS: Core Bluetooth manager not initialized");
             Ok(Vec::new())
         }
     }
@@ -1335,9 +1349,9 @@ impl BluetoothMeshProtocol {
         _device_id: [u8; 6],
         core_bt: &Arc<RwLock<Option<Arc<CoreBluetoothManager>>>>
     ) -> Result<BluetoothConnection> {
-        info!("🔗 Establishing mesh connection to: {}", peer.address);
+        info!(" Establishing mesh connection to: {}", peer.address);
         let connection = Self::macos_connect_mesh_peer(peer, core_bt).await?;
-        info!("✅ BLE connection established to {}", peer.address);
+        info!(" BLE connection established to {}", peer.address);
         Ok(connection)
     }
     
@@ -1347,7 +1361,7 @@ impl BluetoothMeshProtocol {
         peer: &MeshPeer, 
         _device_id: [u8; 6]
     ) -> Result<BluetoothConnection> {
-        info!("🔗 Establishing mesh connection to: {}", peer.address);
+        info!(" Establishing mesh connection to: {}", peer.address);
         
         // Step 1: Establish BLE connection
         let connection = {
@@ -1367,7 +1381,7 @@ impl BluetoothMeshProtocol {
             }
         };
         
-        info!("✅ BLE connection established to {}", peer.address);
+        info!(" BLE connection established to {}", peer.address);
         Ok(connection)
     }
     
@@ -1421,7 +1435,7 @@ impl BluetoothMeshProtocol {
         
         // Discover services to populate the cache (required for characteristic writes)
         let services = gatt_manager.discover_services(&peer.address).await?;
-        info!("✅ Windows: Connected to {} with {} services", peer.address, services.len());
+        info!(" Windows: Connected to {} with {} services", peer.address, services.len());
         
         Ok(BluetoothConnection {
             peer_id: peer.peer_id.clone(),
@@ -1450,7 +1464,7 @@ impl BluetoothMeshProtocol {
             
             // Discover services
             let services = manager.discover_services(&peer.address).await?;
-            info!("✅ macOS: Connected to {} with {} services", peer.address, services.len());
+            info!(" macOS: Connected to {} with {} services", peer.address, services.len());
             
             Ok(BluetoothConnection {
                 peer_id: peer.peer_id.clone(),
@@ -1510,7 +1524,7 @@ impl BluetoothMeshProtocol {
         // - macOS: Use CBPeripheral didUpdateValueForCharacteristic delegate
         // - Linux: Use D-Bus PropertiesChanged signals for org.bluez.GattCharacteristic1
         
-        info!("✅ GATT characteristic handlers initialized (event-driven mode)");
+        info!(" GATT characteristic handlers initialized (event-driven mode)");
         
         Ok(())
     }
@@ -1560,11 +1574,11 @@ impl BluetoothMeshProtocol {
         // First discover services to ensure characteristic exists
         match self.discover_services(device_address).await {
             Ok(_) => {
-                info!("📋 Services discovered for {}, writing to characteristic {}", device_address, char_uuid);
+                info!(" Services discovered for {}, writing to characteristic {}", device_address, char_uuid);
                 self.write_gatt_characteristic(device_address, char_uuid, data).await
             }
             Err(e) => {
-                warn!("⚠️ Service discovery failed for {}: {}, attempting direct write", device_address, e);
+                warn!(" Service discovery failed for {}: {}, attempting direct write", device_address, e);
                 // Fallback to direct write
                 self.write_gatt_characteristic(device_address, char_uuid, data).await
             }
@@ -1722,7 +1736,7 @@ Value=00
             .args(&["advertise", "on"])
             .output();
         
-        info!("Linux: ISP bypass GATT service registered");
+        info!("Linux:  GATT service registered");
         Ok(())
     }
     
@@ -1737,7 +1751,7 @@ Value=00
             core::GUID,
         };
             
-            info!("🔧 Windows: Creating GATT Service Provider with UUID: {}", service_uuid);
+            info!(" Windows: Creating GATT Service Provider with UUID: {}", service_uuid);
             
             // Parse service UUID to GUID
             let service_guid = self.parse_uuid_to_guid(service_uuid)?;
@@ -1862,8 +1876,8 @@ Value=00
                                                 vec![0x09, 0x0A, 0x0B, 0x0C]
                                             },
                                             "6ba7b814-9dad-11d1-80b4-00c04fd430ca" => {
-                                                // ISP bypass info
-                                                info!(" Sending ISP bypass coordination");
+                                                //  info
+                                                info!(" Sending  coordination");
                                                 vec![0x0D, 0x0E, 0x0F, 0x10]
                                             },
                                             _ => vec![0x00]
@@ -1990,18 +2004,18 @@ Value=00
             adv_params.SetIsDiscoverable(true)
                 .map_err(|e| anyhow::anyhow!("Failed to set discoverable: {:?}", e))?;
             
-            // 🔧 FIX: Use ONLY GattServiceProvider advertising (don't create separate publisher)
+            //  FIX: Use ONLY GattServiceProvider advertising (don't create separate publisher)
             // Windows BLE stack limitation: Only ONE advertiser can be active at a time
             // GattServiceProvider handles its own advertising, creating a separate
             // BluetoothLEAdvertisementPublisher causes HRESULT 0x80070057 conflict
-            info!("🔧 Starting GATT Service Provider advertising (includes service UUID automatically)");
+            info!(" Starting GATT Service Provider advertising (includes service UUID automatically)");
             
             // Start advertising with the GATT service using the parameters
             // This will advertise BOTH the GATT service AND the service UUID
             service_provider.StartAdvertisingWithParameters(&adv_params)
                 .map_err(|e| anyhow::anyhow!("Failed to start GATT advertising: {:?}", e))?;
             
-            info!("✅ Windows: GATT Service advertising started successfully");
+            info!(" Windows: GATT Service advertising started successfully");
             info!("   → Service UUID: {} is now discoverable", service_uuid);
             info!("   → GATT Server accepting connections from BLE clients");
             info!("   → Characteristics available for read/write/notify operations");
@@ -2009,9 +2023,9 @@ Value=00
             // Store the service_provider to keep it alive AFTER using it
             // This must be done after calling StartAdvertisingWithParameters to avoid move errors
             *self.gatt_service_provider.write().await = Some(Box::new(service_provider));
-            info!("🔒 Windows: GATT Service Provider stored - will remain active");
+            info!(" Windows: GATT Service Provider stored - will remain active");
             
-            info!("✅ Windows GATT service ready for mesh peer discovery");
+            info!(" Windows GATT service ready for mesh peer discovery");
             info!("   Note: Windows requires phones to be paired in Settings first");
             info!("   Other ZHTP nodes (Mac/Linux/Android) can auto-discover this service");
             
@@ -2036,7 +2050,7 @@ Value=00
             // with manufacturer data, but the service will already be registered
             manager.start_advertising(service_uuid, &char_data).await?;
             
-            info!("✅ macOS: GATT service registered and initial advertising started");
+            info!(" macOS: GATT service registered and initial advertising started");
             Ok(())
         } else {
             Err(anyhow::anyhow!("macOS: Core Bluetooth manager not initialized"))
@@ -2229,7 +2243,7 @@ Value=00
                 device.services = Self::extract_services(&output_str);
                 
                 self.track_device(&raw_mac, device).await?;
-                info!("✅ Linux: Securely discovered device with ephemeral ID");
+                info!(" Linux: Securely discovered device with ephemeral ID");
             }
         }
         
@@ -2281,7 +2295,7 @@ Value=00
             
             self.track_device(&raw_mac, tracked_device).await?;
             
-            info!("✅ Windows: Device securely tracked with ephemeral ID");
+            info!(" Windows: Device securely tracked with ephemeral ID");
         }
         
         #[cfg(not(feature = "windows-gatt"))]
@@ -2485,7 +2499,7 @@ Value=00
             .output()?;
         
         if output.status.success() {
-            info!("✅ Linux: Notifications enabled for characteristic {}", char_uuid);
+            info!(" Linux: Notifications enabled for characteristic {}", char_uuid);
             Ok(())
         } else {
             Err(anyhow!("Failed to enable notifications: {}", 
@@ -2714,7 +2728,7 @@ Value=00
                             data_reader.ReadBytes(&mut data)
                                 .map_err(|e| anyhow::anyhow!("Failed to read buffer data: {:?}", e))?;
                             
-                            info!("✅ Windows: Read {} bytes from GATT characteristic {}", data.len(), char_uuid);
+                            info!(" Windows: Read {} bytes from GATT characteristic {}", data.len(), char_uuid);
                             return Ok(data);
                         } else {
                             return Err(anyhow::anyhow!("GATT read failed with status: {:?}", read_result.Status()?));
@@ -2784,7 +2798,7 @@ Value=00
         for service_uuid in services {
             match gatt_manager.write_characteristic(device_address, &service_uuid, char_uuid, data).await {
                 Ok(()) => {
-                    info!("✅ Windows: Successfully wrote {} bytes to characteristic {}", data.len(), char_uuid);
+                    info!(" Windows: Successfully wrote {} bytes to characteristic {}", data.len(), char_uuid);
                     return Ok(());
                 },
                 Err(_) => continue, // Try next service
@@ -2897,7 +2911,7 @@ Value=00
         // Enable notifications using the GATT manager
         gatt_manager.enable_notifications(device_address, char_uuid).await?;
         
-        info!("✅ Windows: Notifications enabled for characteristic {}", char_uuid);
+        info!(" Windows: Notifications enabled for characteristic {}", char_uuid);
         Ok(())
     }
 
@@ -2987,11 +3001,11 @@ Value=00
             // Read the characteristic 
             let data = manager.read_characteristic(device_address, "6ba7b810-9dad-11d1-80b4-00c04fd430ca", char_uuid).await?;
             
-            info!("✅ macOS: Read {} bytes via Core Bluetooth", data.len());
+            info!(" macOS: Read {} bytes via Core Bluetooth", data.len());
             Ok(data)
         } else {
             // Fallback to system_profiler if Core Bluetooth not available
-            warn!("⚠️ Core Bluetooth not initialized, falling back to system commands");
+            warn!(" Core Bluetooth not initialized, falling back to system commands");
             
             use std::process::Command;
             
@@ -3039,11 +3053,11 @@ Value=00
             // Write to the characteristic
             manager.write_characteristic(device_address, "6ba7b810-9dad-11d1-80b4-00c04fd430ca", char_uuid, data).await?;
             
-            info!("✅ macOS: GATT write successful via Core Bluetooth");
+            info!(" macOS: GATT write successful via Core Bluetooth");
             Ok(())
         } else {
             // Fallback to AppleScript if Core Bluetooth not available
-            warn!("⚠️ Core Bluetooth not initialized, falling back to AppleScript");
+            warn!(" Core Bluetooth not initialized, falling back to AppleScript");
             
             use std::process::Command;
             
@@ -3216,15 +3230,15 @@ Value=00
         
         if let Some(manager) = core_bt.as_ref() {
             // Use Core Bluetooth for service discovery
-            info!("🔍 macOS: Using Core Bluetooth for service discovery on {}", device_address);
+            info!(" macOS: Using Core Bluetooth for service discovery on {}", device_address);
             
             let services = manager.discover_services(device_address).await?;
-            info!("✅ macOS: Discovered {} services via Core Bluetooth", services.len());
+            info!(" macOS: Discovered {} services via Core Bluetooth", services.len());
             
             Ok(services)
         } else {
             // Fallback to system_profiler if Core Bluetooth not initialized
-            warn!("⚠️ Core Bluetooth not initialized, falling back to system_profiler");
+            warn!(" Core Bluetooth not initialized, falling back to system_profiler");
             
             use std::process::Command;
             let output = Command::new("system_profiler")
@@ -3284,7 +3298,7 @@ Value=00
         
         if let Some(manager) = core_bt.as_ref() {
             // Use Core Bluetooth for enabling notifications
-            info!("🔔 macOS: Using Core Bluetooth to enable notifications for characteristic {}", char_uuid);
+            info!(" macOS: Using Core Bluetooth to enable notifications for characteristic {}", char_uuid);
             
             // Connect and discover services first
             let _ = manager.connect_to_peripheral(device_address).await;
@@ -3293,11 +3307,11 @@ Value=00
             // Enable notifications
             manager.enable_notifications(device_address, char_uuid).await?;
             
-            info!("✅ macOS: Notifications enabled via Core Bluetooth");
+            info!(" macOS: Notifications enabled via Core Bluetooth");
             Ok(())
         } else {
             // Fallback to AppleScript
-            warn!("⚠️ Core Bluetooth not initialized, falling back to AppleScript");
+            warn!(" Core Bluetooth not initialized, falling back to AppleScript");
             
             use std::process::Command;
             
@@ -3330,7 +3344,7 @@ Value=00
                 if let Ok(result) = script_output {
                     let success = String::from_utf8_lossy(&result.stdout).trim() == "true";
                     if success {
-                        info!("✅ macOS: Notifications enabled for characteristic {}", char_uuid);
+                        info!(" macOS: Notifications enabled for characteristic {}", char_uuid);
                         return Ok(());
                     }
                 }
@@ -3382,12 +3396,12 @@ Value=00
             // Return simulated notification data
             // TODO: Replace with real Core Bluetooth delegate callback when FFI is implemented
             let simulated_data = vec![0x4E, 0x6F, 0x74, 0x69, 0x66, 0x79]; // "Notify" - PLACEHOLDER
-            warn!("⚠️ macOS: Returning SIMULATED notification data ({} bytes) - Core Bluetooth FFI not implemented", simulated_data.len());
+            warn!(" macOS: Returning SIMULATED notification data ({} bytes) - Core Bluetooth FFI not implemented", simulated_data.len());
             
             Ok(simulated_data)
         } else {
             // Fallback to polling system_profiler
-            warn!("⚠️ Core Bluetooth not initialized, falling back to polling");
+            warn!(" Core Bluetooth not initialized, falling back to polling");
             
             use std::process::Command;
             use tokio::time::{sleep, Duration};
@@ -3435,7 +3449,7 @@ Value=00
             let service_uuid = "6ba7b810-9dad-11d1-80b4-00c04fd430ca";
             manager.write_characteristic(peer_address, service_uuid, char_uuid, data).await?;
             
-            info!("✅ macOS: Handshake written successfully");
+            info!(" macOS: Handshake written successfully");
             Ok(())
         } else {
             Err(anyhow::anyhow!("macOS: Core Bluetooth manager not initialized"))
@@ -3447,7 +3461,7 @@ Value=00
     async fn windows_write_handshake(peer_address: &str, char_uuid: &str, data: &[u8]) -> Result<()> {
         use crate::protocols::bluetooth::windows_gatt::WindowsGattManager;
         
-        info!("🪟 Windows: Writing handshake to {} via GATT", peer_address);
+        info!(" Windows: Writing handshake to {} via GATT", peer_address);
         
         let gatt_manager = WindowsGattManager::new()?;
         gatt_manager.initialize().await?;
@@ -3461,24 +3475,24 @@ Value=00
         
         // Discover services to populate cache (required before writing to characteristics)
         let services = gatt_manager.discover_services(peer_address).await?;
-        info!("🔍 Windows: Discovered {} services on {}", services.len(), peer_address);
+        info!(" Windows: Discovered {} services on {}", services.len(), peer_address);
         
         // Write handshake data to characteristic
         // Use ZHTP service UUID
         let service_uuid = "6ba7b810-9dad-11d1-80b4-00c04fd430ca";
         gatt_manager.write_characteristic(peer_address, service_uuid, char_uuid, data).await?;
         
-        info!("✅ Windows: Handshake written successfully");
+        info!(" Windows: Handshake written successfully");
         
         // Enable notifications to receive handshake response
-        info!("🔔 Windows: Enabling notifications on characteristic {}", char_uuid);
+        info!(" Windows: Enabling notifications on characteristic {}", char_uuid);
         
         // Need to discover services first to populate cache
         let _ = gatt_manager.discover_services(peer_address).await;
         
         match gatt_manager.enable_notifications(peer_address, char_uuid).await {
             Ok(_) => {
-                info!("✅ Windows: Notifications enabled - handshake response will be received via ValueChanged events");
+                info!(" Windows: Notifications enabled - handshake response will be received via ValueChanged events");
                 
                 // Wait for notification response with timeout (5 seconds to allow for Core Bluetooth subscription delays)
                 info!("⏳ Windows: Waiting for handshake ACK notification...");
@@ -3489,7 +3503,7 @@ Value=00
                         use crate::protocols::bluetooth::windows_gatt::GattEvent;
                         match event {
                             GattEvent::CharacteristicValueChanged { device_address, char_uuid, value } => {
-                                info!("🔔 Windows: Received notification from {} on char {}", device_address, char_uuid);
+                                info!(" Windows: Received notification from {} on char {}", device_address, char_uuid);
                                 info!("   Data: {} bytes: {:?}", value.len(), value);
                                 
                                 // Parse handshake ACK response
@@ -3498,11 +3512,11 @@ Value=00
                                     let status = value[1];
                                     match status {
                                         1 => {
-                                            info!("✅ Handshake acknowledged by peer (version {}, status: Success)", version);
+                                            info!(" Handshake acknowledged by peer (version {}, status: Success)", version);
                                             return true; // Exit loop on successful ACK
                                         }
                                         _ => {
-                                            warn!("⚠️ Handshake response: version {}, status: {}", version, status);
+                                            warn!(" Handshake response: version {}, status: {}", version, status);
                                             return false;
                                         }
                                     }
@@ -3513,15 +3527,15 @@ Value=00
                     }
                     false
                 }).await {
-                    Ok(true) => info!("✅ Bidirectional handshake complete!"),
-                    Ok(false) => warn!("⚠️ Handshake ACK received but status indicates failure"),
+                    Ok(true) => info!(" Bidirectional handshake complete!"),
+                    Ok(false) => warn!(" Handshake ACK received but status indicates failure"),
                     Err(_) => {
                         warn!("⏰ Timeout waiting for handshake ACK notification (peer may not have responded)");
                     }
                 }
             }
             Err(e) => {
-                warn!("⚠️ Windows: Failed to enable notifications: {} (handshake sent, but response may not be received)", e);
+                warn!(" Windows: Failed to enable notifications: {} (handshake sent, but response may not be received)", e);
             }
         }
         
@@ -3547,7 +3561,7 @@ Value=00
         // Write handshake data
         bt_ops.write_gatt_characteristic(peer_address, char_uuid, data).await?;
         
-        info!("✅ Linux: Handshake written successfully");
+        info!(" Linux: Handshake written successfully");
         Ok(())
     }
     
@@ -3556,7 +3570,7 @@ Value=00
     // ========================================================================
 
     async fn broadcast_mesh_advertisement(&self, adv_data: &[u8]) -> Result<()> {
-        info!("Broadcasting ISP bypass advertisement ({} bytes)", adv_data.len());
+        info!("Broadcasting  advertisement ({} bytes)", adv_data.len());
         
         #[cfg(target_os = "linux")]
         {
@@ -3593,7 +3607,7 @@ Value=00
             .args(&["hcitool", "-i", "hci0", "cmd", "0x08", "0x000a", "01"])
             .output();
         
-        info!("Linux: ISP bypass advertising started");
+        info!("Linux:  advertising started");
         Ok(())
     }
 
@@ -3641,7 +3655,7 @@ Value=00
             publisher.Start()
                 .map_err(|e| anyhow::anyhow!("Failed to start advertising: {:?}", e))?;
             
-            info!("✅ Windows: BLE advertising started successfully");
+            info!(" Windows: BLE advertising started successfully");
             info!("   Broadcasting as: ZHTP-MESH");
             info!("   Service UUID: 6ba7b810-9dad-11d1-80b4-00c04fd430ca");
             info!("   Advertisement Data: {} bytes", adv_data.len());
@@ -3764,7 +3778,7 @@ Value=00
                             let write_result = write_result_async.get()?;
                             
                             if write_result == GattCommunicationStatus::Success {
-                                info!("✅ Windows: Successfully transmitted {} bytes to {}", data.len(), address);
+                                info!(" Windows: Successfully transmitted {} bytes to {}", data.len(), address);
                                 return Ok(());
                             } else {
                                 return Err(anyhow::anyhow!("GATT write failed with status: {:?}", write_result));
@@ -3911,11 +3925,11 @@ Value=00
             if let Some(ref manager) = *self.core_bluetooth.read().await {
                 // Start peripheral advertising with the mesh advertisement data
                 manager.start_mesh_advertising(adv_data).await?;
-                info!("✅ macOS: BLE mesh advertising started via Core Bluetooth");
+                info!(" macOS: BLE mesh advertising started via Core Bluetooth");
                 info!("   Service UUID: 6ba7b810-9dad-11d1-80b4-00c04fd430ca");
                 info!("   Advertisement data: {} bytes", adv_data.len());
             } else {
-                warn!("❌ macOS: Core Bluetooth manager not initialized");
+                warn!(" macOS: Core Bluetooth manager not initialized");
                 return Err(anyhow!("macOS Core Bluetooth manager not available"));
             }
         }

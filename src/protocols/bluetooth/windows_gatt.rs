@@ -142,7 +142,7 @@ pub struct WindowsGattCharacteristic {
 impl WindowsGattManager {
     /// Create new Windows GATT manager
     pub fn new() -> Result<Self> {
-        info!("🔄 Initializing Windows GATT Manager");
+        info!(" Initializing Windows GATT Manager");
         
         Ok(WindowsGattManager {
             advertisement_watcher: Arc::new(Mutex::new(None)),
@@ -160,28 +160,28 @@ impl WindowsGattManager {
     
     /// Initialize Bluetooth radio and check availability
     pub async fn initialize(&self) -> Result<()> {
-        info!("🔄 Initializing Windows Bluetooth stack");
+        info!(" Initializing Windows Bluetooth stack");
         
         #[cfg(all(target_os = "windows", feature = "windows-gatt"))]
         {
             // Note: Bluetooth radio state checking skipped to avoid dependency issues
             // GATT functionality will be attempted and will fail gracefully if radio is off
-            info!("🔵 Windows GATT manager initialized - radio state will be checked during operation");
+            info!(" Windows GATT manager initialized - radio state will be checked during operation");
         }
         
         #[cfg(not(all(target_os = "windows", feature = "windows-gatt")))]
         {
-            info!("⚠️ Windows GATT feature not enabled, using fallback implementation");
+            info!(" Windows GATT feature not enabled, using fallback implementation");
         }
         
-        info!("✅ Windows Bluetooth stack initialized");
+        info!(" Windows Bluetooth stack initialized");
         Ok(())
     }
     
     /// Set event channel for notifications
     pub async fn set_event_channel(&self, tx: mpsc::UnboundedSender<GattEvent>) -> Result<()> {
         *self.event_tx.lock().await = Some(tx);
-        info!("✅ Windows GATT event channel configured");
+        info!(" Windows GATT event channel configured");
         Ok(())
     }
     
@@ -192,14 +192,14 @@ impl WindowsGattManager {
     
     /// Start BLE device discovery
     pub async fn start_discovery(&self) -> Result<()> {
-        info!("🔍 Starting Windows BLE device discovery");
+        info!(" Starting Windows BLE device discovery");
         
         #[cfg(feature = "windows-gatt")]
         {
             let mut watcher_lock = self.advertisement_watcher.lock().await;
             
             if watcher_lock.is_some() {
-                warn!("⚠️ BLE discovery already running");
+                warn!(" BLE discovery already running");
                 return Ok(());
             }
             
@@ -256,7 +256,7 @@ impl WindowsGattManager {
                                     if let Ok(mut discovered) = discovered_devices.try_write() {
                                         if discovered.insert(address.clone()) {
                                             // First time seeing this device - log and send event
-                                            info!("🔍 Windows: Discovered ZHTP device {} RSSI: {}", 
+                                            info!(" Windows: Discovered ZHTP device {} RSSI: {}", 
                                                 name.as_deref().unwrap_or(&address), rssi);
                                             
                                             // Create advertisement data marker for ZHTP
@@ -287,7 +287,7 @@ impl WindowsGattManager {
             watcher.Start()?;
             *watcher_lock = Some(watcher);
             
-            info!("✅ Windows BLE discovery started");
+            info!(" Windows BLE discovery started");
         }
         
         Ok(())
@@ -302,7 +302,7 @@ impl WindowsGattManager {
             
             if let Some(watcher) = watcher_lock.take() {
                 watcher.Stop()?;
-                info!("✅ Windows BLE discovery stopped");
+                info!(" Windows BLE discovery stopped");
             }
             
             // Clear discovered devices set for next scan
@@ -314,7 +314,7 @@ impl WindowsGattManager {
             let mut watcher_lock = self.advertisement_watcher.lock().await;
             *watcher_lock = None;
             self.discovered_devices.write().await.clear();
-            info!("✅ Fallback BLE discovery stopped");
+            info!(" Fallback BLE discovery stopped");
         }
         
         Ok(())
@@ -322,7 +322,7 @@ impl WindowsGattManager {
     
     /// Connect to a BLE device by address
     pub async fn connect_device(&self, address: &str) -> Result<()> {
-        info!("🔗 Connecting to Windows BLE device: {}", address);
+        info!(" Connecting to Windows BLE device: {}", address);
         
         #[cfg(feature = "windows-gatt")]
         {
@@ -335,14 +335,14 @@ impl WindowsGattManager {
             // Check connection status
             let connection_status = device.ConnectionStatus()?;
             if connection_status == BluetoothConnectionStatus::Connected {
-                info!("✅ Device {} already connected", address);
+                info!(" Device {} already connected", address);
             } else {
                 // Request connection by accessing GATT services
                 let services_async = device.GetGattServicesAsync()?;
                 let services_result = services_async.get()?;
                 
                 if services_result.Status()? == GattCommunicationStatus::Success {
-                    info!("✅ Successfully connected to device {}", address);
+                    info!(" Successfully connected to device {}", address);
                 } else {
                     return Err(anyhow!("Failed to connect to device {}", address));
                 }
@@ -371,7 +371,7 @@ impl WindowsGattManager {
                 self.connected_devices.write().await;
             
             if devices.remove(address).is_some() {
-                info!("❌ Disconnected from device: {}", address);
+                info!(" Disconnected from device: {}", address);
                 
                 // Notify disconnection event
                 if let Some(tx) = self.event_tx.lock().await.as_ref() {
@@ -386,7 +386,7 @@ impl WindowsGattManager {
         {
             let mut devices = self.connected_devices.write().await;
             devices.remove(address);
-            info!("❌ Fallback disconnection from device: {}", address);
+            info!(" Fallback disconnection from device: {}", address);
         }
         
         Ok(())
@@ -394,7 +394,7 @@ impl WindowsGattManager {
     
     /// Discover GATT services on connected device
     pub async fn discover_services(&self, address: &str) -> Result<Vec<String>> {
-        info!("🔍 Discovering GATT services on device: {}", address);
+        info!(" Discovering GATT services on device: {}", address);
         
         #[cfg(feature = "windows-gatt")]
         {
@@ -420,7 +420,7 @@ impl WindowsGattManager {
                 service_uuids.push(uuid_str);
             }
             
-            info!("✅ Discovered {} GATT services", service_uuids.len());
+            info!(" Discovered {} GATT services", service_uuids.len());
             return Ok(service_uuids);
         }
         
@@ -453,7 +453,7 @@ impl WindowsGattManager {
             let mut data = vec![0u8; length];
             data_reader.ReadBytes(&mut data)?;
             
-            info!("✅ Read {} bytes from characteristic", data.len());
+            info!(" Read {} bytes from characteristic", data.len());
             Ok(data)
         }
         
@@ -469,10 +469,10 @@ impl WindowsGattManager {
         
         #[cfg(feature = "windows-gatt")]
         {
-            info!("🔍 Step 1: Finding characteristic...");
+            info!(" Step 1: Finding characteristic...");
             let characteristic = match self.find_characteristic(address, service_uuid, char_uuid).await {
                 Ok(c) => {
-                    info!("✅ Step 1: Characteristic found");
+                    info!(" Step 1: Characteristic found");
                     c
                 }
                 Err(e) => {
@@ -480,16 +480,16 @@ impl WindowsGattManager {
                 }
             };
             
-            info!("📝 Step 2: Creating data buffer...");
+            info!(" Step 2: Creating data buffer...");
             let data_writer = DataWriter::new().map_err(|e| anyhow!("Step 2 failed - DataWriter creation: {}", e))?;
             data_writer.WriteBytes(data).map_err(|e| anyhow!("Step 2 failed - WriteBytes: {}", e))?;
             let buffer = data_writer.DetachBuffer().map_err(|e| anyhow!("Step 2 failed - DetachBuffer: {}", e))?;
-            info!("✅ Step 2: Buffer created with {} bytes", data.len());
+            info!(" Step 2: Buffer created with {} bytes", data.len());
             
             // Check characteristic properties for write type
-            info!("🔍 Step 3: Checking characteristic properties...");
+            info!(" Step 3: Checking characteristic properties...");
             let properties = characteristic.CharacteristicProperties().map_err(|e| anyhow!("Step 3 failed - Cannot get properties: {}", e))?;
-            info!("📋 Properties: {:?}", properties);
+            info!(" Properties: {:?}", properties);
             
             let can_write = (properties & GattCharacteristicProperties::Write).0 != 0;
             let can_write_no_response = (properties & GattCharacteristicProperties::WriteWithoutResponse).0 != 0;
@@ -505,7 +505,7 @@ impl WindowsGattManager {
             // macOS Core Bluetooth may strip WriteWithoutResponse when both properties are set
             // Windows WriteValueWithOptionAsync works better with explicit Write property
             if can_write {
-                info!("✅ Step 3: Using Write (with response) for reliable mesh communication");
+                info!(" Step 3: Using Write (with response) for reliable mesh communication");
                 
                 info!("📤 Step 4: Initiating GATT write with response...");
                 let write_async = characteristic.WriteValueWithOptionAsync(&buffer, GattWriteOption::WriteWithResponse)
@@ -515,14 +515,14 @@ impl WindowsGattManager {
                 let write_result = write_async.get()
                     .map_err(|e| anyhow!("Step 5 failed - Write operation failed: {} (HRESULT: 0x{:08X}). This often means: 1) Device disconnected during write, 2) Pairing required, or 3) Characteristic requires authentication.", e, e.code().0))?;
                 
-                info!("🔍 Step 6: Checking write result status...");
+                info!(" Step 6: Checking write result status...");
                 if write_result != GattCommunicationStatus::Success {
                     return Err(anyhow!("Step 6 failed - GATT write failed with status: {:?}. Device may have disconnected or rejected the write.", write_result));
                 }
                 
-                info!("✅ Successfully wrote {} bytes to characteristic {}", data.len(), char_uuid);
+                info!(" Successfully wrote {} bytes to characteristic {}", data.len(), char_uuid);
             } else if can_write_no_response {
-                warn!("⚠️ Step 3: Falling back to WriteWithoutResponse");
+                warn!(" Step 3: Falling back to WriteWithoutResponse");
                 
                 // WriteWithoutResponse: Fire-and-forget write that doesn't wait for acknowledgment
                 info!("📤 Step 4: Initiating GATT write (WriteWithoutResponse)...");
@@ -536,12 +536,12 @@ impl WindowsGattManager {
                 let write_result = write_async.get()
                     .map_err(|e| anyhow!("Step 5 failed - Write operation failed: {} (HRESULT: 0x{:08X}). This may indicate the characteristic requires Write permission (0x08) in addition to WriteWithoutResponse (0x04).", e, e.code().0))?;
                 
-                info!("🔍 Step 6: Checking write result status...");
+                info!(" Step 6: Checking write result status...");
                 if write_result != GattCommunicationStatus::Success {
                     return Err(anyhow!("Step 6 failed - GATT write returned status: {:?}", write_result));
                 }
                 
-                info!("✅ Successfully wrote {} bytes to characteristic {} (WriteWithoutResponse)", data.len(), char_uuid);
+                info!(" Successfully wrote {} bytes to characteristic {} (WriteWithoutResponse)", data.len(), char_uuid);
             } else {
                 return Err(anyhow!("Step 3 failed - Characteristic does not support writing! Properties: {:?}", properties));
             }
@@ -552,7 +552,7 @@ impl WindowsGattManager {
     
     /// Enable notifications for GATT characteristic
     pub async fn enable_notifications(&self, address: &str, char_uuid: &str) -> Result<()> {
-        info!("🔔 Enabling notifications for characteristic {} on {}", char_uuid, address);
+        info!(" Enabling notifications for characteristic {} on {}", char_uuid, address);
         
         #[cfg(feature = "windows-gatt")]
         {
@@ -614,7 +614,7 @@ impl WindowsGattManager {
             let characteristic_uuid = char_uuid.to_string();
             
             let handler = TypedEventHandler::new(move |_characteristic: &Option<GattCharacteristic>, args: &Option<GattValueChangedEventArgs>| {
-                info!("🔔 ValueChanged handler triggered!");
+                info!(" ValueChanged handler triggered!");
                 if let Some(args) = args {
                     info!("   Args present, extracting buffer...");
                     if let Ok(buffer) = args.CharacteristicValue() {
@@ -632,24 +632,24 @@ impl WindowsGattManager {
                                             char_uuid: characteristic_uuid.clone(),
                                             value: data,
                                         });
-                                        info!("   ✅ Event sent to channel!");
+                                        info!("    Event sent to channel!");
                                     } else {
-                                        warn!("   ⚠️ Event tx is None!");
+                                        warn!("    Event tx is None!");
                                     }
                                 } else {
-                                    warn!("   ⚠️ Failed to lock event_tx!");
+                                    warn!("    Failed to lock event_tx!");
                                 }
                             } else {
-                                warn!("   ⚠️ Failed to read bytes from buffer!");
+                                warn!("    Failed to read bytes from buffer!");
                             }
                         } else {
-                            warn!("   ⚠️ Failed to create DataReader from buffer!");
+                            warn!("    Failed to create DataReader from buffer!");
                         }
                     } else {
-                        warn!("   ⚠️ Failed to get CharacteristicValue from args!");
+                        warn!("    Failed to get CharacteristicValue from args!");
                     }
                 } else {
-                    warn!("   ⚠️ Args is None!");
+                    warn!("    Args is None!");
                 }
                 Ok(())
             });
@@ -666,7 +666,7 @@ impl WindowsGattManager {
                 info!("   Handler token AND characteristic stored to keep subscription alive");
                 info!("   Total items stored: {}", handlers.len());
             } else {
-                warn!("   ⚠️ Failed to lock notification_event_handlers!");
+                warn!("    Failed to lock notification_event_handlers!");
             }
             
             // Enable notifications via CCCD
@@ -687,7 +687,7 @@ impl WindowsGattManager {
             }
             
             info!("   CCCD write completed successfully - peripheral should now send notifications");
-            info!("✅ Notifications enabled for characteristic {}", char_uuid);
+            info!(" Notifications enabled for characteristic {}", char_uuid);
         }
         
         Ok(())
@@ -695,7 +695,7 @@ impl WindowsGattManager {
     
     /// Start GATT server (peripheral mode)
     pub async fn start_gatt_server(&self, service_uuid: &str, characteristics: &[(&str, &[u8])]) -> Result<()> {
-        info!("📢 Starting Windows GATT server with service {}", service_uuid);
+        info!(" Starting Windows GATT server with service {}", service_uuid);
         
         #[cfg(feature = "windows-gatt")]
         {
@@ -795,7 +795,7 @@ impl WindowsGattManager {
             // Store service provider
             *self.gatt_service_provider.lock().await = Some(service_provider);
             
-            info!("✅ GATT server started and advertising");
+            info!(" GATT server started and advertising");
         }
         
         Ok(())
@@ -827,7 +827,7 @@ impl WindowsGattManager {
     
     #[cfg(feature = "windows-gatt")]
     async fn find_characteristic(&self, address: &str, service_uuid: &str, char_uuid: &str) -> Result<GattCharacteristic> {
-        info!("🔍 Finding characteristic: service={}, char={}, device={}", service_uuid, char_uuid, address);
+        info!(" Finding characteristic: service={}, char={}, device={}", service_uuid, char_uuid, address);
         
         // Get device and discover services on-demand (avoid caching non-Send WinRT types)
         let devices = self.connected_devices.read().await;
@@ -846,13 +846,13 @@ impl WindowsGattManager {
         
         let services = services_result.Services()?;
         let service_count = services.Size()?;
-        info!("📋 Found {} services on device {}", service_count, address);
+        info!(" Found {} services on device {}", service_count, address);
         
         let target_service_uuid = GUID::from(service_uuid);
         let target_char_uuid = GUID::from(char_uuid);
         
-        info!("🎯 Looking for service UUID: {:?}", target_service_uuid);
-        info!("🎯 Looking for char UUID: {:?}", target_char_uuid);
+        info!(" Looking for service UUID: {:?}", target_service_uuid);
+        info!(" Looking for char UUID: {:?}", target_char_uuid);
         
         for i in 0..service_count {
             let service = services.GetAt(i)?;
@@ -860,7 +860,7 @@ impl WindowsGattManager {
             info!("   Service {}: {:?}", i, found_service_uuid);
             
             if found_service_uuid == target_service_uuid {
-                info!("✅ Found matching service! Discovering characteristics...");
+                info!(" Found matching service! Discovering characteristics...");
                 
                 let chars_async = service.GetCharacteristicsAsync()?;
                 let chars_result = chars_async.get()?;
@@ -868,7 +868,7 @@ impl WindowsGattManager {
                 if chars_result.Status()? == GattCommunicationStatus::Success {
                     let characteristics = chars_result.Characteristics()?;
                     let char_count = characteristics.Size()?;
-                    info!("📋 Found {} characteristics in service", char_count);
+                    info!(" Found {} characteristics in service", char_count);
                     
                     for j in 0..char_count {
                         let characteristic = characteristics.GetAt(j)?;
@@ -877,14 +877,14 @@ impl WindowsGattManager {
                         info!("   Char {}: {:?} (properties: {:?})", j, found_char_uuid, properties);
                         
                         if found_char_uuid == target_char_uuid {
-                            info!("✅ Found matching characteristic with properties: {:?}", properties);
+                            info!(" Found matching characteristic with properties: {:?}", properties);
                             return Ok(characteristic);
                         }
                     }
-                    warn!("❌ Characteristic {} not found in service", char_uuid);
+                    warn!(" Characteristic {} not found in service", char_uuid);
                 } else {
                     let status = chars_result.Status()?;
-                    warn!("⚠️ Failed to get characteristics: status={:?}", status);
+                    warn!(" Failed to get characteristics: status={:?}", status);
                 }
             }
         }

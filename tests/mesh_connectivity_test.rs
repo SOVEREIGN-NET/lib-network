@@ -65,18 +65,18 @@ async fn test_node_id_addressing() -> Result<()> {
     
     // Convert node ID to hex address format
     let hex_address = hex::encode(node_id);
-    println!("✓ Node ID: {}", &hex_address[..16]); // First 16 chars for display
+    println!(" Node ID: {}", &hex_address[..16]); // First 16 chars for display
     
     // Verify node ID is used in addressing
     let zhtp_address = format!("zhtp://{}", hex_address);
-    println!("✓ ZHTP Address: {}...", &zhtp_address[..32]); // Truncated for display
+    println!(" ZHTP Address: {}...", &zhtp_address[..32]); // Truncated for display
     
     // Test server ID is derived from node ID
-    println!("✓ Server ID: {}", server.server_id);
+    println!(" Server ID: {}", server.server_id);
     
     // Test address derivation from node ID
     let derived_address = format!("zhtp://{}:33445", hex_address);
-    println!("✓ Derived address: {}...", &derived_address[..32]);
+    println!(" Derived address: {}...", &derived_address[..32]);
     
     println!(" Node ID addressing test completed\n");
     Ok(())
@@ -91,22 +91,22 @@ async fn test_mesh_server_creation() -> Result<()> {
     let server = create_unique_test_mesh_server("server-test-node").await?;
     
     // Test that server was created successfully
-    println!("  ✓ Mesh server created successfully");
-    println!("  ✓ Server ID: {}", server.server_id);
+    println!("   Mesh server created successfully");
+    println!("   Server ID: {}", server.server_id);
     
     // Get network statistics (using actual field names)
     let stats = server.get_network_stats().await;
-    println!("  ✓ Active connections: {}", stats.active_connections);
-    println!("  ✓ Total data routed: {} bytes", stats.total_data_routed);
-    println!("  ✓ Total UBI distributed: {} tokens", stats.total_ubi_distributed);
-    println!("  ✓ Long range relays: {}", stats.long_range_relays);
-    println!("  ✓ Average latency: {}ms", stats.average_latency_ms);
-    println!("  ✓ Coverage area: {:.2} km²", stats.coverage_area_km2);
-    println!("  ✓ People with free internet: {}", stats.people_with_free_internet);
+    println!("   Active connections: {}", stats.active_connections);
+    println!("   Total data routed: {} bytes", stats.total_data_routed);
+    println!("   Total UBI distributed: {} tokens", stats.total_ubi_distributed);
+    println!("   Long range relays: {}", stats.long_range_relays);
+    println!("   Average latency: {}ms", stats.average_latency_ms);
+    println!("   Coverage area: {:.2} km²", stats.coverage_area_km2);
+    println!("   People with free internet: {}", stats.people_with_free_internet);
     
     // Test revenue pools (economic incentives)
     let revenue_pools = server.get_revenue_pools().await;
-    println!("  ✓ Revenue pools: {}", revenue_pools.len());
+    println!("   Revenue pools: {}", revenue_pools.len());
     for (pool_name, amount) in revenue_pools {
         println!("    {}: {} tokens", pool_name, amount);
     }
@@ -129,8 +129,8 @@ async fn test_mesh_network_formation() -> Result<()> {
     let node1_id = node1.mesh_node.read().await.node_id;
     let node2_id = node2.mesh_node.read().await.node_id;
     
-    println!("  ✓ Node 1 ID: {}...", hex::encode(&node1_id[..4]));
-    println!("  ✓ Node 2 ID: {}...", hex::encode(&node2_id[..4]));
+    println!("   Node 1 ID: {}...", hex::encode(&node1_id[..4]));
+    println!("   Node 2 ID: {}...", hex::encode(&node2_id[..4]));
     
     // Test that nodes have different IDs
     assert_ne!(node1_id, node2_id, "Nodes should have unique IDs");
@@ -139,9 +139,9 @@ async fn test_mesh_network_formation() -> Result<()> {
     let node1_stats = node1.get_network_stats().await;
     let node2_stats = node2.get_network_stats().await;
     
-    println!("  ✓ Node 1 stats: {} active connections, {} data routed", 
+    println!("   Node 1 stats: {} active connections, {} data routed", 
              node1_stats.active_connections, node1_stats.total_data_routed);
-    println!("  ✓ Node 2 stats: {} active connections, {} data routed", 
+    println!("   Node 2 stats: {} active connections, {} data routed", 
              node2_stats.active_connections, node2_stats.total_data_routed);
     
     // Test node ownership verification
@@ -150,8 +150,8 @@ async fn test_mesh_network_formation() -> Result<()> {
     let is_owner1 = node1.verify_node_ownership(&owner_key).await;
     let is_owner2 = node2.verify_node_ownership(&owner_key).await;
     
-    println!("  ✓ Node 1 ownership verification: {}", is_owner1);
-    println!("  ✓ Node 2 ownership verification: {}", is_owner2);
+    println!("   Node 1 ownership verification: {}", is_owner1);
+    println!("   Node 2 ownership verification: {}", is_owner2);
     
     println!(" Mesh network formation test completed\n");
     Ok(())
@@ -168,13 +168,13 @@ async fn test_mesh_connectivity_monitoring() -> Result<()> {
     println!("  Getting connectivity statistics...");
     let stats = server.get_network_stats().await;
     
-    println!("  ✓ Active connections: {}", stats.active_connections);
-    println!("  ✓ Total data routed: {} bytes", stats.total_data_routed);
-    println!("  ✓ Total UBI distributed: {} tokens", stats.total_ubi_distributed);
-    println!("  ✓ Long range relays: {}", stats.long_range_relays);
-    println!("  ✓ Average latency: {}ms", stats.average_latency_ms);
-    println!("  ✓ Coverage area: {:.2} km²", stats.coverage_area_km2);
-    println!("  ✓ People with free internet: {}", stats.people_with_free_internet);
+    println!("   Active connections: {}", stats.active_connections);
+    println!("   Total data routed: {} bytes", stats.total_data_routed);
+    println!("   Total UBI distributed: {} tokens", stats.total_ubi_distributed);
+    println!("   Long range relays: {}", stats.long_range_relays);
+    println!("   Average latency: {}ms", stats.average_latency_ms);
+    println!("   Coverage area: {:.2} km²", stats.coverage_area_km2);
+    println!("   People with free internet: {}", stats.people_with_free_internet);
     
     println!(" Mesh connectivity monitoring test completed\n");
     Ok(())
@@ -191,12 +191,12 @@ async fn test_mesh_peer_authentication() -> Result<()> {
     println!("  Testing node ownership verification...");
     let test_key = PublicKey::new(vec![1, 2, 3, 4]);
     let is_owner = server.verify_node_ownership(&test_key).await;
-    println!("  ✓ Node ownership verification: {}", is_owner);
+    println!("   Node ownership verification: {}", is_owner);
     
     // Test permission level system
     println!("  Testing permission level system...");
     let permission = server.get_permission_level(&test_key).await;
-    println!("  ✓ Permission level: {:?}", permission);
+    println!("   Permission level: {:?}", permission);
     
     // Test cryptographic signature verification
     println!("  Testing cryptographic signatures...");
@@ -210,12 +210,12 @@ async fn test_mesh_peer_authentication() -> Result<()> {
     
     // Verify signature
     let signature_valid = keypair.public_key.verify(test_message, &signature)?;
-    println!("  ✓ Message signature valid: {}", signature_valid);
+    println!("   Message signature valid: {}", signature_valid);
     
     // Test routing rewards system (economic authentication)
     println!("  Testing economic authentication...");
     let balance = server.get_routing_rewards_balance().await?;
-    println!("  ✓ Routing rewards balance: {} tokens", balance);
+    println!("   Routing rewards balance: {} tokens", balance);
     
     println!(" Mesh peer authentication test completed\n");
     Ok(())
@@ -256,7 +256,7 @@ async fn test_mesh_message_routing() -> Result<()> {
     
     match server.handle_mesh_message(test_mesh_message, sender_key).await {
         Ok(()) => {
-            println!("  ✓ Mesh message handled successfully");
+            println!("   Mesh message handled successfully");
         }
         Err(e) => {
             println!("  ⚠ Mesh message handling failed: {} (may be expected)", e);
@@ -265,13 +265,13 @@ async fn test_mesh_message_routing() -> Result<()> {
     
     // Test network statistics (shows message routing activity)
     let stats = server.get_network_stats().await;
-    println!("  ✓ Active connections: {}", stats.active_connections);
-    println!("  ✓ Data routed: {} bytes", stats.total_data_routed);
-    println!("  ✓ UBI distributed: {} tokens", stats.total_ubi_distributed);
+    println!("   Active connections: {}", stats.active_connections);
+    println!("   Data routed: {} bytes", stats.total_data_routed);
+    println!("   UBI distributed: {} tokens", stats.total_ubi_distributed);
     
     // Test routing rewards (economic incentives for message routing)
     let routing_balance = server.get_routing_rewards_balance().await?;
-    println!("  ✓ Routing rewards balance: {} tokens", routing_balance);
+    println!("   Routing rewards balance: {} tokens", routing_balance);
     
     println!(" Mesh message routing test completed\n");
     Ok(())

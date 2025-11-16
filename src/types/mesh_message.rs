@@ -295,6 +295,86 @@ pub enum ZhtpMeshMessage {
         /// Starting height of the first header
         start_height: u64,
     },
+
+    /// DHT Store operation - store key/value in distributed hash table
+    /// Routes over any protocol (UDP, BLE, WiFi Direct)
+    DhtStore {
+        /// Requester's public key
+        requester: PublicKey,
+        /// Unique request ID
+        request_id: u64,
+        /// Key to store (typically domain name or content hash)
+        key: Vec<u8>,
+        /// Value to store (content hash, IP address, etc.)
+        value: Vec<u8>,
+        /// Time-to-live for this entry (seconds)
+        ttl: u64,
+        /// Signature proving ownership of requester key
+        signature: Vec<u8>,
+    },
+
+    /// DHT Store acknowledgment
+    DhtStoreAck {
+        request_id: u64,
+        success: bool,
+        /// Number of nodes that stored the value
+        stored_count: u32,
+    },
+
+    /// DHT FindValue - query for a key in the distributed hash table
+    DhtFindValue {
+        /// Requester's public key
+        requester: PublicKey,
+        /// Unique request ID
+        request_id: u64,
+        /// Key to find
+        key: Vec<u8>,
+        /// Maximum hops for query propagation
+        max_hops: u8,
+    },
+
+    /// DHT FindValue response
+    DhtFindValueResponse {
+        request_id: u64,
+        /// True if value was found
+        found: bool,
+        /// The value (if found)
+        value: Option<Vec<u8>>,
+        /// Closer nodes that might have the value
+        closer_nodes: Vec<PublicKey>,
+    },
+
+    /// DHT FindNode - find nodes close to a given ID (Kademlia routing)
+    DhtFindNode {
+        /// Requester's public key
+        requester: PublicKey,
+        /// Unique request ID
+        request_id: u64,
+        /// Target node ID (20-byte Kademlia key)
+        target_id: Vec<u8>,
+        /// Maximum hops for query propagation
+        max_hops: u8,
+    },
+
+    /// DHT FindNode response
+    DhtFindNodeResponse {
+        request_id: u64,
+        /// Nodes closer to the target
+        closer_nodes: Vec<(PublicKey, String)>, // (pubkey, address)
+    },
+
+    /// DHT Ping - check if node is alive
+    DhtPing {
+        requester: PublicKey,
+        request_id: u64,
+        timestamp: u64,
+    },
+
+    /// DHT Pong - response to ping
+    DhtPong {
+        request_id: u64,
+        timestamp: u64,
+    },
 }
 
 /// Types of blockchain data requests

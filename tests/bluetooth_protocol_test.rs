@@ -17,7 +17,7 @@ async fn test_bluetooth_hardware_detection() -> Result<()> {
     // Create Bluetooth protocol instance
     match BluetoothMeshProtocol::new(node_id) {
         Ok(p) => {
-            println!("✓ Bluetooth protocol created successfully");
+            println!(" Bluetooth protocol created successfully");
             println!("  - Node ID: {:?}", &p.node_id[..8]); // Show first 8 bytes
             println!("  - Device ID: {:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}", 
                 p.device_id[0], p.device_id[1], p.device_id[2],
@@ -32,7 +32,7 @@ async fn test_bluetooth_hardware_detection() -> Result<()> {
         }
     }
     
-    println!("✓ Bluetooth hardware detection test completed");
+    println!(" Bluetooth hardware detection test completed");
     Ok(())
 }
 
@@ -43,7 +43,7 @@ async fn test_bluetooth_peer_scanning() -> Result<()> {
     // Test peer scanning (method is private, so we test conceptually)
     println!("Testing Bluetooth peer scanning concept...");
     
-    println!("✓ Peer scanning functionality exists in BluetoothMeshProtocol");
+    println!(" Peer scanning functionality exists in BluetoothMeshProtocol");
     println!("  Note: Actual scanning requires access to private methods");
     
     // Simulate the result that would come from scanning
@@ -51,7 +51,7 @@ async fn test_bluetooth_peer_scanning() -> Result<()> {
     
     match simulated_result {
         Ok(peers) => {
-            println!("✓ Bluetooth scanning simulation completed");
+            println!(" Bluetooth scanning simulation completed");
             println!("  Found {} potential mesh peers", peers.len());
             
             if peers.is_empty() {
@@ -77,7 +77,7 @@ async fn test_bluetooth_gatt_operations() -> Result<()> {
     let test_char_uuid = "6e400002-b5a3-f393-e0a9-e50e24dcca9e"; // Nordic UART Service TX
     
     println!("Testing GATT operations concept...");
-    println!("✓ GATT operations functionality exists in BluetoothMeshProtocol");
+    println!(" GATT operations functionality exists in BluetoothMeshProtocol");
     println!("  - Test UUID: {}", test_char_uuid);
     println!("  - GATT read/write methods are implemented");
     println!("  - Actual GATT operations require connected BLE devices");
@@ -116,7 +116,7 @@ async fn test_bluetooth_mesh_message_transmission() -> Result<()> {
     println!("  Mesh capable: {}", mock_peer.mesh_capable);
     println!("  Quantum secure: {}", mock_peer.quantum_secure);
     
-    println!("✓ Message transmission setup completed");
+    println!(" Message transmission setup completed");
     println!("  Note: Actual transmission requires Bluetooth devices");
     
     Ok(())
@@ -132,15 +132,15 @@ async fn test_bluetooth_platform_specific_functions() -> Result<()> {
         println!("  Platform-specific Bluetooth support detected");
         
         // Note: Platform-specific methods are private, so we just verify platform detection
-        println!("✓ Windows Bluetooth support available");
+        println!(" Windows Bluetooth support available");
         
     } else if cfg!(unix) {
         println!("Running on Unix-like platform");
-        println!("✓ Unix Bluetooth support available");
+        println!(" Unix Bluetooth support available");
         
     } else {
         println!("Running on other platform");
-        println!("✓ Generic Bluetooth support available");
+        println!(" Generic Bluetooth support available");
     }
     
     Ok(())
@@ -157,10 +157,10 @@ async fn test_bluetooth_connection_management() -> Result<()> {
         Ok(protocol) => {
             // Test getting current connections (should be empty initially)
             let connections = protocol.get_connected_peers().await;
-            println!("✓ Current connections: {}", connections.len());
+            println!(" Current connections: {}", connections.len());
             assert!(connections.is_empty());
             
-            println!("✓ Connection management testing completed");
+            println!(" Connection management testing completed");
         }
         Err(e) => {
             println!("⚠ Could not create Bluetooth protocol: {}", e);

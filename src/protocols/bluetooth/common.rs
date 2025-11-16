@@ -43,7 +43,7 @@ pub fn get_system_bluetooth_mac() -> Result<[u8; 6]> {
     {
         use std::process::Command;
         
-        info!("🪟 Windows: Detecting Bluetooth MAC address via PowerShell");
+        info!(" Windows: Detecting Bluetooth MAC address via PowerShell");
         let output = Command::new("powershell")
             .args(&["-Command", "Get-NetAdapter | Where-Object {$_.Name -like '*Bluetooth*'} | Select-Object -ExpandProperty MacAddress"])
             .output();
@@ -53,12 +53,12 @@ pub fn get_system_bluetooth_mac() -> Result<[u8; 6]> {
             let trimmed = mac_str.trim();
             if !trimmed.is_empty() {
                 if let Ok(mac) = parse_mac_address(trimmed) {
-                    info!("✅ Detected Windows Bluetooth MAC: {}", trimmed);
+                    info!(" Detected Windows Bluetooth MAC: {}", trimmed);
                     return Ok(mac);
                 }
             }
         }
-        warn!("⚠️ Windows: Could not detect Bluetooth MAC via PowerShell");
+        warn!(" Windows: Could not detect Bluetooth MAC via PowerShell");
     }
     
     #[cfg(target_os = "linux")]
@@ -71,13 +71,13 @@ pub fn get_system_bluetooth_mac() -> Result<[u8; 6]> {
                 if let Ok(address) = std::fs::read_to_string(address_path) {
                     let trimmed = address.trim();
                     if let Ok(mac) = parse_mac_address(trimmed) {
-                        info!("✅ Detected Linux Bluetooth MAC: {}", trimmed);
+                        info!(" Detected Linux Bluetooth MAC: {}", trimmed);
                         return Ok(mac);
                     }
                 }
             }
         }
-        warn!("⚠️ Linux: Could not detect Bluetooth MAC from sysfs");
+        warn!(" Linux: Could not detect Bluetooth MAC from sysfs");
     }
     
     #[cfg(target_os = "macos")]
@@ -99,7 +99,7 @@ pub fn get_system_bluetooth_mac() -> Result<[u8; 6]> {
                     for word in line.split_whitespace() {
                         if word.len() == 17 && word.matches(':').count() == 5 {
                             if let Ok(mac) = parse_mac_address(word) {
-                                info!("✅ Detected macOS Bluetooth MAC: {}", word);
+                                info!(" Detected macOS Bluetooth MAC: {}", word);
                                 return Ok(mac);
                             }
                         }
@@ -107,11 +107,11 @@ pub fn get_system_bluetooth_mac() -> Result<[u8; 6]> {
                 }
             }
         }
-        warn!("⚠️ macOS: Could not detect Bluetooth MAC via system_profiler");
+        warn!(" macOS: Could not detect Bluetooth MAC via system_profiler");
     }
     
     // Fallback: Generate deterministic locally-administered MAC
-    info!("⚠️ Generating deterministic fallback Bluetooth MAC address");
+    info!(" Generating deterministic fallback Bluetooth MAC address");
     generate_fallback_mac()
 }
 
@@ -140,7 +140,7 @@ fn generate_fallback_mac() -> Result<[u8; 6]> {
     // Clear multicast bit (bit 0 of first octet)
     mac[0] &= 0xFE;
     
-    info!("🔧 Generated fallback MAC: {:02X}:{:02X}:{:02X}:{:02X}:{:02X}:{:02X}", 
+    info!(" Generated fallback MAC: {:02X}:{:02X}:{:02X}:{:02X}:{:02X}:{:02X}", 
           mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
     
     Ok(mac)

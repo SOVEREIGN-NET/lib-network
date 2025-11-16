@@ -26,12 +26,12 @@ ZHTP lib-network enables:
 ├─────────────────────────────────────────────────────────────┤
 │                  Multi-Protocol Stack                       │
 ├─────────────────┬───────────────┬───────────────────────────┤
-│  📱 Bluetooth   │  📶 WiFi      │  📡 LoRaWAN/Satellite     │
+│  📱 Bluetooth   │  📶 WiFi      │   LoRaWAN/Satellite     │
 │  LE + Classic   │  Direct P2P   │  Long-Range Global        │
 ├─────────────────┼───────────────┼───────────────────────────┤
 │               Discovery & Routing System                     │
 ├─────────────────────────────────────────────────────────────┤
-│  🔍 Hardware Detection  📍 Geographic Location              │
+│   Hardware Detection   Geographic Location              │
 │  🕸️ Smart Routing        Network Monitoring              │
 ├─────────────────────────────────────────────────────────────┤
 │            Native Binary DHT (lib-storage backend)          │
@@ -41,9 +41,9 @@ ZHTP lib-network enables:
 └─────────────────────────────────────────────────────────────┘
 ```
 
-## 🚀 Key Features
+##  Key Features
 
-### 📡 Multi-Protocol Mesh Networking
+###  Multi-Protocol Mesh Networking
 - **Bluetooth LE**: Device-to-device communication (phones, laptops, IoT)
 - **Bluetooth Classic**: High-throughput mesh connections
 - **WiFi Direct**: Medium-range peer-to-peer connections
@@ -63,7 +63,7 @@ ZHTP lib-network enables:
 - **Relay Rewards**: Compensation for internet bridge services
 - **UBI Distribution**: Universal Basic Income through network participation
 
-### 🔍 Intelligent Discovery
+###  Intelligent Discovery
 - **Cross-Platform Hardware Detection**: Automatic protocol enablement
 - **Geographic Routing**: Location-aware mesh optimization
 - **Network Health Monitoring**: Real-time statistics and diagnostics
@@ -253,7 +253,7 @@ server.transfer_routing_rewards(recipient_key, amount).await?;
 | LoRaWAN | 15km | 50 kbps | 1s | Ultra-Low |
 | Satellite | Global | 100 Mbps | 500ms | High |
 
-## 🔧 Platform Support
+##  Platform Support
 
 ### Windows
 - **WinRT Bluetooth APIs**: Native Windows 10/11 Bluetooth LE

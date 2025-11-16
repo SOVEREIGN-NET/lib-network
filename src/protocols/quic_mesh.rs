@@ -89,7 +89,7 @@ pub enum PqcHandshakeMessage {
 impl QuicMeshProtocol {
     /// Create a new QUIC mesh protocol instance
     pub fn new(node_id: [u8; 32], bind_addr: SocketAddr) -> Result<Self> {
-        info!("🚀 Initializing QUIC mesh protocol on {}", bind_addr);
+        info!(" Initializing QUIC mesh protocol on {}", bind_addr);
         
         // Generate self-signed certificate for QUIC (TLS 1.3 requirement)
         let cert = Self::generate_self_signed_cert()?;
@@ -101,7 +101,7 @@ impl QuicMeshProtocol {
         let endpoint = Endpoint::server(server_config, bind_addr)
             .context("Failed to create QUIC endpoint")?;
         
-        info!("✅ QUIC endpoint listening on {}", endpoint.local_addr()?);
+        info!(" QUIC endpoint listening on {}", endpoint.local_addr()?);
         
         Ok(Self {
             endpoint,
@@ -113,7 +113,7 @@ impl QuicMeshProtocol {
     
     /// Connect to a peer using QUIC with PQC handshake
     pub async fn connect_to_peer(&self, peer_addr: SocketAddr) -> Result<()> {
-        info!("🔗 Connecting to peer at {} via QUIC+PQC", peer_addr);
+        info!(" Connecting to peer at {} via QUIC+PQC", peer_addr);
         
         // Configure client
         let client_config = Self::configure_client()?;
@@ -124,13 +124,13 @@ impl QuicMeshProtocol {
             .await
             .context("QUIC connection failed")?;
         
-        info!("✅ QUIC connection established to {}", peer_addr);
+        info!(" QUIC connection established to {}", peer_addr);
         
         // Perform PQC handshake
         let mut pqc_conn = PqcQuicConnection::new(connection, peer_addr);
         pqc_conn.perform_pqc_handshake_as_client().await?;
         
-        info!("🔐 PQC handshake complete with {} (quantum-safe encryption active)", peer_addr);
+        info!(" PQC handshake complete with {} (quantum-safe encryption active)", peer_addr);
         
         // Store connection using peer's node_id as key
         let peer_key = pqc_conn.peer_node_id
@@ -159,7 +159,7 @@ impl QuicMeshProtocol {
     
     /// Receive messages from peers (background task)
     pub async fn start_receiving(&self) -> Result<()> {
-        info!("👂 Starting QUIC message receiver...");
+        info!(" Starting QUIC message receiver...");
         
         let endpoint = self.endpoint.clone();
         let connections = Arc::clone(&self.connections);
@@ -175,7 +175,7 @@ impl QuicMeshProtocol {
                         tokio::spawn(async move {
                             match incoming.await {
                                 Ok(connection) => {
-                                    info!("🔗 New QUIC connection from {}", connection.remote_address());
+                                    info!(" New QUIC connection from {}", connection.remote_address());
                                     
                                     // Perform PQC handshake as server
                                     let peer_addr = connection.remote_address();
@@ -186,7 +186,7 @@ impl QuicMeshProtocol {
                                         return;
                                     }
                                     
-                                    info!("🔐 PQC handshake complete (server side)");
+                                    info!(" PQC handshake complete (server side)");
                                     
                                     // Store connection using peer's node_id as key
                                     if let Some(peer_id) = pqc_conn.peer_node_id {
@@ -342,7 +342,7 @@ impl PqcQuicConnection {
     
     /// Perform PQC key exchange as client
     async fn perform_pqc_handshake_as_client(&mut self) -> Result<()> {
-        debug!("🔑 Starting PQC handshake (client)...");
+        debug!(" Starting PQC handshake (client)...");
         
         // Open bidirectional stream for handshake
         let (mut send, mut recv) = self.quic_conn.open_bi().await
@@ -390,7 +390,7 @@ impl PqcQuicConnection {
             // Note: peer_node_id is set from the initial message (node_id field)
             self.peer_node_id = Some(node_id);
             
-            debug!("✅ PQC handshake complete (client): quantum-safe key established");
+            debug!(" PQC handshake complete (client): quantum-safe key established");
         } else {
             return Err(anyhow!("Unexpected handshake response format"));
         }
@@ -400,7 +400,7 @@ impl PqcQuicConnection {
     
     /// Perform PQC key exchange as server
     async fn perform_pqc_handshake_as_server(&mut self) -> Result<()> {
-        debug!("🔑 Starting PQC handshake (server)...");
+        debug!(" Starting PQC handshake (server)...");
         
         // Accept bidirectional stream for handshake
         let (mut send, mut recv) = self.quic_conn.accept_bi().await
@@ -440,7 +440,7 @@ impl PqcQuicConnection {
             self.peer_dilithium_key = Some(dilithium_pubkey);
             self.peer_node_id = Some(node_id);
             
-            debug!("✅ PQC handshake complete (server): quantum-safe key established");
+            debug!(" PQC handshake complete (server): quantum-safe key established");
         } else {
             return Err(anyhow!("Expected KyberPublicKey message from client"));
         }
@@ -611,7 +611,7 @@ mod tests {
         let peers = client.get_active_peers().await;
         if let Some(peer_addr) = peers.first() {
             // Get connection and send (would need to expose connection in real implementation)
-            info!("✅ Test: Connected to peer at {}", peer_addr);
+            info!(" Test: Connected to peer at {}", peer_addr);
         }
         
         // Cleanup
