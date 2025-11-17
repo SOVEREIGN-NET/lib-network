@@ -49,7 +49,13 @@ pub struct HandshakeCapabilities {
 }
 
 /// Start local network discovery service
-pub async fn start_local_discovery(node_id: Uuid, mesh_port: u16, public_key: lib_crypto::PublicKey) -> Result<()> {
+/// Optional peer_discovered_callback will be called when a peer is found (for coordinator integration)
+pub async fn start_local_discovery(
+    node_id: Uuid, 
+    mesh_port: u16, 
+    public_key: lib_crypto::PublicKey,
+    peer_discovered_callback: Option<std::sync::Arc<dyn Fn(String, lib_crypto::PublicKey) + Send + Sync>>,
+) -> Result<()> {
     info!(" Starting UDP Multicast discovery...");
     info!("   Multicast address: {}:{}", ZHTP_MULTICAST_ADDR, ZHTP_MULTICAST_PORT);
     info!("   Node ID: {}", node_id);
@@ -67,7 +73,7 @@ pub async fn start_local_discovery(node_id: Uuid, mesh_port: u16, public_key: li
     let listen_node_id = node_id;
     let listen_public_key = public_key.clone();
     tokio::spawn(async move {
-        if let Err(e) = listen_for_announcements(listen_node_id, listen_public_key).await {
+        if let Err(e) = listen_for_announcements(listen_node_id, listen_public_key, peer_discovered_callback).await {
             error!(" Local discovery listener failed: {}", e);
         }
     });
@@ -91,11 +97,11 @@ async fn broadcast_announcements(node_id: Uuid, mesh_port: u16) -> Result<()> {
     info!(" Broadcasting from local IP: {}", local_ip);
     
     let mut interval = interval(Duration::from_secs(30)); // Announce every 30 seconds
+    interval.tick().await; // Skip the first tick (which would wait 30 seconds)
     
     let mut announcement_count = 0;
     loop {
-        interval.tick().await;
-        
+        // Send announcement FIRST, then wait
         let announcement = NodeAnnouncement {
             node_id,
             mesh_port,
@@ -124,11 +130,18 @@ async fn broadcast_announcements(node_id: Uuid, mesh_port: u16) -> Result<()> {
                 warn!("Failed to serialize announcement: {}", e);
             }
         }
+        
+        // Wait 30 seconds before next announcement
+        interval.tick().await;
     }
 }
 
 /// Listen for other ZHTP nodes on local network
-async fn listen_for_announcements(our_node_id: Uuid, our_public_key: lib_crypto::PublicKey) -> Result<()> {
+async fn listen_for_announcements(
+    our_node_id: Uuid, 
+    our_public_key: lib_crypto::PublicKey,
+    peer_discovered_callback: Option<std::sync::Arc<dyn Fn(String, lib_crypto::PublicKey) + Send + Sync>>,
+) -> Result<()> {
     let socket = UdpSocket::bind(format!("{}:{}", "0.0.0.0", ZHTP_MULTICAST_PORT)).await?;
     
     // Join multicast group
@@ -168,6 +181,13 @@ async fn listen_for_announcements(our_node_id: Uuid, our_public_key: lib_crypto:
                             );
                             info!("   Protocols: {:?}", announcement.protocols);
                             info!("   Attempting connection...");
+                            
+                            // Notify coordinator if callback provided (Phase 3 integration)
+                            if let Some(ref callback) = peer_discovered_callback {
+                                let peer_addr = format!("{}:{}", announcement.local_ip, announcement.mesh_port);
+                                callback(peer_addr, our_public_key.clone());
+                                debug!("   ✓ Notified discovery coordinator");
+                            }
                             
                             // TODO: Add this peer to our connections
                             attempt_connect_to_discovered_peer(&announcement, &our_public_key).await;

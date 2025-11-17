@@ -34,6 +34,9 @@ rand = "0.8"
 # Hex encoding for debugging
 hex = "0.4"
 
+# Socket options for multicast
+socket2 = "0.5"
+
 # System calls (for Bluetooth Classic on macOS/Linux)
 libc = "0.2"
 

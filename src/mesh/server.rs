@@ -882,17 +882,10 @@ impl ZhtpMeshServer {
         let mesh_connections = self.mesh_connections.clone();
         let server_id = self.server_id.clone();
         
-        // Create temporary PublicKey for discovery (library code doesn't have full identity)
-        let node_id = self.mesh_node.read().await.node_id;
-        let temp_public_key_for_discovery = lib_crypto::PublicKey::new(node_id.to_vec());
-        
-        // Start continuous multicast discovery  
-        let discovery_server_id = server_id.clone();
-        let discovery_task = tokio::spawn(async move {
-            if let Err(e) = crate::discovery::local_network::start_local_discovery(discovery_server_id, 33444, temp_public_key_for_discovery).await {
-                error!("Failed to start local discovery: {}", e);
-            }
-        });
+        // REMOVED: Duplicate multicast discovery with WRONG PORT (33444)
+        // This was the third instance of start_local_discovery() running
+        // Discovery is centralized in unified_server.rs on correct port (9333)
+        // Mesh server will receive peer notifications from unified discovery
         
         tokio::spawn(async move {
             let mut interval = tokio::time::interval(Duration::from_secs(30));
