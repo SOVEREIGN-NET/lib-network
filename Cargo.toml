@@ -34,9 +34,6 @@ rand = "0.8"
 # Hex encoding for debugging
 hex = "0.4"
 
-# Socket options for multicast
-socket2 = "0.5"
-
 # System calls (for Bluetooth Classic on macOS/Linux)
 libc = "0.2"
 
@@ -48,6 +45,9 @@ chrono = "0.4"
 
 # Network IP detection
 local-ip-address = "0.5"
+
+# Socket options (SO_REUSEADDR for multicast)
+socket2 = "0.5"
 
 # Async utilities
 futures = "0.3"

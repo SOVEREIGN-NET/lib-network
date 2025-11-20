@@ -212,11 +212,11 @@ impl MeshMessageRouter {
     /// Estimate message size in bytes
     fn estimate_message_size(message: &ZhtpMeshMessage) -> usize {
         match message {
-            ZhtpMeshMessage::ZhtpRequest { body, headers, .. } => {
-                body.len() + headers.iter().map(|(k, v)| k.len() + v.len()).sum::<usize>() + 100
+            ZhtpMeshMessage::ZhtpRequest(request) => {
+                request.body.len() + request.headers.iter().into_iter().map(|(k, v)| k.len() + v.len()).sum::<usize>() + 100
             },
-            ZhtpMeshMessage::ZhtpResponse { body, headers, .. } => {
-                body.len() + headers.iter().map(|(k, v)| k.len() + v.len()).sum::<usize>() + 100
+            ZhtpMeshMessage::ZhtpResponse(response) => {
+                response.body.len() + response.headers.iter().into_iter().map(|(k, v)| k.len() + v.len()).sum::<usize>() + 100
             },
             ZhtpMeshMessage::LongRangeRoute { payload, relay_chain, .. } => {
                 payload.len() + relay_chain.iter().map(|s| s.len()).sum::<usize>() + 64

@@ -27,12 +27,8 @@ use super::common::{
 };
 use super::device::ClassicBluetoothDevice;
 
-// Windows-specific imports
-#[cfg(all(target_os = "windows", feature = "windows-gatt"))]
-use windows::{
-    Devices::Bluetooth::Rfcomm::RfcommServiceProvider,
-    Networking::Sockets::StreamSocketListener,
-};
+// Windows-specific imports removed - using local imports in methods
+
 
 /// RFCOMM channel assignments (1-30 available)
 pub mod rfcomm_channels {
@@ -2314,11 +2310,54 @@ impl BluetoothClassicProtocol {
             
             // Dispatch to appropriate handler based on message type
             match envelope.message {
-                ZhtpMeshMessage::ZhtpRequest { requester, method, uri, headers, body, timestamp } => {
-                    handler_guard.handle_lib_request(requester, method, uri, headers, body, timestamp).await?;
+                ZhtpMeshMessage::ZhtpRequest(request) => {
+                    // Convert ZhtpHeaders to HashMap for compatibility
+                    let mut headers_map = std::collections::HashMap::new();
+                    if let Some(ct) = &request.headers.content_type {
+                        headers_map.insert("Content-Type".to_string(), ct.clone());
+                    }
+                    if let Some(cl) = request.headers.content_length {
+                        headers_map.insert("Content-Length".to_string(), cl.to_string());
+                    }
+                    for (k, v) in &request.headers.custom {
+                        headers_map.insert(k.clone(), v.clone());
+                    }
+
+                    handler_guard.handle_lib_request(
+                        envelope.origin.clone(),
+                        request.method.to_string(),
+                        request.uri,
+                        headers_map,
+                        request.body,
+                        request.timestamp
+                    ).await?;
                 }
-                ZhtpMeshMessage::ZhtpResponse { request_id, status, status_message, headers, body, timestamp } => {
-                    handler_guard.handle_lib_response(request_id, status, status_message, headers, body, timestamp).await?;
+                ZhtpMeshMessage::ZhtpResponse(response) => {
+                    // Convert ZhtpHeaders to HashMap
+                    let mut headers_map = std::collections::HashMap::new();
+                    if let Some(ct) = &response.headers.content_type {
+                        headers_map.insert("Content-Type".to_string(), ct.clone());
+                    }
+                    if let Some(cl) = response.headers.content_length {
+                        headers_map.insert("Content-Length".to_string(), cl.to_string());
+                    }
+                    for (k, v) in &response.headers.custom {
+                        headers_map.insert(k.clone(), v.clone());
+                    }
+
+                    // Try to find request_id in headers or use 0
+                    let request_id = response.headers.custom.get("Request-ID")
+                        .and_then(|v| v.parse::<u64>().ok())
+                        .unwrap_or(0);
+
+                    handler_guard.handle_lib_response(
+                        request_id,
+                        response.status.code(),
+                        response.status_message,
+                        headers_map,
+                        response.body,
+                        response.timestamp
+                    ).await?;
                 }
                 ZhtpMeshMessage::BlockchainRequest { requester, request_id, request_type } => {
                     handler_guard.handle_blockchain_request(requester, request_id, request_type).await?;

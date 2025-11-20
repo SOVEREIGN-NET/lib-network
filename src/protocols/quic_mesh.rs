@@ -33,6 +33,9 @@ use lib_crypto::{
 };
 use lib_crypto::types::Encapsulation;
 
+use crate::types::mesh_message::ZhtpMeshMessage;
+use crate::messaging::message_handler::MeshMessageHandler;
+
 /// QUIC mesh protocol with PQC encryption layer
 pub struct QuicMeshProtocol {
     /// QUIC endpoint (handles all connections)
@@ -46,6 +49,9 @@ pub struct QuicMeshProtocol {
     
     /// Local binding address
     local_addr: SocketAddr,
+
+    /// Message handler for processing received messages
+    pub message_handler: Option<Arc<RwLock<MeshMessageHandler>>>,
 }
 
 /// QUIC connection with PQC encryption
@@ -108,7 +114,18 @@ impl QuicMeshProtocol {
             connections: Arc::new(RwLock::new(std::collections::HashMap::new())),
             node_id,
             local_addr: bind_addr,
+            message_handler: None,
         })
+    }
+
+    /// Set the message handler for processing received messages
+    pub fn set_message_handler(&mut self, handler: Arc<RwLock<MeshMessageHandler>>) {
+        self.message_handler = Some(handler);
+    }
+    
+    /// Get the QUIC endpoint for accepting connections
+    pub fn get_endpoint(&self) -> Arc<Endpoint> {
+        Arc::new(self.endpoint.clone())
     }
     
     /// Connect to a peer using QUIC with PQC handshake
@@ -144,16 +161,20 @@ impl QuicMeshProtocol {
     pub async fn send_to_peer(
         &self,
         peer_pubkey: &[u8],
-        message: &[u8],
+        message: ZhtpMeshMessage,
     ) -> Result<()> {
         let mut conns = self.connections.write().await;
         
         let conn = conns.get_mut(peer_pubkey)
             .ok_or_else(|| anyhow!("No connection to peer"))?;
         
-        conn.send_encrypted_message(message).await?;
+        // Serialize message
+        let message_bytes = bincode::serialize(&message)
+            .context("Failed to serialize ZhtpMeshMessage")?;
+
+        conn.send_encrypted_message(&message_bytes).await?;
         
-        debug!("📤 Sent {} bytes to peer (PQC encrypted + QUIC)", message.len());
+        debug!("📤 Sent {} bytes to peer (PQC encrypted + QUIC)", message_bytes.len());
         Ok(())
     }
     
@@ -163,6 +184,7 @@ impl QuicMeshProtocol {
         
         let endpoint = self.endpoint.clone();
         let connections = Arc::clone(&self.connections);
+        let message_handler = self.message_handler.clone();
         
         // Task 1: Accept new incoming connections
         tokio::spawn(async move {
@@ -171,6 +193,7 @@ impl QuicMeshProtocol {
                 match endpoint.accept().await {
                     Some(incoming) => {
                         let conns = Arc::clone(&connections);
+                        let handler = message_handler.clone();
                         
                         tokio::spawn(async move {
                             match incoming.await {
@@ -195,6 +218,8 @@ impl QuicMeshProtocol {
                                         // Start receiving messages on this connection
                                         let conns_clone = Arc::clone(&conns);
                                         let peer_id_vec = peer_id.to_vec();
+                                        let handler_clone = handler.clone();
+                                        
                                         tokio::spawn(async move {
                                             loop {
                                                 // Get connection
@@ -209,9 +234,25 @@ impl QuicMeshProtocol {
                                                 
                                                 // Receive message
                                                 match pqc_conn.recv_encrypted_message().await {
-                                                    Ok(message) => {
-                                                        debug!("📨 Received {} bytes from peer", message.len());
-                                                        // TODO: Pass to message handler
+                                                    Ok(message_bytes) => {
+                                                        debug!("📨 Received {} bytes from peer", message_bytes.len());
+                                                        
+                                                        // Deserialize message
+                                                        match bincode::deserialize::<ZhtpMeshMessage>(&message_bytes) {
+                                                            Ok(message) => {
+                                                                if let Some(h) = &handler_clone {
+                                                                    let peer_pk = PublicKey::new(peer_id_vec.clone());
+                                                                    if let Err(e) = h.read().await.handle_mesh_message(message, peer_pk).await {
+                                                                        error!("Error handling message: {}", e);
+                                                                    }
+                                                                } else {
+                                                                    warn!("No message handler configured for QUIC protocol");
+                                                                }
+                                                            }
+                                                            Err(e) => {
+                                                                error!("Failed to deserialize ZhtpMeshMessage: {}", e);
+                                                            }
+                                                        }
                                                     }
                                                     Err(e) => {
                                                         debug!("Connection closed or error: {}", e);

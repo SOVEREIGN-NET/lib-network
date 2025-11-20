@@ -109,11 +109,11 @@ async fn handle_lib_mesh_message(
     server_id: Uuid,
 ) -> Result<()> {
     match message {
-        ZhtpMeshMessage::ZhtpRequest { requester, method, uri, headers, body, timestamp } => {
-            info!(" Processing ZHTP request: {} {}", method, uri);
+        ZhtpMeshMessage::ZhtpRequest(request) => {
+            info!(" Processing ZHTP request: {} {}", request.method, request.uri);
             
             // Create response based on request
-            let (response_status, response_body) = match uri.as_str() {
+            let (response_status, response_body) = match request.uri.as_str() {
                 "/test" => (200, create_test_response(server_id)),
                 "/node/status" => (200, create_node_status_response()),
                 "/blockchain/info" => (200, create_blockchain_info_response()),
@@ -121,21 +121,18 @@ async fn handle_lib_mesh_message(
                 "/dao/proposals" => (200, create_dao_proposals_response()),
                 "/identity/create" => (200, create_identity_create_response()),
                 uri if uri.starts_with("/wallet/balance") => (200, create_wallet_balance_response(&uri)),
-                _ => (404, create_not_found_response(&uri)),
+                _ => (404, create_not_found_response(&request.uri)),
             };
             
             // Create response mesh message
-            let response_message = ZhtpMeshMessage::ZhtpResponse {
-                request_id: timestamp,
-                status: response_status,
-                status_message: if response_status == 200 { "OK".to_string() } else { "Not Found".to_string() },
-                headers: std::collections::HashMap::new(),
-                body: response_body.into_bytes(),
-                timestamp: std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_secs(),
-            };
+            let mut response = lib_protocols::types::ZhtpResponse::success(response_body.into_bytes(), None);
+            response.status = lib_protocols::types::ZhtpStatus::from_code(response_status).unwrap_or(lib_protocols::types::ZhtpStatus::InternalServerError);
+            response.status_message = if response_status == 200 { "OK".to_string() } else { "Not Found".to_string() };
+            
+            // Add request_id to headers (using timestamp as ID as before)
+            response.headers.custom.insert("Request-ID".to_string(), request.timestamp.to_string());
+            
+            let response_message = ZhtpMeshMessage::ZhtpResponse(response);
             
             // Send response back to browser
             if let Ok(response_json) = serde_json::to_string(&response_message) {

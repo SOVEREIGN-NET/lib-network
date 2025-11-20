@@ -126,15 +126,27 @@ impl EdgeNodeSyncManager {
     ) -> Result<()> {
         info!(" Processing bootstrap proof up to height {}", proof_height);
         
+        // ⚠️  CRITICAL SECURITY ISSUE: ZK PROOF VERIFICATION NOT IMPLEMENTED
         // TODO: Verify ZK proof using lib-proofs ChainRecursiveProof
-        // For now, trust the proof and add headers
+        // 
+        // Current behavior: Edge nodes TRUST unverified proofs from full nodes
+        // This is a TEMPORARY implementation for development/testing only.
+        // 
+        // PRODUCTION REQUIREMENT:
+        // 1. Deserialize proof_data into ChainRecursiveProof
+        // 2. Verify the recursive SNARK proves valid chain up to proof_height
+        // 3. Verify proof's final state hash matches first header's previous_block_hash
+        // 4. Only accept headers if proof verification succeeds
+        // 
+        // Without verification, malicious full nodes could provide fake blockchain history.
+        warn!("⚠️  ZK proof verification NOT IMPLEMENTED - trusting full node (INSECURE)");
         
         let mut edge_state = self.edge_state.write().await;
         for header in headers {
             edge_state.add_header(header);
         }
 
-        info!(" Bootstrap complete at height {}", edge_state.current_height);
+        info!(" Bootstrap complete at height {} (UNVERIFIED PROOF)", edge_state.current_height);
         Ok(())
     }
 
@@ -151,6 +163,11 @@ impl EdgeNodeSyncManager {
     /// Get current edge node height
     pub async fn current_height(&self) -> u64 {
         self.edge_state.read().await.current_height
+    }
+
+    /// Get the known network height
+    pub async fn network_height(&self) -> u64 {
+        *self.network_height.read().await
     }
 
     /// Check if edge node needs bootstrap proof

@@ -191,20 +191,12 @@ async fn test_zhtp_request_message() {
     let requester = PublicKey::new(vec![1, 2, 3]);
     let destination = PublicKey::new(vec![4, 5, 6]);
     
-    let mut headers = HashMap::new();
-    headers.insert("Content-Type".to_string(), "text/plain".to_string());
+    let request = lib_protocols::types::ZhtpRequest::get(
+        "/content/hello".to_string(),
+        None
+    ).unwrap();
     
-    let message = ZhtpMeshMessage::ZhtpRequest {
-        requester: requester.clone(),
-        method: "GET".to_string(),
-        uri: "/content/hello".to_string(),
-        headers,
-        body: vec![],
-        timestamp: SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_secs(),
-    };
+    let message = ZhtpMeshMessage::ZhtpRequest(request);
     
     let envelope = MeshMessageEnvelope::new(
         444,
@@ -220,9 +212,9 @@ async fn test_zhtp_request_message() {
     
     // Check message type
     match deserialized.message {
-        ZhtpMeshMessage::ZhtpRequest { method, uri, .. } => {
-            assert_eq!(method, "GET");
-            assert_eq!(uri, "/content/hello");
+        ZhtpMeshMessage::ZhtpRequest(request) => {
+            assert_eq!(request.method, lib_protocols::types::ZhtpMethod::Get);
+            assert_eq!(request.uri, "/content/hello");
         }
         _ => panic!("Wrong message type"),
     }
@@ -339,14 +331,9 @@ fn test_message_types_coverage() {
             connected_peers: 5,
             uptime_hours: 24,
         },
-        ZhtpMeshMessage::ZhtpRequest {
-            requester: peer.clone(),
-            method: "GET".to_string(),
-            uri: "/test".to_string(),
-            headers: HashMap::new(),
-            body: vec![],
-            timestamp: 1234567890,
-        },
+        ZhtpMeshMessage::ZhtpRequest(
+            lib_protocols::types::ZhtpRequest::get("/test".to_string(), None).unwrap()
+        ),
         ZhtpMeshMessage::NewBlock {
             block: vec![1, 2, 3],
             sender: peer.clone(),

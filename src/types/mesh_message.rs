@@ -10,6 +10,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use crate::types::geographic::GeographicLocation;
 use crate::types::mesh_capability::{MeshCapability, SharedResources};
 use crate::types::connection_details::ConnectionDetails;
+use lib_protocols::types::{ZhtpRequest as ProtocolZhtpRequest, ZhtpResponse as ProtocolZhtpResponse};
 
 /// Default TTL for mesh messages (32 hops)
 pub const DEFAULT_TTL: u8 = 32;
@@ -176,24 +177,10 @@ pub enum ZhtpMeshMessage {
     },
 
     /// Native ZHTP protocol request from browser/API clients
-    ZhtpRequest {
-        requester: PublicKey,
-        method: String,
-        uri: String,
-        headers: HashMap<String, String>,
-        body: Vec<u8>,
-        timestamp: u64,
-    },
+    ZhtpRequest(ProtocolZhtpRequest),
 
     /// Native ZHTP protocol response to browser/API clients
-    ZhtpResponse {
-        request_id: u64,
-        status: u16,
-        status_message: String,
-        headers: HashMap<String, String>,
-        body: Vec<u8>,
-        timestamp: u64,
-    },
+    ZhtpResponse(ProtocolZhtpResponse),
 
     /// Request blockchain data from peer (for sync)
     BlockchainRequest {

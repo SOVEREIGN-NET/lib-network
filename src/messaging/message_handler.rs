@@ -106,11 +106,25 @@ impl MeshMessageHandler {
             ZhtpMeshMessage::HealthReport { reporter, network_quality, available_bandwidth, connected_peers, uptime_hours } => {
                 self.handle_health_report(reporter, network_quality, available_bandwidth, connected_peers, uptime_hours).await?;
             },
-            ZhtpMeshMessage::ZhtpRequest { requester, method, uri, headers, body, timestamp } => {
-                self.handle_lib_request(requester, method, uri, headers, body, timestamp).await?;
+            ZhtpMeshMessage::ZhtpRequest(request) => {
+                let mut headers_map = HashMap::new();
+                for (k, v) in &request.headers.custom {
+                    headers_map.insert(k.clone(), v.clone());
+                }
+                if let Some(ct) = &request.headers.content_type { headers_map.insert("Content-Type".to_string(), ct.clone()); }
+                
+                self.handle_lib_request(sender, request.method.to_string(), request.uri, headers_map, request.body, request.timestamp).await?;
             },
-            ZhtpMeshMessage::ZhtpResponse { request_id, status, status_message, headers, body, timestamp } => {
-                self.handle_lib_response(request_id, status, status_message, headers, body, timestamp).await?;
+            ZhtpMeshMessage::ZhtpResponse(response) => {
+                let mut headers_map = HashMap::new();
+                for (k, v) in &response.headers.custom {
+                    headers_map.insert(k.clone(), v.clone());
+                }
+                let request_id = response.headers.custom.get("Request-ID")
+                    .and_then(|v| v.parse::<u64>().ok())
+                    .unwrap_or(0);
+                    
+                self.handle_lib_response(request_id, response.status.code(), response.status_message, headers_map, response.body, response.timestamp).await?;
             },
             ZhtpMeshMessage::BlockchainRequest { requester, request_id, request_type } => {
                 self.handle_blockchain_request(requester, request_id, request_type).await?;
@@ -485,19 +499,16 @@ impl MeshMessageHandler {
         let request_id = self.generate_request_id().await;
         
         // Create response message
-        let mut response_headers = HashMap::new();
-        response_headers.insert("Content-Type".to_string(), "text/plain".to_string());
-        response_headers.insert("Content-Length".to_string(), response_body.len().to_string());
-        response_headers.insert("X-Mesh-Node".to_string(), "ZHTP/1.0".to_string());
+        let mut response = lib_protocols::types::ZhtpResponse::success(response_body, None);
+        response.status = lib_protocols::types::ZhtpStatus::from_code(status).unwrap_or(lib_protocols::types::ZhtpStatus::InternalServerError);
+        response.status_message = status_message.clone();
         
-        let response_message = ZhtpMeshMessage::ZhtpResponse {
-            request_id,
-            status,
-            status_message: status_message.clone(),
-            headers: response_headers,
-            body: response_body,
-            timestamp: SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs(),
-        };
+        // Add custom headers
+        response.headers.custom.insert("X-Mesh-Node".to_string(), "ZHTP/1.0".to_string());
+        response.headers.custom.insert("Request-ID".to_string(), request_id.to_string());
+        response.headers.content_type = Some("text/plain".to_string());
+        
+        let response_message = ZhtpMeshMessage::ZhtpResponse(response);
         
         // Send response back to requester via mesh
         info!("📤 Sending response {} {} back to requester", status, status_message);
@@ -543,14 +554,17 @@ impl MeshMessageHandler {
         let mut headers = HashMap::new();
         headers.insert("Content-Type".to_string(), "text/plain".to_string());
         
-        let error_message = ZhtpMeshMessage::ZhtpResponse {
-            request_id,
-            status,
-            status_message: message.clone(),
-            headers,
-            body: message.into_bytes(),
-            timestamp: SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs(),
-        };
+        let mut response = lib_protocols::types::ZhtpResponse::error(
+            lib_protocols::types::ZhtpStatus::from_code(status).unwrap_or(lib_protocols::types::ZhtpStatus::InternalServerError),
+            message.clone()
+        );
+        
+        for (k, v) in headers {
+            response.headers.custom.insert(k, v);
+        }
+        response.headers.custom.insert("Request-ID".to_string(), request_id.to_string());
+        
+        let error_message = ZhtpMeshMessage::ZhtpResponse(response);
         
         self.send_response_to_requester(requester, error_message).await
     }

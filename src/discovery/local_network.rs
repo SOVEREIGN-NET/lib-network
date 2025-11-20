@@ -86,8 +86,24 @@ pub async fn start_local_discovery(
 
 /// Broadcast this node's presence on local network
 async fn broadcast_announcements(node_id: Uuid, mesh_port: u16) -> Result<()> {
-    let socket = UdpSocket::bind("0.0.0.0:0").await?;
-    socket.set_broadcast(true)?;
+    // Bind to the multicast port with SO_REUSEADDR to allow multiple processes
+    use socket2::{Socket, Domain, Type, Protocol};
+    let socket = Socket::new(Domain::IPV4, Type::DGRAM, Some(Protocol::UDP))?;
+    socket.set_reuse_address(true)?;
+    #[cfg(unix)]
+    socket.set_reuse_port(true)?;
+    
+    // Bind to the multicast port (not ephemeral) for proper multicast routing
+    socket.bind(&format!("0.0.0.0:{}", ZHTP_MULTICAST_PORT).parse::<std::net::SocketAddr>()?.into())?;
+    socket.set_nonblocking(true)?;
+    let std_socket: std::net::UdpSocket = socket.into();
+    let socket = UdpSocket::from_std(std_socket)?;
+    
+    // Configure multicast socket options
+    let multicast_ipv4: Ipv4Addr = ZHTP_MULTICAST_ADDR.parse()?;
+    socket.set_multicast_ttl_v4(2)?; // TTL=2 allows crossing one router (subnet-local)
+    socket.set_multicast_loop_v4(true)?; // Enable loopback for testing on same machine
+    socket.join_multicast_v4(multicast_ipv4, Ipv4Addr::UNSPECIFIED)?;
     
     let multicast_addr: SocketAddr = format!("{}:{}", ZHTP_MULTICAST_ADDR, ZHTP_MULTICAST_PORT).parse()?;
     
@@ -142,10 +158,21 @@ async fn listen_for_announcements(
     our_public_key: lib_crypto::PublicKey,
     peer_discovered_callback: Option<std::sync::Arc<dyn Fn(String, lib_crypto::PublicKey) + Send + Sync>>,
 ) -> Result<()> {
-    let socket = UdpSocket::bind(format!("{}:{}", "0.0.0.0", ZHTP_MULTICAST_PORT)).await?;
+    // Use SO_REUSEADDR to allow multiple listeners on the same port
+    // This lets both the persistent listener and temporary discovery scans coexist
+    use socket2::{Socket, Domain, Type, Protocol};
+    let socket = Socket::new(Domain::IPV4, Type::DGRAM, Some(Protocol::UDP))?;
+    socket.set_reuse_address(true)?;
+    #[cfg(unix)]
+    socket.set_reuse_port(true)?;
+    socket.bind(&format!("0.0.0.0:{}", ZHTP_MULTICAST_PORT).parse::<std::net::SocketAddr>()?.into())?;
+    socket.set_nonblocking(true)?;
+    let socket: std::net::UdpSocket = socket.into();
+    let socket = UdpSocket::from_std(socket)?;
     
-    // Join multicast group
+    // Configure multicast socket options
     let multicast_addr: Ipv4Addr = ZHTP_MULTICAST_ADDR.parse()?;
+    socket.set_multicast_loop_v4(true)?; // Enable loopback for testing on same machine
     socket.join_multicast_v4(multicast_addr, Ipv4Addr::UNSPECIFIED)?;
     
     info!(" Listening for ZHTP node announcements on multicast {}:{}", ZHTP_MULTICAST_ADDR, ZHTP_MULTICAST_PORT);
@@ -170,28 +197,31 @@ async fn listen_for_announcements(
                 
                 match serde_json::from_str::<NodeAnnouncement>(&announcement_str) {
                     Ok(announcement) => {
-                        // Ignore our own announcements
-                        if announcement.node_id != our_node_id {
-                            discovery_count += 1;
-                            info!(" PEER DISCOVERED #{}: Node {} at {}:{}", 
-                                discovery_count,
-                                announcement.node_id, 
-                                announcement.local_ip, 
-                                announcement.mesh_port
-                            );
-                            info!("   Protocols: {:?}", announcement.protocols);
-                            info!("   Attempting connection...");
-                            
-                            // Notify coordinator if callback provided (Phase 3 integration)
-                            if let Some(ref callback) = peer_discovered_callback {
-                                let peer_addr = format!("{}:{}", announcement.local_ip, announcement.mesh_port);
-                                callback(peer_addr, our_public_key.clone());
-                                debug!("   ✓ Notified discovery coordinator");
-                            }
-                            
-                            // TODO: Add this peer to our connections
-                            attempt_connect_to_discovered_peer(&announcement, &our_public_key).await;
+                        // Ignore our own announcements (check node_id)
+                        if announcement.node_id == our_node_id {
+                            debug!("Ignoring our own multicast announcement (node_id={})", our_node_id);
+                            continue;
                         }
+                        
+                        discovery_count += 1;
+                        info!(" PEER DISCOVERED #{}: Node {} at {}:{}", 
+                            discovery_count,
+                            announcement.node_id, 
+                            announcement.local_ip, 
+                            announcement.mesh_port
+                        );
+                        info!("   Protocols: {:?}", announcement.protocols);
+                        info!("   Attempting connection...");
+                        
+                        // Notify coordinator if callback provided (Phase 3 integration)
+                        if let Some(ref callback) = peer_discovered_callback {
+                            let peer_addr = format!("{}:{}", announcement.local_ip, announcement.mesh_port);
+                            callback(peer_addr, our_public_key.clone());
+                            debug!("   ✓ Notified discovery coordinator");
+                        }
+                        
+                        // TODO: Add this peer to our connections
+                        attempt_connect_to_discovered_peer(&announcement, &our_public_key).await;
                     },
                     Err(e) => {
                         debug!("Invalid announcement format from {}: {}", addr, e);

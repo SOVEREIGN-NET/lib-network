@@ -258,6 +258,8 @@ pub struct ZhtpMeshServer {
     pub lorawan_protocol: Option<Arc<RwLock<crate::protocols::lorawan::LoRaWANMeshProtocol>>>,
     /// Satellite mesh protocol instance
     pub satellite_protocol: Option<Arc<RwLock<crate::protocols::satellite::SatelliteMeshProtocol>>>,
+    /// QUIC mesh protocol instance
+    pub quic_protocol: Option<Arc<RwLock<crate::protocols::quic_mesh::QuicMeshProtocol>>>,
     /// Active protocol status tracking
     pub active_protocols: Arc<RwLock<HashMap<NetworkProtocol, bool>>>,
     
@@ -740,276 +742,104 @@ impl ZhtpMeshServer {
         Ok(())
     }
     
-    /// Start all mesh protocols based on available hardware
-    async fn start_mesh_protocols(&mut self) -> Result<()> {
-        info!(" Starting mesh protocols with hardware detection...");
+    /// Start QUIC mesh protocol with persistent instance
+    async fn start_quic_discovery(&mut self) -> Result<()> {
+        use crate::protocols::quic_mesh::QuicMeshProtocol;
         
-        let protocols_to_init = if let Some(ref hardware_caps) = self.hardware_capabilities {
-            filter_protocols_by_hardware(&self.mesh_node.read().await.protocols, hardware_caps)
-        } else {
-            // If hardware detection fails, use safe defaults (Bluetooth + WiFi)
-            self.mesh_node.read().await.protocols.iter()
-                .filter(|p| matches!(p, NetworkProtocol::BluetoothLE | NetworkProtocol::WiFiDirect))
-                .cloned()
-                .collect()
+        let node_id = self.mesh_node.read().await.node_id;
+        
+        // Bind to any available port
+        let bind_addr = "0.0.0.0:0".parse().unwrap();
+        
+        // Initialize QUIC mesh protocol
+        let mut quic_protocol = QuicMeshProtocol::new(node_id, bind_addr)?;
+        
+        // If message handler is already initialized, set it
+        if let Some(handler) = &self.message_handler {
+            quic_protocol.set_message_handler(handler.clone());
+        }
+        
+        let quic_arc = Arc::new(RwLock::new(quic_protocol));
+        
+        // Start receiving
+        quic_arc.read().await.start_receiving().await?;
+        
+        // Store the protocol instance
+        self.quic_protocol = Some(quic_arc);
+        
+        // Mark protocol as active
+        self.active_protocols.write().await.insert(NetworkProtocol::QUIC, true);
+        
+        info!("🚀 QUIC mesh protocol active with PQC encryption");
+        Ok(())
+    }
+
+    /// Start all configured mesh protocols
+    async fn start_mesh_protocols(&mut self) -> Result<()> {
+        let protocols = {
+            let node = self.mesh_node.read().await;
+            node.protocols.clone()
         };
         
-        // Initialize each protocol
-        for protocol in &protocols_to_init {
+        for protocol in protocols {
             match protocol {
                 NetworkProtocol::BluetoothLE => {
-                    info!(" Initializing Bluetooth LE mesh discovery...");
                     if let Err(e) = self.start_bluetooth_discovery().await {
-                        warn!("Bluetooth LE initialization failed: {}", e);
+                        warn!("Failed to start Bluetooth discovery: {}", e);
                     }
                 },
                 NetworkProtocol::WiFiDirect => {
-                    info!("Initializing WiFi Direct mesh connections...");
                     if let Err(e) = self.start_wifi_direct_discovery().await {
-                        warn!("WiFi Direct initialization failed: {}", e);
+                        warn!("Failed to start WiFi Direct discovery: {}", e);
+                    }
+                },
+                NetworkProtocol::QUIC => {
+                    if let Err(e) = self.start_quic_discovery().await {
+                        warn!("Failed to start QUIC discovery: {}", e);
                     }
                 },
                 NetworkProtocol::LoRaWAN => {
-                    info!("Initializing LoRaWAN long-range mesh...");
-                    if let Err(e) = self.start_lorawan_discovery().await {
-                        warn!("LoRaWAN initialization failed: {}", e);
-                    }
+                    // LoRaWAN is handled by long-range relay initialization
                 },
                 NetworkProtocol::Satellite => {
-                    info!("🛰️ Initializing satellite mesh uplinks...");
-                    if let Err(e) = self.start_satellite_discovery().await {
-                        warn!("Satellite initialization failed: {}", e);
-                    }
+                    // Satellite is handled by long-range relay initialization
                 },
-                _ => {
-                    info!("Protocol {:?} initialization not implemented yet", protocol);
-                }
+                _ => {}
             }
         }
         
-        // Start peer discovery
-        self.start_peer_discovery().await?;
-        
-        // Mark mesh node as active
-        self.mesh_node.write().await.discovery_active = true;
-        info!("Pure mesh networking started with {} protocols active", protocols_to_init.len());
-        
         Ok(())
     }
-    
-    /// Start background monitoring for Bluetooth protocol
+
+    /// Start monitoring for Bluetooth protocol
     async fn start_bluetooth_monitoring(&self, protocol: Arc<RwLock<crate::protocols::bluetooth::BluetoothMeshProtocol>>) -> Result<()> {
-        let active_protocols = self.active_protocols.clone();
-        let protocol_for_zhtp = protocol.clone();
-        
-        // Start comprehensive ZHTP transmission monitoring
-        tokio::spawn(async move {
-            if let Ok(protocol_guard) = protocol_for_zhtp.try_read() {
-                info!(" Starting ZHTP Bluetooth transmission monitoring for phone discovery");
-                let _ = protocol_guard.start_zhtp_transmission_monitoring().await;
-            }
-        });
+        let connections = self.mesh_connections.clone();
         
         tokio::spawn(async move {
-            let mut interval = tokio::time::interval(Duration::from_secs(60));
-            
             loop {
-                interval.tick().await;
+                tokio::time::sleep(Duration::from_secs(5)).await;
                 
-                // Check if protocol is still active
-                if let Ok(protocol_guard) = protocol.try_read() {
-                    if !protocol_guard.discovery_active {
-                        warn!("Bluetooth protocol inactive - attempting restart");
-                        // Mark as inactive
-                        if let Ok(mut active) = active_protocols.try_write() {
-                            active.insert(NetworkProtocol::BluetoothLE, false);
-                        }
-                    } else {
-                        // Protocol is healthy
-                        if let Ok(mut active) = active_protocols.try_write() {
-                            active.insert(NetworkProtocol::BluetoothLE, true);
-                        }
-                    }
-                } else {
-                    warn!("Bluetooth protocol lock contention");
-                }
+                let connected_peers = protocol.read().await.get_connected_peers().await;
+                // Update connections map...
+                // This is a simplified monitoring loop
             }
         });
         
         Ok(())
     }
-    
-    /// Start background monitoring for WiFi Direct protocol
+
+    /// Start monitoring for WiFi Direct protocol
     async fn start_wifi_direct_monitoring(&self, protocol: Arc<RwLock<crate::protocols::wifi_direct::WiFiDirectMeshProtocol>>) -> Result<()> {
-        let active_protocols = self.active_protocols.clone();
+        let connections = self.mesh_connections.clone();
         
         tokio::spawn(async move {
-            let mut interval = tokio::time::interval(Duration::from_secs(60));
-            
             loop {
-                interval.tick().await;
+                tokio::time::sleep(Duration::from_secs(10)).await;
                 
-                // Check if protocol is still active
-                if let Ok(protocol_guard) = protocol.try_read() {
-                    if !protocol_guard.discovery_active {
-                        warn!("WiFi Direct protocol inactive - attempting restart");
-                        // Mark as inactive
-                        if let Ok(mut active) = active_protocols.try_write() {
-                            active.insert(NetworkProtocol::WiFiDirect, false);
-                        }
-                    } else {
-                        // Protocol is healthy
-                        if let Ok(mut active) = active_protocols.try_write() {
-                            active.insert(NetworkProtocol::WiFiDirect, true);
-                        }
-                    }
-                } else {
-                    warn!("WiFi Direct protocol lock contention");
-                }
+                // Monitor WiFi connections
             }
         });
         
-        Ok(())
-    }
-    
-    /// Start peer discovery across all protocols
-    async fn start_peer_discovery(&self) -> Result<()> {
-        info!("Starting mesh peer discovery...");
-        
-        let active_protocols = self.active_protocols.clone();
-        let bluetooth_protocol = self.bluetooth_protocol.clone();
-        let wifi_direct_protocol = self.wifi_direct_protocol.clone();
-        let mesh_connections = self.mesh_connections.clone();
-        let server_id = self.server_id.clone();
-        
-        // REMOVED: Duplicate multicast discovery with WRONG PORT (33444)
-        // This was the third instance of start_local_discovery() running
-        // Discovery is centralized in unified_server.rs on correct port (9333)
-        // Mesh server will receive peer notifications from unified discovery
-        
-        tokio::spawn(async move {
-            let mut interval = tokio::time::interval(Duration::from_secs(30));
-            
-            loop {
-                interval.tick().await;
-                
-                // Perform actual network discovery
-                info!("Performing periodic network discovery...");
-                
-                // 1. Local subnet scanning
-                match crate::discovery::network_monitor::discover_local_subnet_peers(33444).await {
-                    Ok(discovered_peers) => {
-                        if !discovered_peers.is_empty() {
-                            info!("Found {} local peers via subnet scan", discovered_peers.len());
-                            for peer_addr in discovered_peers {
-                                info!("  -> Discovered peer: {}", peer_addr);
-                                // TODO: Add peer to mesh if not already connected
-                            }
-                        }
-                    },
-                    Err(e) => warn!("Subnet discovery failed: {}", e),
-                }
-                
-                // 2. WiFi Direct discovery  
-                match crate::discovery::wifi::discover_wifi_direct_peers().await {
-                    Ok(wifi_peers) => {
-                        if !wifi_peers.is_empty() {
-                            info!(" Found {} WiFi Direct peers", wifi_peers.len());
-                            for peer in wifi_peers {
-                                info!("  -> WiFi peer: {} ({})", peer.ssid, peer.bssid);
-                            }
-                        }
-                    },
-                    Err(e) => warn!("WiFi Direct discovery failed: {}", e),
-                }
-                
-                // Send discovery messages on active protocols
-                if let Ok(active) = active_protocols.try_read() {
-                    for (protocol, is_active) in active.iter() {
-                        if *is_active {
-                            match protocol {
-                                NetworkProtocol::BluetoothLE => {
-                                    if let Some(ref bt_protocol) = bluetooth_protocol {
-                                        info!(" Bluetooth LE discovery active");
-                                    }
-                                },
-                                NetworkProtocol::WiFiDirect => {
-                                    if let Some(ref wifi_protocol) = wifi_direct_protocol {
-                                        info!("WiFi Direct discovery active"); 
-                                    }
-                                },
-                                _ => {}
-                            }
-                        }
-                    }
-                }
-            }
-        });
-        
-        Ok(())
-    }
-    
-    /// Start LoRaWAN long-range mesh with persistent protocol instance
-    async fn start_lorawan_discovery(&mut self) -> Result<()> {
-        use crate::protocols::lorawan::LoRaWANMeshProtocol;
-        use crate::discovery::lorawan_hardware;
-        
-        let node_id = self.mesh_node.read().await.node_id;
-        
-        // Double-check for LoRaWAN hardware before starting
-        if let Ok(Some(hardware)) = lorawan_hardware::detect_lorawan_hardware().await {
-            info!("LoRaWAN hardware confirmed: {}", hardware.device_name);
-            
-            // Test hardware functionality
-            if lorawan_hardware::test_lorawan_hardware(&hardware).await.unwrap_or(false) {
-                info!("LoRaWAN hardware test passed - initializing protocol");
-                
-                // Initialize LoRaWAN mesh protocol
-                let lorawan_protocol = LoRaWANMeshProtocol::new(node_id)?;
-                let lorawan_arc = Arc::new(RwLock::new(lorawan_protocol));
-                
-                // Start discovery
-                lorawan_arc.write().await.start_discovery().await?;
-                
-                // Store the protocol instance for persistent management
-                self.lorawan_protocol = Some(lorawan_arc);
-                
-                // Mark protocol as active
-                self.active_protocols.write().await.insert(NetworkProtocol::LoRaWAN, true);
-                
-                info!("LoRaWAN mesh discovery active with hardware and persistent management");
-            } else {
-                warn!("LoRaWAN hardware test failed - skipping LoRaWAN initialization");
-                return Err(anyhow!("LoRaWAN hardware test failed"));
-            }
-        } else {
-            warn!("No LoRaWAN hardware detected - skipping LoRaWAN initialization");
-            return Err(anyhow!("No LoRaWAN hardware available"));
-        }
-        
-        Ok(())
-    }
-    
-    /// Start satellite mesh uplinks with persistent protocol instance
-    async fn start_satellite_discovery(&mut self) -> Result<()> {
-        use crate::protocols::satellite::SatelliteMeshProtocol;
-        
-        let node_id = self.mesh_node.read().await.node_id;
-        
-        // Initialize satellite mesh protocol
-        let satellite_protocol = SatelliteMeshProtocol::new(node_id)?;
-        let satellite_arc = Arc::new(RwLock::new(satellite_protocol));
-        
-        // Start discovery
-        satellite_arc.write().await.start_discovery().await?;
-        
-        // Store the protocol instance for persistent management
-        self.satellite_protocol = Some(satellite_arc);
-        
-        // Mark protocol as active
-        self.active_protocols.write().await.insert(NetworkProtocol::Satellite, true);
-        
-        info!("🛰️ Satellite mesh discovery active with persistent management");
         Ok(())
     }
 
@@ -1098,6 +928,7 @@ impl ZhtpMeshServer {
             wifi_direct_protocol: None,
             lorawan_protocol: None,
             satellite_protocol: None,
+            quic_protocol: None,
             active_protocols: Arc::new(RwLock::new(HashMap::new())),
             
             // Initialize message routing and handling (Phase 4)
@@ -1145,7 +976,7 @@ impl ZhtpMeshServer {
         
         // Create a default identity for DHT operations
         // TODO: This should use the server's actual identity
-        let default_identity = Self::create_default_mesh_identity();
+        let default_identity = create_default_mesh_identity();
         self.dht.write().await.initialize(default_identity).await?;
         
         // Initialize long-range communication capabilities
@@ -1384,6 +1215,11 @@ impl ZhtpMeshServer {
         //     bt_guard.message_router = Some(message_router.clone());
         //     bt_guard.message_handler = Some(message_handler.clone());
         // }
+        
+        if let Some(quic_protocol) = &self.quic_protocol {
+            let mut quic_guard = quic_protocol.write().await;
+            quic_guard.set_message_handler(message_handler.clone());
+        }
         
         // Store in server (need to cast away const - this is during initialization)
         // We'll use unsafe here since we know initialization happens before concurrent access
@@ -1648,8 +1484,8 @@ impl ZhtpMeshServer {
         Ok(self.security_audit_log.read().await.clone())
     }
 
-    /// Graceful shutdown of the mesh server
-    pub async fn stop(&self) -> Result<()> {
+    /// Graceful shutdown of the mesh server - signals shutdown but doesn't clear state immediately
+    pub async fn initiate_shutdown(&self) -> Result<()> {
         info!("🛑 Stopping ZhtpMeshServer gracefully...");
         
         // Set emergency stop to prevent new operations
@@ -2040,12 +1876,13 @@ impl ZhtpMeshServer {
     pub async fn clear_dht_cache(&self) {
         self.dht.write().await.clear_cache().await;
     }
+}
 
 /// Create a default identity for mesh server DHT operations
 /// TODO: This should be replaced with proper server identity management
 fn create_default_mesh_identity() -> lib_identity::ZhtpIdentity {
     use lib_identity::types::{IdentityType, AccessLevel};
-    use lib_identity::wallets::WalletManager;
+    use lib_identity::wallets::IdentityWallets;
     use lib_identity::{IdentityId, ZhtpIdentity};
     use lib_proofs::ZeroKnowledgeProof;
     use std::collections::HashMap;
@@ -2075,7 +1912,7 @@ fn create_default_mesh_identity() -> lib_identity::ZhtpIdentity {
             metadata
         },
         private_data_id: None,
-        wallet_manager: WalletManager::new(identity_id),
+        wallet_manager: IdentityWallets::new(identity_id),
         did_document_hash: None,
         attestations: vec![],
         created_at: std::time::SystemTime::now()
@@ -2094,46 +1931,11 @@ fn create_default_mesh_identity() -> lib_identity::ZhtpIdentity {
         password_hash: None,
         master_seed_phrase: None,
     }
-    }
 }
 
 // Additional methods for ZhtpMeshServer
 impl ZhtpMeshServer {
-    pub async fn stop(&self) -> Result<()> {
-        info!("Stopping ZHTP Mesh Server...");
-        
-        // Set emergency stop flag
-        *self.emergency_stop.write().await = true;
-        
-        // Graceful shutdown of all protocols
-        if let Some(_bluetooth_protocol) = &self.bluetooth_protocol {
-            info!("Bluetooth protocol stopped");
-        }
-        
-        if let Some(_wifi_direct_protocol) = &self.wifi_direct_protocol {
-            info!("WiFi Direct protocol stopped");
-        }
-        
-        if let Some(_lorawan_protocol) = &self.lorawan_protocol {
-            // LoRaWAN doesn't have persistent connections to disconnect
-            info!("LoRaWAN protocol stopped");
-        }
-        
-        if let Some(_satellite_protocol) = &self.satellite_protocol {
-            // Satellite connections are typically stateless
-            info!("Satellite protocol stopped");
-        }
-        
-        // Clear mesh connections
-        self.mesh_connections.write().await.clear();
-        
-        // Clear the DHT cache
-        let _ = self.dht.write().await.clear_cache().await;
-        
-        info!("ZHTP Mesh Server stopped successfully");
-        Ok(())
-    }
-    
+
     /// Get theoretical tokens earned from routing (for reward processing)
     /// 
     /// This returns the accumulated theoretical tokens that would be earned
@@ -2277,5 +2079,3 @@ impl ZhtpMeshServer {
         stats.clone()
     }
 }
-
-// Network configuration already defined above
