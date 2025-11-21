@@ -61,7 +61,13 @@ pub async fn start_local_discovery(
     info!("   Node ID: {}", node_id);
     info!("   Mesh port: {}", mesh_port);
     
-    // Start announcement broadcaster
+    // Send an immediate announcement BEFORE spawning background task
+    // This ensures other nodes can discover us right away
+    if let Err(e) = send_immediate_announcement(node_id, mesh_port).await {
+        warn!("Failed to send immediate announcement: {}", e);
+    }
+    
+    // Start announcement broadcaster (background task)
     let announce_node_id = node_id;
     tokio::spawn(async move {
         if let Err(e) = broadcast_announcements(announce_node_id, mesh_port).await {
@@ -69,7 +75,7 @@ pub async fn start_local_discovery(
         }
     });
     
-    // Start discovery listener
+    // Start discovery listener (background task)
     let listen_node_id = node_id;
     let listen_public_key = public_key.clone();
     tokio::spawn(async move {
@@ -81,6 +87,38 @@ pub async fn start_local_discovery(
     info!(" UDP Multicast discovery active on {}:{}", ZHTP_MULTICAST_ADDR, ZHTP_MULTICAST_PORT);
     info!("   Broadcasting announcements every 30 seconds");
     info!("   Listening for peer announcements");
+    Ok(())
+}
+
+/// Send a single immediate announcement (synchronous, before background task starts)
+async fn send_immediate_announcement(node_id: Uuid, mesh_port: u16) -> Result<()> {
+    use socket2::{Socket, Domain, Type, Protocol};
+    
+    // Create ephemeral socket for immediate announcement
+    let socket = Socket::new(Domain::IPV4, Type::DGRAM, Some(Protocol::UDP))?;
+    socket.set_reuse_address(true)?;
+    socket.set_nonblocking(true)?;
+    let std_socket: std::net::UdpSocket = socket.into();
+    let socket = UdpSocket::from_std(std_socket)?;
+    
+    let multicast_addr: SocketAddr = format!("{}:{}", ZHTP_MULTICAST_ADDR, ZHTP_MULTICAST_PORT).parse()?;
+    let local_ip = get_local_ip().await.unwrap_or(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)));
+    
+    let announcement = NodeAnnouncement {
+        node_id,
+        mesh_port,
+        local_ip,
+        protocols: vec!["tcp".to_string(), "bluetooth".to_string(), "wifi_direct".to_string()],
+        announced_at: std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs(),
+    };
+    
+    let announcement_json = serde_json::to_string(&announcement)?;
+    socket.send_to(announcement_json.as_bytes(), multicast_addr).await?;
+    info!(" Sent immediate announcement to {}", multicast_addr);
+    
     Ok(())
 }
 
@@ -113,11 +151,14 @@ async fn broadcast_announcements(node_id: Uuid, mesh_port: u16) -> Result<()> {
     info!(" Broadcasting from local IP: {}", local_ip);
     
     let mut interval = interval(Duration::from_secs(30)); // Announce every 30 seconds
-    interval.tick().await; // Skip the first tick (which would wait 30 seconds)
     
     let mut announcement_count = 0;
     loop {
-        // Send announcement FIRST, then wait
+        // Send announcement immediately on first iteration, then wait 30s between
+        if announcement_count > 0 {
+            interval.tick().await;
+        }
+        
         let announcement = NodeAnnouncement {
             node_id,
             mesh_port,
