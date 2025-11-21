@@ -41,6 +41,10 @@ pub struct MeshConnection {
     /// Peer trust score (0.0 - 1.0)
     #[serde(default)]
     pub trust_score: f64,
+    /// Bootstrap mode: connection is unauthenticated and can only request blockchain data
+    /// Used by new nodes downloading blockchain before creating identity
+    #[serde(default)]
+    pub bootstrap_mode: bool,
 }
 
 fn default_true() -> bool {

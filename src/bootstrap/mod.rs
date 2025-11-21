@@ -1,11 +1,10 @@
-pub mod tcp_server;
-pub mod udp_server;
+// DEPRECATED: TCP/UDP bootstrap removed - using QUIC-only architecture
+// pub mod tcp_server;  // REMOVED
+// pub mod udp_server;  // REMOVED
 pub mod handshake;
 pub mod peer_discovery;
 
 // Re-exports for convenience
-pub use tcp_server::{start_tcp_bootstrap_server, handle_tcp_bootstrap_connection};
-pub use udp_server::{start_udp_bootstrap_server};
 pub use handshake::*;
 pub use peer_discovery::*;
 

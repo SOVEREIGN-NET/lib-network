@@ -191,7 +191,7 @@ pub struct SecurityAuditLog {
     pub reason: String,
 }
 
-use crate::bootstrap::{start_tcp_bootstrap_server, start_udp_bootstrap_server};
+// TCP/UDP bootstrap servers removed - using QUIC only
 use crate::monitoring::health_monitoring::HealthMonitor;
 use crate::dht::{ZkDHTIntegration, DHTNetworkStatus};
 use crate::discovery::hardware::HardwareCapabilities;
@@ -268,6 +268,10 @@ pub struct ZhtpMeshServer {
     pub message_router: Option<Arc<RwLock<crate::routing::message_routing::MeshMessageRouter>>>,
     /// Message handler for processing received messages
     pub message_handler: Option<Arc<RwLock<crate::messaging::message_handler::MeshMessageHandler>>>,
+    
+    // Blockchain Synchronization
+    /// Sync coordinator to prevent duplicate syncs across multiple protocols
+    pub sync_coordinator: Arc<crate::blockchain_sync::SyncCoordinator>,
     
     // Safety and Emergency Features
     /// Emergency stop flag for immediate shutdown
@@ -748,8 +752,8 @@ impl ZhtpMeshServer {
         
         let node_id = self.mesh_node.read().await.node_id;
         
-        // Bind to any available port
-        let bind_addr = "0.0.0.0:0".parse().unwrap();
+        // Bind to QUIC mesh port 9334 (PQC encrypted)
+        let bind_addr = "0.0.0.0:9334".parse().unwrap();
         
         // Initialize QUIC mesh protocol
         let mut quic_protocol = QuicMeshProtocol::new(node_id, bind_addr)?;
@@ -765,12 +769,39 @@ impl ZhtpMeshServer {
         quic_arc.read().await.start_receiving().await?;
         
         // Store the protocol instance
-        self.quic_protocol = Some(quic_arc);
+        self.quic_protocol = Some(quic_arc.clone());
         
         // Mark protocol as active
         self.active_protocols.write().await.insert(NetworkProtocol::QUIC, true);
         
-        info!("🚀 QUIC mesh protocol active with PQC encryption");
+        info!("🚀 QUIC mesh protocol active with PQC encryption on port 9334");
+        
+        // Connect to bootstrap peers if configured
+        let bootstrap_peers = self.mesh_node.read().await.bootstrap_peers.clone();
+        if !bootstrap_peers.is_empty() {
+            info!("📡 Connecting to {} bootstrap peer(s) via QUIC...", bootstrap_peers.len());
+            let quic = quic_arc.read().await;
+            
+            for peer_str in &bootstrap_peers {
+                // Parse address - might be "192.168.1.245:9334" or "zhtp://192.168.1.245:9334"
+                let addr_str = peer_str.trim_start_matches("zhtp://").trim_start_matches("http://");
+                
+                match addr_str.parse::<std::net::SocketAddr>() {
+                    Ok(peer_addr) => {
+                        info!("   Connecting to bootstrap peer: {}", peer_addr);
+                        if let Err(e) = quic.connect_to_peer(peer_addr).await {
+                            warn!("   Failed to connect to bootstrap peer {}: {}", peer_addr, e);
+                        } else {
+                            info!("   ✓ Connected to bootstrap peer {}", peer_addr);
+                        }
+                    }
+                    Err(e) => {
+                        warn!("   Failed to parse bootstrap peer address '{}': {}", peer_str, e);
+                    }
+                }
+            }
+        }
+        
         Ok(())
     }
 
@@ -935,6 +966,9 @@ impl ZhtpMeshServer {
             message_router: None,
             message_handler: None,
             
+            // Initialize blockchain sync coordinator
+            sync_coordinator: Arc::new(crate::blockchain_sync::SyncCoordinator::new()),
+            
             // Initialize safety features
             emergency_stop: Arc::new(RwLock::new(false)),
             max_connections: Arc::new(RwLock::new(100)), // Default safety limit
@@ -992,8 +1026,7 @@ impl ZhtpMeshServer {
         // Start mesh protocol message handling
         self.start_mesh_message_handler().await?;
         
-        // Start TCP bootstrap server
-        self.start_tcp_bootstrap_server().await?;
+        // TCP/UDP bootstrap removed - using QUIC only
         
         // Start network health monitoring
         self.start_health_monitoring().await?;
@@ -1140,11 +1173,8 @@ impl ZhtpMeshServer {
         // Initialize message forwarding components
         self.initialize_message_forwarding().await?;
         
-        // Use the correct mesh port from configuration (33444) instead of hardcoded 9333
-        let mesh_port = 33444; // This should match DEFAULT_MESH_PORT from zhtp crate
-        
-        // Start UDP server for mesh packet handling
-        start_udp_bootstrap_server(self.server_id, mesh_port).await?;
+        // UDP bootstrap removed - using QUIC only
+        info!(" QUIC mesh protocol active on port 9334");
         
         Ok(())
     }
@@ -1230,19 +1260,6 @@ impl ZhtpMeshServer {
         }
         
         info!(" Message forwarding system initialized successfully");
-        
-        Ok(())
-    }
-    
-    /// Start TCP bootstrap server
-    async fn start_tcp_bootstrap_server(&self) -> Result<()> {
-        info!("Starting TCP bootstrap server...");
-        
-        // Use the correct mesh port from configuration (33444) instead of hardcoded 9333
-        let mesh_port = 33444; // This should match DEFAULT_MESH_PORT from zhtp crate
-        
-        // Start TCP server for bootstrap connections
-        start_tcp_bootstrap_server(self.server_id, mesh_port).await?;
         
         Ok(())
     }

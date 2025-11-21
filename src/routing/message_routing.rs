@@ -35,6 +35,8 @@ pub struct MeshMessageRouter {
     pub wifi_handler: Option<Arc<RwLock<crate::protocols::wifi_direct::WiFiDirectMeshProtocol>>>,
     /// LoRa protocol handler (Phase 2)
     pub lora_handler: Option<Arc<RwLock<crate::protocols::lorawan::LoRaWANMeshProtocol>>>,
+    /// QUIC protocol handler (Phase 2)
+    pub quic_handler: Option<Arc<RwLock<crate::protocols::quic_mesh::QuicMeshProtocol>>>,
 }
 
 /// Routing table for mesh network
@@ -186,6 +188,7 @@ impl MeshMessageRouter {
             bluetooth_handler: None,
             wifi_handler: None,
             lora_handler: None,
+            quic_handler: None,
         }
     }
     
@@ -207,6 +210,11 @@ impl MeshMessageRouter {
     /// Set LoRa protocol handler (Phase 2)
     pub fn set_lora_handler(&mut self, handler: Arc<RwLock<crate::protocols::lorawan::LoRaWANMeshProtocol>>) {
         self.lora_handler = Some(handler);
+    }
+    
+    /// Set QUIC protocol handler (Phase 2)
+    pub fn set_quic_handler(&mut self, handler: Arc<RwLock<crate::protocols::quic_mesh::QuicMeshProtocol>>) {
+        self.quic_handler = Some(handler);
     }
     
     /// Estimate message size in bytes
@@ -869,6 +877,17 @@ impl MeshMessageRouter {
                     info!(" Sent via LoRaWAN");
                 } else {
                     return Err(anyhow!("LoRa handler not configured"));
+                }
+            }
+            NetworkProtocol::QUIC => {
+                // Get QUIC protocol handler
+                if let Some(ref quic_handler) = self.quic_handler {
+                    let handler = quic_handler.read().await;
+                    // Send mesh message via QUIC - extract pubkey and message from envelope
+                    handler.send_to_peer(&peer_id.as_bytes(), envelope.message.clone()).await?;
+                    info!("📡 Sent via QUIC (quantum-safe encrypted)");
+                } else {
+                    return Err(anyhow!("QUIC handler not configured"));
                 }
             }
             _ => {

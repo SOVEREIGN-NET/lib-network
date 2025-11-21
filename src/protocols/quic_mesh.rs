@@ -70,6 +70,10 @@ pub struct PqcQuicConnection {
     
     /// Peer address
     peer_addr: SocketAddr,
+    
+    /// Bootstrap mode: allows unauthenticated blockchain sync requests
+    /// New nodes connecting for first time can only request blockchain data
+    pub bootstrap_mode: bool,
 }
 
 /// Handshake message for PQC key exchange over QUIC
@@ -143,11 +147,54 @@ impl QuicMeshProtocol {
         
         info!(" QUIC connection established to {}", peer_addr);
         
-        // Perform PQC handshake
-        let mut pqc_conn = PqcQuicConnection::new(connection, peer_addr);
+        // Perform PQC handshake (normal authenticated mode)
+        let mut pqc_conn = PqcQuicConnection::new(connection, peer_addr, false);
         pqc_conn.perform_pqc_handshake_as_client().await?;
         
         info!(" PQC handshake complete with {} (quantum-safe encryption active)", peer_addr);
+        
+        // Store connection using peer's node_id as key
+        let peer_key = pqc_conn.peer_node_id
+            .ok_or_else(|| anyhow!("Peer node_id not set after handshake"))?;
+        self.connections.write().await.insert(peer_key.to_vec(), pqc_conn);
+        
+        Ok(())
+    }
+    
+    /// Connect to a bootstrap peer in unauthenticated mode (for new nodes downloading blockchain)
+    /// Bootstrap mode connections can only request blockchain data, not submit transactions or store DHT data
+    /// 
+    /// # Arguments
+    /// * `peer_addr` - Address of the bootstrap peer
+    /// * `is_edge_node` - If true, uses edge sync (headers + ZK proofs). If false, downloads full blockchain
+    pub async fn connect_as_bootstrap(&self, peer_addr: SocketAddr, is_edge_node: bool) -> Result<()> {
+        let mode_str = if is_edge_node { "edge node - headers+proofs only" } else { "full node - complete blockchain" };
+        info!(" Connecting to bootstrap peer at {} (bootstrap mode: {})", peer_addr, mode_str);
+        
+        // Configure client
+        let client_config = Self::configure_client()?;
+        
+        // Connect via QUIC
+        let connection = self.endpoint
+            .connect_with(client_config, peer_addr, "zhtp-mesh")?
+            .await
+            .context("QUIC connection failed")?;
+        
+        info!(" QUIC connection established to bootstrap peer {}", peer_addr);
+        
+        // Perform PQC handshake in bootstrap mode (allows unauthenticated blockchain requests)
+        let mut pqc_conn = PqcQuicConnection::new(connection, peer_addr, true);
+        pqc_conn.perform_pqc_handshake_as_client().await?;
+        
+        info!(" PQC handshake complete with bootstrap peer {} (bootstrap mode active)", peer_addr);
+        if is_edge_node {
+            info!("   → Edge node: Can download headers + ZK proofs");
+            info!("   → Edge node: Will NOT download full blocks");
+        } else {
+            info!("   → Full node: Can download complete blockchain");
+            info!("   → Full node: Will store and validate all blocks");
+        }
+        info!("   → Cannot submit transactions or store DHT data until identity created");
         
         // Store connection using peer's node_id as key
         let peer_key = pqc_conn.peer_node_id
@@ -202,7 +249,7 @@ impl QuicMeshProtocol {
                                     
                                     // Perform PQC handshake as server
                                     let peer_addr = connection.remote_address();
-                                    let mut pqc_conn = PqcQuicConnection::new(connection.clone(), peer_addr);
+                                    let mut pqc_conn = PqcQuicConnection::new(connection.clone(), peer_addr, false);
                                     
                                     if let Err(e) = pqc_conn.perform_pqc_handshake_as_server().await {
                                         error!("PQC handshake failed: {}", e);
@@ -371,13 +418,14 @@ impl QuicMeshProtocol {
 }
 
 impl PqcQuicConnection {
-    pub fn new(quic_conn: Connection, peer_addr: SocketAddr) -> Self {
+    pub fn new(quic_conn: Connection, peer_addr: SocketAddr, bootstrap_mode: bool) -> Self {
         Self {
             quic_conn,
             kyber_shared_secret: None,
             peer_dilithium_key: None,
             peer_node_id: None,
             peer_addr,
+            bootstrap_mode,
         }
     }
     

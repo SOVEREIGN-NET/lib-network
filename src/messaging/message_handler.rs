@@ -223,6 +223,7 @@ impl MeshMessageHandler {
             stability_score: shared_resources.reliability_score,
             zhtp_authenticated: false,
             quantum_secure: true,
+            bootstrap_mode: false, // Peer discovery is for authenticated nodes
             peer_dilithium_pubkey: None,
             kyber_shared_secret: None,
             trust_score: 0.0,
@@ -603,9 +604,8 @@ impl MeshMessageHandler {
         Ok(())
     }
 
-    /// Handle blockchain request from peer (UPDATED - Phase 3)
-    /// TODO: This requires lib-blockchain which would create a circular dependency
-    /// For now, this is stubbed out and should be implemented at the application layer
+    /// Handle blockchain request from peer (implements bootstrap sync)
+    /// This allows new nodes to download blockchain data before creating their identity
     pub async fn handle_blockchain_request(
         &self,
         requester: PublicKey,
@@ -615,9 +615,86 @@ impl MeshMessageHandler {
         info!(" Blockchain request from peer {:?} (request_id: {}, type: {:?})", 
               hex::encode(&requester.key_id[0..8]), request_id, request_type);
         
-        // TODO: Implement blockchain integration at application layer
-        // This functionality requires lib-blockchain which would create a circular dependency
-        warn!(" Blockchain integration not yet implemented (circular dependency issue)");
+        // Use the blockchain provider to get blockchain data
+        match request_type {
+            crate::types::mesh_message::BlockchainRequestType::FullChain => {
+                info!("   Sending full blockchain to peer");
+                
+                // Get full blockchain data from provider
+                match self.blockchain_provider.get_full_blockchain().await {
+                    Ok(blockchain_data) => {
+                        info!("   Retrieved blockchain data: {} bytes", blockchain_data.len());
+                        
+                        // Get protocol for chunking
+                        let protocol = self.get_protocol_for_peer(&requester).await
+                            .unwrap_or(NetworkProtocol::QUIC); // Default to QUIC
+                        
+                        // Chunk the data based on protocol
+                        let chunks = self.chunk_blockchain_data(
+                            self.node_id.clone().unwrap_or_else(|| PublicKey::new(vec![0; 32])),
+                            request_id,
+                            blockchain_data,
+                            &protocol,
+                        )?;
+                        
+                        info!("   Sending {} chunks to peer", chunks.len());
+                        
+                        // Send chunks via message router
+                        if let Some(router) = &self.message_router {
+                            if let Some(node_id) = &self.node_id {
+                                for chunk in chunks {
+                                    if let Err(e) = router.write().await.route_message(chunk, requester.clone(), node_id.clone()).await {
+                                        warn!("Failed to send blockchain chunk: {}", e);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        warn!("Failed to get blockchain data: {}", e);
+                    }
+                }
+            }
+            crate::types::mesh_message::BlockchainRequestType::HeadersOnly { start_height, count } => {
+                info!("   Sending headers from height {} (count: {})", start_height, count);
+                
+                // Get headers from provider (convert u32 to u64)
+                match self.blockchain_provider.get_headers(start_height, count as u64).await {
+                    Ok(headers) => {
+                        info!("   Retrieved {} headers", headers.len());
+                        
+                        // Serialize headers to Vec<Vec<u8>>
+                        let serialized_headers: Vec<Vec<u8>> = headers
+                            .iter()
+                            .map(|h| bincode::serialize(h).unwrap_or_default())
+                            .collect();
+                        
+                        // Send headers response
+                        let response = ZhtpMeshMessage::HeadersResponse {
+                            request_id,
+                            headers: serialized_headers,
+                            start_height,
+                        };
+                        
+                        if let Some(router) = &self.message_router {
+                            if let Some(node_id) = &self.node_id {
+                                if let Err(e) = router.write().await.route_message(response, requester, node_id.clone()).await {
+                                    warn!("Failed to send headers response: {}", e);
+                                }
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        warn!("Failed to get headers: {}", e);
+                    }
+                }
+            }
+            // Other request types not yet implemented
+            _ => {
+                warn!("Unsupported blockchain request type: {:?}", request_type);
+            }
+        }
+        
         Ok(())
     }
     
@@ -793,8 +870,9 @@ impl MeshMessageHandler {
             .collect::<Result<Vec<_>, _>>()
             .map_err(|e| anyhow!("Failed to serialize headers: {}", e))?;
         
-        // Serialize proof
-        let proof_data = bincode::serialize(&chain_proof.recursive_proof)
+        // Serialize FULL ChainRecursiveProof (not just recursive_proof)
+        // CRITICAL: Edge nodes expect the complete ChainRecursiveProof structure
+        let proof_data = bincode::serialize(&chain_proof)
             .map_err(|e| anyhow!("Failed to serialize proof: {}", e))?;
         
         // Send response

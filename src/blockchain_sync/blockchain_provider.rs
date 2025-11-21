@@ -34,6 +34,10 @@ pub trait BlockchainProvider: Send + Sync {
     /// This should return a cached proof if available, or generate a new one
     async fn get_chain_proof(&self, up_to_height: u64) -> Result<ChainRecursiveProof>;
     
+    /// Get the full blockchain data (for bootstrap sync)
+    /// This returns the serialized blockchain for new nodes to download
+    async fn get_full_blockchain(&self) -> Result<Vec<u8>>;
+    
     /// Check if blockchain is available
     async fn is_available(&self) -> bool;
 }
@@ -53,6 +57,10 @@ impl BlockchainProvider for NullBlockchainProvider {
     }
     
     async fn get_chain_proof(&self, _up_to_height: u64) -> Result<ChainRecursiveProof> {
+        Err(anyhow::anyhow!("Blockchain not available"))
+    }
+    
+    async fn get_full_blockchain(&self) -> Result<Vec<u8>> {
         Err(anyhow::anyhow!("Blockchain not available"))
     }
     
